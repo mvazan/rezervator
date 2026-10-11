@@ -3417,6 +3417,178 @@ void main() {
 
         await finish(tester);
       });
+
+      // „V kalendáři“: the band's piece over one day's header, if any.
+      Finder headerOf(Day date) => find.byWidgetPredicate(
+        (w) => w is BoardColumnHeader && w.date == date,
+      );
+      BoardBandSegment? bandOn(WidgetTester tester, Day date) {
+        final band = find.descendant(
+          of: headerOf(date),
+          matching: find.byType(BoardBand),
+        );
+        if (band.evaluate().isEmpty) return null;
+        return tester.widget<BoardBand>(band).segment;
+      }
+
+      const both = 'AA Hráč a PP Hráč';
+
+      testWidgets('„V kalendáři“: a band over each duty\'s days, rounded '
+          'where it starts and ends, who on its first day and on the first '
+          'column', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        (bool, bool, String?) piece(Day date) {
+          final s = bandOn(tester, date)!;
+          return (s.starts, s.ends, s.label);
+        }
+
+        // Today is the first column: the duty began on Monday, off the
+        // board, and still says who.
+        expect(piece(day), (false, false, both));
+        expect(piece(Day(2026, 10, 9)), (false, false, null));
+        expect(piece(Day(2026, 10, 10)), (false, false, null));
+        expect(piece(Day(2026, 10, 11)), (false, true, null));
+        // The next week's starts on Monday, with its name there only.
+        expect(piece(Day(2026, 10, 12)), (true, false, 'BB Hráč'));
+        expect(piece(Day(2026, 10, 13)), (false, false, null));
+        // Only the band: the status bar's line is the other switch.
+        expect(find.byType(KioskDutyLine), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('scrolled, the names follow the first column in view; the '
+          'idle reset brings them back to today', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            pastDays: 3,
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        double left(Day date) => tester.getTopLeft(headerOf(date)).dx;
+        const firstLeft = calendarRulerWidth + 2;
+        expect(left(day), firstLeft);
+        expect(bandOn(tester, day)!.label, both);
+
+        // Back to Monday, the duty's first day: today is no first column.
+        await tester.drag(find.byType(ListView).last, const Offset(900, 0));
+        await tester.pumpAndSettle();
+        expect(left(Day(2026, 10, 5)), firstLeft);
+        expect(bandOn(tester, Day(2026, 10, 5))!.label, both);
+        expect(bandOn(tester, Day(2026, 10, 6))!.label, isNull);
+        expect(bandOn(tester, day)!.label, isNull);
+
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(left(day), firstLeft);
+        expect(bandOn(tester, day)!.label, both);
+
+        // On to Friday.
+        await tester.drag(find.byType(ListView).last, const Offset(-300, 0));
+        await tester.pumpAndSettle();
+        expect(left(Day(2026, 10, 9)), firstLeft);
+        expect(bandOn(tester, Day(2026, 10, 9))!.label, both);
+        expect(bandOn(tester, Day(2026, 10, 10))!.label, isNull);
+
+        await finish(tester);
+      });
+
+      testWidgets('a tap on the band shows the plan; the rest of the header '
+          'still lists the day\'s matches; the idle reset closes the plan', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Domácí')],
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final band = find.descendant(
+          of: headerOf(Day(2026, 10, 10)),
+          matching: find.byType(BoardBand),
+        );
+
+        await tester.tap(band);
+        await tester.pumpAndSettle();
+        expect(inDialog('Služby v kantýně'), findsOneWidget);
+        expect(inDialog('Teď slouží: $both'), findsOneWidget);
+        await tester.tap(inDialog('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await tester.tap(
+          find.descendant(
+            of: headerOf(day),
+            matching: find.textContaining('Domácí'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(dialog, findsOneWidget);
+        expect(inDialog('Služby v kantýně'), findsNothing);
+        await tester.tap(inDialog('Zavřít'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(band);
+        await tester.pumpAndSettle();
+        expect(inDialog('Služby v kantýně'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('the band off: none, and the headers as they were; on, '
+          'they grow by it, and a duty nobody is on has none', (
+        tester,
+      ) async {
+        fullHd(tester);
+        double headerHeight() =>
+            tester.getSize(find.byType(BoardColumnHeader).first).height;
+        await tester.pumpWidget(
+          app(dutyPeriods: periods, dutyAssignments: assignments),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(BoardBand), findsNothing);
+        expect(headerHeight(), boardHeaderHeight(0));
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now') a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(headerHeight(), boardHeaderHeight(0) + boardBandHeight);
+        for (var d = 8; d <= 11; d++) {
+          expect(bandOn(tester, Day(2026, 10, d)), isNull);
+        }
+        expect(bandOn(tester, Day(2026, 10, 12))!.label, 'BB Hráč');
+
+        await finish(tester);
+      });
     });
   });
 

@@ -245,6 +245,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
       columnBasisWidth: screenWidth,
       onVisibleDays: (first, last) =>
           setState(() => _boardDays = (first: first, last: last)),
+      onOpenDuty: _openDuty,
     );
     if (content == null) return board;
     // A match being played keeps the drawer open: a visitor may close it,
