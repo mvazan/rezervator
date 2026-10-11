@@ -52,8 +52,6 @@ const appChangelog = <Release>[
   Release(null, '11. 10. 2026', [
     'Web: když máte Rezervátor otevřený ve více záložkách, přihlášení '
         'v jedné se zase přenese i do ostatních.',
-  ]),
-  Release(null, '10. 10. 2026', [
     'Kiosk: zápis zápasu ukazuje i registrační čísla hráčů.',
     'Ikony v textu (⛔ blokace, 🏆 zápas, 🔒 pronájem, 👍/👎/💬 u zpráv a '
         'další) se kreslí z obrázků jako 🏠 — na webu vypadají všude stejně.',
