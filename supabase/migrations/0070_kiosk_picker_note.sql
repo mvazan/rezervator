@@ -9,7 +9,7 @@
 
 alter table schedule_settings
   add column if not exists kiosk_picker_note text
-    default 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby na kantýně nebo u správce kuželny.'
+    default 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby v kantýně nebo u správce kuželny.'
     constraint schedule_settings_kiosk_picker_note_check
     check (kiosk_picker_note is null
            or char_length(btrim(kiosk_picker_note)) between 1 and 200);

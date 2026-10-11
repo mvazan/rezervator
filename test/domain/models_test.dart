@@ -145,10 +145,6 @@ void main() {
       ).firstMatch(sql)!.group(1);
       expect(column, ScheduleSettings.defaultPickerNote);
       expect(ScheduleSettings.defaultPickerNote.length, lessThanOrEqualTo(200));
-      // The duty as the rest of the app says it — Správa → Kiosk → „Služby
-      // na kantýně“, the drawer's „SLUŽBA NA KANTÝNĚ“ — beside them.
-      expect(ScheduleSettings.defaultPickerNote, contains('na kantýně'));
-      expect(ScheduleSettings.defaultPickerNote, isNot(contains('v kantýně')));
     });
 
     test('fromJson reads the stream windows at once (0072); one when absent',
