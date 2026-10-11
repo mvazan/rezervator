@@ -356,15 +356,20 @@ class BoardBandSegment {
 }
 
 /// A [BoardBandSegment] in its [boardBandHeight]: a strip tinted
-/// `secondaryContainer`, flush with the column where the band runs on, a
+/// `secondaryContainer`, out to the column's edge where the band runs on —
+/// over the header's [bleed] too, so the neighbours' pieces meet — a
 /// little in and rounded where it starts or ends, the label one
 /// ellipsised line at its start.
 class BoardBand extends StatelessWidget {
-  const BoardBand({super.key, required this.segment});
+  const BoardBand({super.key, required this.segment, this.bleed = 0});
 
   static const radius = Radius.circular(6);
 
   final BoardBandSegment segment;
+
+  /// How far past its own sides the strip reaches where the band runs on:
+  /// the header's [BoardColumnHeader.gap].
+  final double bleed;
 
   @override
   Widget build(BuildContext context) {
@@ -372,41 +377,48 @@ class BoardBand extends StatelessWidget {
     final scheme = theme.colorScheme;
     final label = segment.label;
     return Padding(
-      padding: EdgeInsets.only(
-        left: segment.starts ? 4 : 0,
-        top: 2,
-        right: segment.ends ? 4 : 0,
-      ),
+      padding: const EdgeInsets.only(top: 2),
       child: SizedBox(
         height: boardBandHeight - 2,
         width: double.infinity,
-        child: Material(
-          color: scheme.secondaryContainer,
-          borderRadius: BorderRadius.horizontal(
-            left: segment.starts ? radius : Radius.zero,
-            right: segment.ends ? radius : Radius.zero,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: segment.onTap,
-            child: label == null
-                ? const SizedBox.expand()
-                : Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSecondaryContainer,
+        // Unclipped past the sides: the [bleed] is painted, a touch on
+        // that sliver misses the strip.
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              left: segment.starts ? 4 : -bleed,
+              right: segment.ends ? 4 : -bleed,
+              child: Material(
+                color: scheme.secondaryContainer,
+                borderRadius: BorderRadius.horizontal(
+                  left: segment.starts ? radius : Radius.zero,
+                  right: segment.ends ? radius : Radius.zero,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: segment.onTap,
+                  child: label == null
+                      ? const SizedBox.expand()
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSecondaryContainer,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
-          ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -435,6 +447,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.watch,
     this.onOpenMatch,
     this.band,
+    this.gap = 0,
   });
 
   final Day date;
@@ -473,6 +486,12 @@ class BoardColumnHeader extends StatelessWidget {
   /// strip, no room for one.
   final BoardBandSegment? band;
 
+  /// The kiosk's: how far the background stands in from each side — the
+  /// room the board keeps between neighbouring headers, drawn inside the
+  /// header so the [band] runs on through it. 0 (the app's week board,
+  /// its headers side by side): none.
+  final double gap;
+
   /// The label's and the events' sides (the [band] has none).
   static const _inset = EdgeInsets.symmetric(horizontal: 6);
 
@@ -498,10 +517,10 @@ class BoardColumnHeader extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOutCubic,
       height: collapsed ? collapsedHeaderHeight : height,
+      margin: EdgeInsets.symmetric(horizontal: gap),
       // The sides inset the label and the events, not the [band]: it runs
       // on from column to column.
       padding: EdgeInsets.symmetric(vertical: collapsed ? 2 : 4),
-      clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         gradient:
             isToday ? const LinearGradient(colors: brandGradientColors) : null,
@@ -516,7 +535,8 @@ class BoardColumnHeader extends StatelessWidget {
         children: [
           Padding(padding: _inset, child: dayText),
           // Gone in the thin strip, which has room for the label alone.
-          if (band != null && !collapsed) BoardBand(segment: band!),
+          if (band != null && !collapsed)
+            BoardBand(segment: band!, bleed: gap),
           Padding(
             padding: _inset,
             child: AnimatedOpacity(
@@ -588,8 +608,11 @@ class BoardColumnHeader extends StatelessWidget {
         ],
       ),
     );
-    if (onAdd == null) return body;
-    return InkWell(onTap: onAdd, child: body);
+    // Clipped here, around the [gap], not by the container inside it: the
+    // [band] runs on through the gap.
+    final clipped = ClipRect(child: body);
+    if (onAdd == null) return clipped;
+    return InkWell(onTap: onAdd, child: clipped);
   }
 }
 

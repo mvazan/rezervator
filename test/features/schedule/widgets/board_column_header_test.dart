@@ -18,6 +18,7 @@ void main() {
     WidgetTester tester, {
     BoardBandSegment? segment,
     bool collapsed = false,
+    double gap = 0,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -38,6 +39,7 @@ void main() {
                   priority: const [],
                   height: boardHeaderHeight(0) + boardBandHeight,
                   collapsed: collapsed,
+                  gap: gap,
                   band: segment,
                 ),
               ),
@@ -130,6 +132,44 @@ void main() {
     expect(radius(tester), BorderRadius.zero);
     expect(tester.getRect(strip).left, tester.getRect(header).left);
     expect(tester.getRect(strip).right, tester.getRect(header).right);
+  });
+
+  testWidgets('with a gap the background stands in from the sides; the band '
+      'runs on through it to the column\'s edge', (tester) async {
+    // The header's background: the first box it decorates.
+    final background = find
+        .descendant(of: header, matching: find.byType(DecoratedBox))
+        .first;
+    await pump(
+      tester,
+      gap: 2,
+      segment: const BoardBandSegment(starts: false, ends: false),
+    );
+    expect(
+      tester.getRect(background).left,
+      tester.getRect(header).left + 2,
+    );
+    expect(
+      tester.getRect(background).right,
+      tester.getRect(header).right - 2,
+    );
+    expect(tester.getRect(strip).left, tester.getRect(header).left);
+    expect(tester.getRect(strip).right, tester.getRect(header).right);
+
+    // Where it starts and ends, a little in from the background's sides.
+    await pump(
+      tester,
+      gap: 2,
+      segment: const BoardBandSegment(starts: true, ends: true, label: who),
+    );
+    expect(
+      tester.getRect(strip).left,
+      tester.getRect(background).left + 4,
+    );
+    expect(
+      tester.getRect(strip).right,
+      tester.getRect(background).right - 4,
+    );
   });
 
   testWidgets('without a label the strip runs on blank', (tester) async {

@@ -3466,6 +3466,49 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('the band runs on unbroken from day to day, through the '
+          'gap between the headers; the next duty starts apart', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        Rect strip(int d) => tester.getRect(
+          find.descendant(
+            of: find.descendant(
+              of: headerOf(Day(2026, 10, d)),
+              matching: find.byType(BoardBand),
+            ),
+            matching: find.byType(Material),
+          ),
+        );
+        // A header's background: the first box it decorates.
+        Rect background(int d) => tester.getRect(
+          find
+              .descendant(
+                of: headerOf(Day(2026, 10, d)),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        );
+
+        for (var d = 8; d < 11; d++) {
+          expect(strip(d).right, strip(d + 1).left);
+          // The headers themselves keep their gap.
+          expect(background(d + 1).left - background(d).right, 4);
+        }
+        // Sunday ends one duty, Monday starts the next: rounded, apart.
+        expect(strip(12).left, greaterThan(strip(11).right));
+
+        await finish(tester);
+      });
+
       testWidgets('scrolled, the names follow the first column in view; the '
           'idle reset brings them back to today', (tester) async {
         fullHd(tester);
@@ -3479,7 +3522,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         double left(Day date) => tester.getTopLeft(headerOf(date)).dx;
-        const firstLeft = calendarRulerWidth + 2;
+        const firstLeft = calendarRulerWidth;
         expect(left(day), firstLeft);
         expect(bandOn(tester, day)!.label, both);
 

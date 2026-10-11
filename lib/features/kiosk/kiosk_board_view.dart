@@ -478,24 +478,25 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                       itemCount: days.length,
                       itemBuilder: (context, index) => SizedBox(
                         width: columnWidth,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 2),
-                          child: BoardColumnHeader(
-                            date: days[index].date,
-                            isToday: index == todayIndex,
-                            priority: headerEvents(days[index]),
-                            height: headerHeight,
-                            onOpenMatch: widget.onOpenMatch,
-                            // Never a tap-through to MatchDetailScreen or a
-                            // video button here: the kiosk's own 60 s
-                            // idle-reset Listener doesn't see touches on a
-                            // pushed route, and an external video browser on
-                            // a kiosk tablet is undesirable.
-                            interactive: false,
-                            band: _dutySegment(
-                              dutyOn?.call(days[index].date),
-                              first: index == _firstVisible,
-                            ),
+                        child: BoardColumnHeader(
+                          date: days[index].date,
+                          isToday: index == todayIndex,
+                          priority: headerEvents(days[index]),
+                          height: headerHeight,
+                          onOpenMatch: widget.onOpenMatch,
+                          // Never a tap-through to MatchDetailScreen or a
+                          // video button here: the kiosk's own 60 s
+                          // idle-reset Listener doesn't see touches on a
+                          // pushed route, and an external video browser on
+                          // a kiosk tablet is undesirable.
+                          interactive: false,
+                          // The 2 px the day columns below keep on each
+                          // side, inside the header: the duty's band runs on
+                          // through them from day to day.
+                          gap: 2,
+                          band: _dutySegment(
+                            dutyOn?.call(days[index].date),
+                            first: index == _firstVisible,
                           ),
                         ),
                       ),
