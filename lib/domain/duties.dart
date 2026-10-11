@@ -1,7 +1,8 @@
 /// Služby na kantýně (0050), the pure half: the generator's preview, the
-/// seasons and their counts, the Kalendář week header and "my duty". Pure
-/// Dart over the `duty_periods`, `duty_assignments` and `duty_seasons` rows,
-/// unit-tested; the screens only render it. The rights themselves are the
+/// seasons and their counts, the Kalendář week header, "my duty" and the
+/// kiosk's plan (0073). Pure Dart over the `duty_periods`,
+/// `duty_assignments` and `duty_seasons` rows, unit-tested; the screens
+/// only render it. The rights themselves are the
 /// server's (`is_on_duty()` / `duty_gate()` for booking and cancelling,
 /// `duty_edit_gate()` for the blocks of a day, in 0050_canteen_duty.sql) —
 /// the app only hides what the server would refuse.
@@ -553,5 +554,101 @@ MyDuty myDuty(
             for (final id in assigneeIds(assignments, current.id))
               if (id != meId) id,
           ],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The kiosk
+// ---------------------------------------------------------------------------
+
+/// One duty as the kiosk shows it: the period and who serves it, as display
+/// names, Czech-sorted. Only a period with a known assignee is one — the
+/// kiosk, like the week header, says nothing of an unassigned period.
+class KioskDutyEntry {
+  const KioskDutyEntry(this.period, this.names);
+
+  final DutyPeriod period;
+
+  /// Never empty.
+  final List<String> names;
+
+  /// „po 5. 10. – ne 11. 10.“, a one-day duty its day once.
+  String get range => dutyRangeLabel(period);
+
+  /// „Jan Novák a Petr Svoboda“.
+  String get who => joinNames(names);
+
+  @override
+  bool operator ==(Object other) =>
+      other is KioskDutyEntry &&
+      other.period == period &&
+      _sameIds(other.names, names);
+
+  @override
+  int get hashCode => Object.hash(period, Object.hashAll(names));
+
+  @override
+  String toString() => 'KioskDutyEntry($period, $names)';
+}
+
+/// [period] with its assignees' names from [names] (ids it does not know
+/// are left out), Czech-sorted; null when no name is left.
+KioskDutyEntry? _kioskEntry(
+  DutyPeriod period,
+  Iterable<DutyAssignment> assignments,
+  Map<String, String> names,
+) {
+  final who = [
+    for (final id in assigneeIds(assignments, period.id)) ?names[id],
+  ]..sort(compareCzech);
+  return who.isEmpty ? null : KioskDutyEntry(period, who);
+}
+
+/// The kiosk's plan over [today]: who serves [now] — the period covering
+/// today, one ending today included ([splitDuties]' rule) — and the
+/// [next] ones starting after today, in date order, at most [ahead] of
+/// them. Periods without a known assignee are skipped: an unassigned
+/// current period leaves [now] null, and unassigned ones ahead do not
+/// count against [ahead].
+({KioskDutyEntry? now, List<KioskDutyEntry> next}) kioskDutyPlan(
+  Iterable<DutyPeriod> periods,
+  Iterable<DutyAssignment> assignments,
+  Map<String, String> names,
+  Day today, {
+  int ahead = 5,
+}) {
+  final split = splitDuties(periods, today);
+  final current = split.current;
+  final next = <KioskDutyEntry>[];
+  for (final period in split.upcoming) {
+    if (next.length >= ahead) break;
+    if (_kioskEntry(period, assignments, names) case final entry?) {
+      next.add(entry);
+    }
+  }
+  return (
+    now: current == null ? null : _kioskEntry(current, assignments, names),
+    next: next,
+  );
+}
+
+/// The duty on [day] for the kiosk board's band: the period covering it
+/// with who serves, and whether [day] is the period's first ([starts]) or
+/// last ([ends]) day — where the band's segment is rounded. Null when no
+/// period covers [day], or nobody known serves it.
+({KioskDutyEntry entry, bool starts, bool ends})? kioskDutyOn(
+  Iterable<DutyPeriod> periods,
+  Iterable<DutyAssignment> assignments,
+  Map<String, String> names,
+  Day day,
+) {
+  final period = periodOn(periods, day);
+  if (period == null) return null;
+  final entry = _kioskEntry(period, assignments, names);
+  if (entry == null) return null;
+  return (
+    entry: entry,
+    starts: day == period.startsOn,
+    ends: day == period.endsOn,
   );
 }

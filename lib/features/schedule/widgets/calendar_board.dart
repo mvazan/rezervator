@@ -37,6 +37,11 @@ double boardHeaderHeight(int maxEvents) =>
 /// would leave a sliver of the first event line peeking through the clip.
 const double collapsedHeaderHeight = 20.0;
 
+/// What a [BoardBand] adds to the header's height: an 18px strip and the
+/// 2px above it. A board drawing one adds it to [boardHeaderHeight] for
+/// every column, banded or not, so the day labels stay on one line.
+const double boardBandHeight = 20.0;
+
 /// One time-positioned widget inside a [CalendarColumn].
 class CalendarEntry {
   const CalendarEntry({
@@ -388,14 +393,102 @@ class CalendarEventBand extends StatelessWidget {
   }
 }
 
+/// One day's piece of a band drawn across the board's day headers, like an
+/// all-day event — the kiosk's canteen duty (0073). The caller decides
+/// where the band [starts] and [ends] (rounded there) and on which days
+/// its [label] is read; null leaves the piece blank, the band running on.
+class BoardBandSegment {
+  const BoardBandSegment({
+    required this.starts,
+    required this.ends,
+    this.label,
+    this.onTap,
+  });
+
+  final bool starts;
+  final bool ends;
+  final String? label;
+  final VoidCallback? onTap;
+}
+
+/// A [BoardBandSegment] in its [boardBandHeight]: a strip tinted
+/// `secondaryContainer`, out to the column's edge where the band runs on —
+/// over the header's [bleed] too, so the neighbours' pieces meet — a
+/// little in and rounded where it starts or ends, the label one
+/// ellipsised line at its start.
+class BoardBand extends StatelessWidget {
+  const BoardBand({super.key, required this.segment, this.bleed = 0});
+
+  static const radius = Radius.circular(6);
+
+  final BoardBandSegment segment;
+
+  /// How far past its own sides the strip reaches where the band runs on:
+  /// the header's [BoardColumnHeader.gap].
+  final double bleed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = segment.label;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: SizedBox(
+        height: boardBandHeight - 2,
+        width: double.infinity,
+        // Unclipped past the sides: the [bleed] is painted, a touch on
+        // that sliver misses the strip.
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              left: segment.starts ? 4 : -bleed,
+              right: segment.ends ? 4 : -bleed,
+              child: Material(
+                color: scheme.secondaryContainer,
+                borderRadius: BorderRadius.horizontal(
+                  left: segment.starts ? radius : Radius.zero,
+                  right: segment.ends ? radius : Radius.zero,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: segment.onTap,
+                  child: label == null
+                      ? const SizedBox.expand()
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSecondaryContainer,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// One board column's header: the day label (today gets the "DNES · …"
 /// gradient treatment) pinned to the TOP edge — same y in every column no
 /// matter how many events a day has — with the day's events stacked under
 /// it, one ellipsized line each ('🏠 domáci zápas · od–do', away matches
 /// without any icon, ⛔ blockages; pass [headerEvents]' output). A quiet
-/// [subtitle] shows when there are none. When [collapsed], only the day
-/// label renders as a thin strip. Typed on [date] so widget tests can
-/// enumerate visible days.
+/// [subtitle] shows when there are none. A [band] runs between the label
+/// and the events. When [collapsed], only the day label renders as a thin
+/// strip. Typed on [date] so widget tests can enumerate visible days.
 class BoardColumnHeader extends StatelessWidget {
   const BoardColumnHeader({
     super.key,
@@ -411,6 +504,8 @@ class BoardColumnHeader extends StatelessWidget {
     this.onOpenMatch,
     this.onPlayVideo,
     this.pulseLive = true,
+    this.band,
+    this.gap = 0,
   });
 
   final Day date;
@@ -451,6 +546,21 @@ class BoardColumnHeader extends StatelessWidget {
   /// the kiosk's „Opakující se animace“.
   final bool pulseLive;
 
+  /// The kiosk's: this day's piece of a band across the headers (the
+  /// canteen duty, 0073), a [BoardBand] under the day label — [height]
+  /// must hold its [boardBandHeight] too. Null (the app's week board): no
+  /// strip, no room for one.
+  final BoardBandSegment? band;
+
+  /// The kiosk's: how far the background stands in from each side — the
+  /// room the board keeps between neighbouring headers, drawn inside the
+  /// header so the [band] runs on through it. 0 (the app's week board,
+  /// its headers side by side): none.
+  final double gap;
+
+  /// The label's and the events' sides (the [band] has none).
+  static const _inset = EdgeInsets.symmetric(horizontal: 6);
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -473,8 +583,10 @@ class BoardColumnHeader extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOutCubic,
       height: collapsed ? collapsedHeaderHeight : height,
-      padding: EdgeInsets.symmetric(horizontal: 6, vertical: collapsed ? 2 : 4),
-      clipBehavior: Clip.hardEdge,
+      margin: EdgeInsets.symmetric(horizontal: gap),
+      // The sides inset the label and the events, not the [band]: it runs
+      // on from column to column.
+      padding: EdgeInsets.symmetric(vertical: collapsed ? 2 : 4),
       decoration: BoxDecoration(
         gradient:
             isToday ? const LinearGradient(colors: brandGradientColors) : null,
@@ -487,78 +599,88 @@ class BoardColumnHeader extends StatelessWidget {
         // line visible under the day label.
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          dayText,
-          AnimatedOpacity(
-            duration: const Duration(milliseconds: 150),
-            opacity: collapsed ? 0 : 1,
-            // The event lines are one-line ellipsised, so a long match reads
-            // "…"; tapping the strip opens the day's events in full. Not while
-            // collapsed — then the header's own tap (admin: add a slot) wins.
-            child: priority.isNotEmpty
-                ? GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: collapsed
-                        ? null
-                        : () => showDayMatchesDialog(
-                              context,
-                              date,
-                              priority,
-                              interactive: interactive,
-                              onOpenMatch: onOpenMatch,
-                              onPlayVideo: onPlayVideo,
-                              pulseLive: pulseLive,
-                            ),
-                    child: Column(
-                      children: [
-                        for (final m in priority)
-                          EmojiText(
-                            headerEventLabel(m),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 10,
-                              height: 1.25,
-                              color: isToday
-                                  ? Colors.white.withValues(alpha: 0.9)
-                                  : scheme.primary,
-                            ),
-                          ),
-                      ],
-                    ),
-                  )
-                : subtitle != null
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
+          Padding(padding: _inset, child: dayText),
+          // Gone in the thin strip, which has room for the label alone.
+          if (band != null && !collapsed)
+            BoardBand(segment: band!, bleed: gap),
+          Padding(
+            padding: _inset,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 150),
+              opacity: collapsed ? 0 : 1,
+              // The event lines are one-line ellipsised, so a long match
+              // reads "…"; tapping the strip opens the day's events in full.
+              // Not while collapsed — then the header's own tap (admin: add
+              // a slot) wins.
+              child: priority.isNotEmpty
+                  ? GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: collapsed
+                          ? null
+                          : () => showDayMatchesDialog(
+                                context,
+                                date,
+                                priority,
+                                interactive: interactive,
+                                onOpenMatch: onOpenMatch,
+                                onPlayVideo: onPlayVideo,
+                                pulseLive: pulseLive,
+                              ),
+                      child: Column(
                         children: [
-                          Flexible(
-                            child: Text(
-                              subtitle!,
+                          for (final m in priority)
+                            EmojiText(
+                              headerEventLabel(m),
                               textAlign: TextAlign.center,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 10,
+                                height: 1.25,
                                 color: isToday
-                                    ? Colors.white.withValues(alpha: 0.85)
-                                    : scheme.onSurfaceVariant
-                                        .withValues(alpha: 0.7),
+                                    ? Colors.white.withValues(alpha: 0.9)
+                                    : scheme.primary,
                               ),
                             ),
-                          ),
-                          if (watch != null) ...[
-                            const SizedBox(width: 2),
-                            watch!,
-                          ],
                         ],
-                      )
-                    : const SizedBox.shrink(),
+                      ),
+                    )
+                  : subtitle != null
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                subtitle!,
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isToday
+                                      ? Colors.white.withValues(alpha: 0.85)
+                                      : scheme.onSurfaceVariant
+                                          .withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ),
+                            if (watch != null) ...[
+                              const SizedBox(width: 2),
+                              watch!,
+                            ],
+                          ],
+                        )
+                      : const SizedBox.shrink(),
+            ),
           ),
         ],
       ),
     );
-    if (onAdd == null) return body;
-    return InkWell(onTap: onAdd, child: body);
+    // Clipped here, around the [gap], not by the container inside it: the
+    // [band] runs on through the gap.
+    final clipped = ClipRect(child: body);
+    if (onAdd == null) return clipped;
+    return InkWell(onTap: onAdd, child: clipped);
   }
 }
 

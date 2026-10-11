@@ -18,12 +18,14 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/calendar_layout.dart';
+import '../../domain/duties.dart' show KioskDutyEntry, kioskDutyOn;
 import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
 import '../schedule/widgets/schedule_day_column.dart';
 import '../schedule/widgets/slot_tile.dart';
+import 'kiosk_duty.dart';
 
 /// Slack under the columns so the bottom hour label (centered on its line)
 /// isn't half-clipped by the viewport in fit-height mode.
@@ -71,6 +73,7 @@ class KioskBoardView extends ConsumerStatefulWidget {
     this.onPlayVideo,
     this.columnBasisWidth,
     this.onVisibleDays,
+    this.onOpenDuty,
   });
 
   /// The currently selected player, or null when the board is display-only.
@@ -94,6 +97,10 @@ class KioskBoardView extends ConsumerStatefulWidget {
   /// A visitor scrolled the board: the first and the last day now in view.
   /// Not called for the idle reset's own scroll back to today.
   final void Function(Day first, Day last)? onVisibleDays;
+
+  /// A tap on the canteen duty's band („V kalendáři“, 0073) asks for the
+  /// plan — the shell opens it, so a touch there counts for the idle timer.
+  final VoidCallback? onOpenDuty;
 
   @override
   ConsumerState<KioskBoardView> createState() => KioskBoardViewState();
@@ -139,6 +146,11 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// The geometry [_todayOffset] was last applied for: the board opens on
   /// today, not on the oldest day, and again when that changes.
   (int, double)? _alignedFor;
+
+  /// The first column in view where the horizontal scroll last settled —
+  /// a visitor's or the idle reset's. The duty band names who serves there
+  /// (see [_dutySegment]).
+  int _firstVisible = 0;
 
   /// Today's block spans in minutes-from-midnight — the idle reset anchors
   /// on the START of the block containing "now" (the board doesn't creep
@@ -198,6 +210,34 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final now = DateTime.now();
     resetToNow(HourMinute(now.hour, now.minute));
   }
+
+  /// The horizontal scroll settled with column [first] at the left. Only
+  /// the duty band shows it ([rebuild]); without one the board is not
+  /// rebuilt for it.
+  void _settledOn(int first, {required bool rebuild}) {
+    if (first == _firstVisible) return;
+    if (rebuild) {
+      setState(() => _firstVisible = first);
+    } else {
+      _firstVisible = first;
+    }
+  }
+
+  /// The duty's piece over one day's header ([on], null = no duty there).
+  /// The names stand where a visitor starts reading: the period's first
+  /// day and the [first] column in view — a period begun off to the left
+  /// still says who.
+  BoardBandSegment? _dutySegment(
+    ({KioskDutyEntry entry, bool starts, bool ends})? on, {
+    required bool first,
+  }) => on == null
+      ? null
+      : BoardBandSegment(
+          starts: on.starts,
+          ends: on.ends,
+          label: on.starts || first ? on.entry.who : null,
+          onTap: widget.onOpenDuty,
+        );
 
   Future<void> _book(
     BuildContext context,
@@ -358,7 +398,20 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       final count = headerEvents(day).length;
       if (count > maxHeaderEvents) maxHeaderEvents = count;
     }
-    final headerHeight = boardHeaderHeight(maxHeaderEvents);
+    // The canteen duty's band across the headers („V kalendáři“, 0073):
+    // the plan is read only while the admin has it on, and every header
+    // keeps the band's room then, a day without a duty too.
+    ({KioskDutyEntry entry, bool starts, bool ends})? Function(Day)? dutyOn;
+    if (settings.kioskDutyBoard) {
+      final periods = ref.watch(dutyPeriodsProvider).value ?? const [];
+      final assignments =
+          ref.watch(dutyAssignmentsProvider).value ?? const [];
+      final names = ref.watch(kioskDutyNamesProvider);
+      dutyOn = (day) => kioskDutyOn(periods, assignments, names, day);
+    }
+    final headerHeight =
+        boardHeaderHeight(maxHeaderEvents) +
+        (dutyOn == null ? 0 : boardBandHeight);
 
     // At the cap the board simply stops offering ＋, which on a kiosk —
     // where the player has just tapped their own name and is waiting for
@@ -404,6 +457,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         _todayOffset = todayIndex * columnWidth;
         if (_alignedFor != (pastDays, columnWidth)) {
           _alignedFor = (pastDays, columnWidth);
+          _firstVisible = todayIndex;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_hScroll.hasClients) _hScroll.jumpTo(_todayOffset);
           });
@@ -431,23 +485,28 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                       itemCount: days.length,
                       itemBuilder: (context, index) => SizedBox(
                         width: columnWidth,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 2),
-                          child: BoardColumnHeader(
-                            date: days[index].date,
-                            isToday: index == todayIndex,
-                            priority: headerEvents(days[index]),
-                            height: headerHeight,
-                            onOpenMatch: widget.onOpenMatch,
-                            onPlayVideo: widget.onPlayVideo,
-                            pulseLive: settings.kioskAnimations,
-                            // Never a tap-through to MatchDetailScreen or the
-                            // browser's video button here: the kiosk's own
-                            // 60 s idle-reset Listener doesn't see touches on
-                            // a pushed route, and an external video browser
-                            // on a kiosk tablet is undesirable — a video
-                            // plays in the kiosk's stream window instead.
-                            interactive: false,
+                        child: BoardColumnHeader(
+                          date: days[index].date,
+                          isToday: index == todayIndex,
+                          priority: headerEvents(days[index]),
+                          height: headerHeight,
+                          onOpenMatch: widget.onOpenMatch,
+                          onPlayVideo: widget.onPlayVideo,
+                          pulseLive: settings.kioskAnimations,
+                          // Never a tap-through to MatchDetailScreen or the
+                          // browser's video button here: the kiosk's own
+                          // 60 s idle-reset Listener doesn't see touches on
+                          // a pushed route, and an external video browser
+                          // on a kiosk tablet is undesirable — a video
+                          // plays in the kiosk's stream window instead.
+                          interactive: false,
+                          // The 2 px the day columns below keep on each
+                          // side, inside the header: the duty's band runs on
+                          // through them from day to day.
+                          gap: 2,
+                          band: _dutySegment(
+                            dutyOn?.call(days[index].date),
+                            first: index == _firstVisible,
                           ),
                         ),
                       ),
@@ -476,6 +535,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                             onNotification: (n) {
                               if (n.metrics.axis != Axis.horizontal) {
                                 return false;
+                              }
+                              if (n is ScrollEndNotification) {
+                                _settledOn(
+                                  (n.metrics.pixels / columnWidth).round(),
+                                  rebuild: dutyOn != null,
+                                );
                               }
                               if (n is ScrollStartNotification &&
                                   n.dragDetails != null) {

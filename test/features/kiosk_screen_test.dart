@@ -761,6 +761,96 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  group('canteen duty (0073)', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    testWidgets('three places, each its own switch, all off by default: '
+        'each PATCHes its own column', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Služby na kantýně'), findsOneWidget);
+      expect(
+        find.textContaining('Správě → Služby. Každé místo se zapíná zvlášť.'),
+        findsOneWidget,
+      );
+      for (final (title, column) in [
+        ('V záhlaví', 'kiosk_duty_header'),
+        ('V kalendáři', 'kiosk_duty_board'),
+        ('V panelu', 'kiosk_duty_drawer'),
+      ]) {
+        final tile = find.widgetWithText(SwitchListTile, title);
+        await tester.ensureVisible(tile);
+        expect(tester.widget<SwitchListTile>(tile).value, isFalse,
+            reason: title);
+        await tester.tap(tile);
+        await tester.pumpAndSettle();
+        expect(lastPatch(), {column: true}, reason: title);
+      }
+      // What each place is.
+      expect(find.text('Pod hodinami „Služba: …“ s dnešní službou; ťuk '
+          'ukáže plán.'), findsOneWidget);
+      expect(find.text('Pás se jmény přes dny služby v hlavičkách dnů '
+          'tabule.'), findsOneWidget);
+      expect(find.text('Karta se službou a plánem v postranním panelu.'),
+          findsOneWidget);
+      // Without the card there is no share of the drawer to set.
+      expect(find.widgetWithText(TextField, 'Podíl karty v panelu'),
+          findsNothing);
+    });
+
+    testWidgets('with the card in the drawer its share shows: 30 % by '
+        'default, 10–90, PATCHes kiosk_duty_share', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskDutyDrawer: true,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'V panelu'),
+        ).value,
+        isTrue,
+      );
+      final share = find.widgetWithText(TextField, 'Podíl karty v panelu');
+      expect(tester.widget<TextField>(share).controller!.text, '30');
+      expect(find.text('Kolik výšky panelu karta zabere; zbytek si dělí '
+          'nástěnka a zápasy.'), findsOneWidget);
+      // Right under its switch, still in the duty's section.
+      expect(
+        tester.getTopLeft(share).dy,
+        greaterThan(
+            tester.getTopLeft(find.widgetWithText(SwitchListTile, 'V panelu'))
+                .dy),
+      );
+      expect(
+        tester.getTopLeft(share).dy,
+        lessThan(tester.getTopLeft(find.text('Postranní panel')).dy),
+      );
+
+      await enter(tester, 'Podíl karty v panelu', '95');
+      expect(find.text('Zadej číslo od 10 do 90.'), findsOneWidget);
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+      await enter(tester, 'Podíl karty v panelu', '50');
+      expect(lastPatch(), {'kiosk_duty_share': 50});
+
+      await tester.tap(find.widgetWithText(SwitchListTile, 'V panelu'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_duty_drawer': false});
+    });
+  });
+
   testWidgets('the numbers are typed in: each PATCHes its own column on '
       'Enter', (tester) async {
     tall(tester);
@@ -1031,8 +1121,8 @@ void main() {
         {'kiosk_drawer_columns': 3});
   });
 
-  testWidgets('the options come in sections: screen, notices, panel, live '
-      'match, then the address and the accounts', (tester) async {
+  testWidgets('the options come in sections: screen, notices, canteen duty, '
+      'panel, live match, then the address and the accounts', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -1041,6 +1131,7 @@ void main() {
       top('Obrazovka kiosku'),
       top('Stavový řádek'),
       top('Nástěnka'),
+      top('Služby na kantýně'),
       top('Postranní panel'),
       top('Hraný zápas'),
       top('Adresa pro tablet'),
@@ -1091,11 +1182,16 @@ void main() {
       'Výchozně rozbalený',
       'Zápasy v panelu',
       'Hraný zápas přes celý panel',
+      // The duty's card has no drawer to go to; header and board stay.
+      'V panelu',
     ]) {
       expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
     }
     expect(find.text('Šířka panelu'), findsNothing);
+    expect(find.text('Podíl karty v panelu'), findsNothing);
     expect(find.text('Hraný zápas'), findsNothing);
+    expect(find.widgetWithText(SwitchListTile, 'V záhlaví'), findsOneWidget);
+    expect(find.widgetWithText(SwitchListTile, 'V kalendáři'), findsOneWidget);
     // The notices can still go to the status bar without the panel.
     expect(find.text('Kde se oznamy zobrazí'), findsOneWidget);
 

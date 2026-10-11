@@ -85,6 +85,9 @@ const appChangelog = <Release>[
         '(text nastaví správce ve Správě → Kiosk).',
     'Kiosk: nadpis oznamu v záhlaví se při střídání plynule prolne na svém '
         'místě, neposkočí.',
+    'Kiosk: kdo slouží na kantýně — v záhlaví (ťuk ukáže plán), jako pás '
+        'v kalendáři nebo karta v panelu; zapíná správce ve Správě → Kiosk → '
+        'Služby na kantýně.',
   ], store: [
     'Kiosk: video zápasu živě i ze záznamu; počasí, svátek a upozornění v '
         'záhlaví; dnešní zápasy v záhlaví jdou skrýt.',

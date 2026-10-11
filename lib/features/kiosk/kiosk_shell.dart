@@ -26,6 +26,7 @@ import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
 import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
+import 'kiosk_duty.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_warning.dart';
 import 'kiosk_stream_window.dart';
@@ -215,6 +216,11 @@ class _KioskShellState extends ConsumerState<KioskShell>
   void _openStream(PrioritySlot match) =>
       ref.read(kioskStreamsProvider.notifier).open(match.id);
 
+  /// The canteen duty's plan (0073), from wherever the kiosk names who
+  /// serves.
+  void _openDuty() =>
+      unawaited(showKioskDutyDialog(context, wrap: _touchable));
+
   void _openMatch(PrioritySlot match) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
     unawaited(
@@ -294,6 +300,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
       columnBasisWidth: screenWidth,
       onVisibleDays: (first, last) =>
           setState(() => _boardDays = (first: first, last: last)),
+      onOpenDuty: _openDuty,
     );
     if (content == null) return board;
     // A match being played keeps the drawer open: a visitor may close it,
@@ -388,6 +395,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 onClearSelection: _clearSelection,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatchOrStream,
+                onOpenDuty: _openDuty,
               ),
               const KioskOfflineBanner(),
               // The idle bar: thin, filling from left to right until the reset.
@@ -431,6 +439,7 @@ class _StatusBar extends ConsumerWidget {
     required this.onClearSelection,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    required this.onOpenDuty,
   });
 
   final PlayerName? selected;
@@ -441,6 +450,9 @@ class _StatusBar extends ConsumerWidget {
   /// A tap on one of today's matches: its Zápis once it has a score, its
   /// stream before that when it has a video.
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// A tap on the canteen duty's line: the plan.
+  final VoidCallback onOpenDuty;
 
   /// Today's matches the bar lists, start-ordered; Úklid children are
   /// plumbing (their match already announces). None while the admin keeps
@@ -522,6 +534,10 @@ class _StatusBar extends ConsumerWidget {
         : const <Message>[];
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    // Who serves today (0073) — the plan is read only with the line on.
+    final duty = (ref.watch(settingsProvider).value?.kioskDutyHeader ?? false)
+        ? ref.watch(kioskDutyPlanProvider.select((plan) => plan.now))
+        : null;
 
     return Container(
       color: scheme.surfaceContainerHighest,
@@ -546,6 +562,11 @@ class _StatusBar extends ConsumerWidget {
                   dayFull(todayDay),
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
+                if (duty != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: KioskDutyLine(entry: duty, onTap: onOpenDuty),
+                  ),
               ],
             ),
             // Today's weather and name day, when the admin wants them —

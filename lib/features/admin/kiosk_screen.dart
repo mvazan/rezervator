@@ -626,8 +626,62 @@ class KioskSettingsScreen extends ConsumerWidget {
             ),
             _section(
               context,
+              'Služby na kantýně',
+              'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu '
+                  've Správě → Služby. Každé místo se zapíná zvlášť.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'V záhlaví',
+                  settings?.kioskDutyHeader ?? false,
+                  'kiosk_duty_header',
+                  subtitle:
+                      'Pod hodinami „Služba: …“ s dnešní službou; ťuk ukáže '
+                      'plán.',
+                ),
+                _switch(
+                  context,
+                  settings,
+                  'V kalendáři',
+                  settings?.kioskDutyBoard ?? false,
+                  'kiosk_duty_board',
+                  subtitle:
+                      'Pás se jmény přes dny služby v hlavičkách dnů tabule.',
+                ),
+                // The card lives in the drawer: with the drawer off there is
+                // nowhere to put it (like the live match's section).
+                if (settings?.kioskPanelEnabled ?? true)
+                  _switch(
+                    context,
+                    settings,
+                    'V panelu',
+                    settings?.kioskDutyDrawer ?? false,
+                    'kiosk_duty_drawer',
+                    subtitle: 'Karta se službou a plánem v postranním panelu.',
+                  ),
+                if ((settings?.kioskPanelEnabled ?? true) &&
+                    (settings?.kioskDutyDrawer ?? false))
+                  _number(
+                    context,
+                    settings,
+                    'Podíl karty v panelu',
+                    settings?.kioskDutyShare ?? 30,
+                    'kiosk_duty_share',
+                    unit: '%',
+                    min: 10,
+                    max: 90,
+                    helper:
+                        'Kolik výšky panelu karta zabere; zbytek si dělí '
+                        'nástěnka a zápasy.',
+                  ),
+              ],
+            ),
+            _section(
+              context,
               'Postranní panel',
-              'Panel vpravo vedle tabule s nástěnkou a zápasy. Návštěvník '
+              'Panel vpravo vedle tabule s nástěnkou a zápasy (a službou na '
+                  'kantýně, je-li zapnutá). Návštěvník '
                   'ho rozbalí a sbalí tlačítkem na okraji obrazovky; po době '
                   'nečinnosti se vrátí do výchozího stavu.',
               [
@@ -677,7 +731,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                       max: 90,
                       helper:
                           'Kolik výšky panelu dostanou oznamy; zbytek mají '
-                          'zápasy.',
+                          'zápasy. Karta služby si bere svůj podíl napřed.',
                     ),
                   _switch(
                     context,

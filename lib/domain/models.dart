@@ -732,6 +732,10 @@ class ScheduleSettings {
     this.kioskBandFontSize = 10,
     this.kioskTodaysMatches = true,
     this.kioskStreamMax = 1,
+    this.kioskDutyHeader = false,
+    this.kioskDutyBoard = false,
+    this.kioskDutyDrawer = false,
+    this.kioskDutyShare = 30,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -817,6 +821,18 @@ class ScheduleSettings {
   /// How many stream windows at once, 1–4 (0072): 1 turns through the
   /// open streams in one window, more give each its own.
   final int kioskStreamMax;
+  /// The canteen duty on the kiosk (0073), each place switched on by
+  /// itself: today's duty under the clock in the status bar, a tap shows
+  /// the plan ([kioskDutyHeader]); a band across a duty's days in the
+  /// board's day headers ([kioskDutyBoard]); a card with the duty and the
+  /// plan in the side drawer ([kioskDutyDrawer]).
+  final bool kioskDutyHeader;
+  final bool kioskDutyBoard;
+  final bool kioskDutyDrawer;
+
+  /// Percent of the drawer's height the duty card takes (0073); the
+  /// notices and the matches share the rest as before.
+  final int kioskDutyShare;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -957,6 +973,10 @@ class ScheduleSettings {
         kioskBandFontSize: json['kiosk_band_font_size'] as int? ?? 10,
         kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
         kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
+        kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
+        kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,
+        kioskDutyDrawer: json['kiosk_duty_drawer'] as bool? ?? false,
+        kioskDutyShare: json['kiosk_duty_share'] as int? ?? 30,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,
