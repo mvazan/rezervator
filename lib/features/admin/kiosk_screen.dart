@@ -601,83 +601,95 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _switch(
                   context,
                   settings,
-                  'Živý přenos se otevře sám',
-                  settings?.kioskStream ?? false,
-                  'kiosk_stream',
+                  'Stream na kiosku',
+                  settings?.kioskStreamEnabled ?? true,
+                  'kiosk_stream_enabled',
                   subtitle:
-                      'Hraný zápas s videem se otevře bez dotyku: od hodiny '
-                      'před začátkem do půl hodiny po zapsání výsledku. '
-                      'Zavřený se sám znovu neotevře. Vypnuto = jen '
-                      'tlačítkem ▶.',
+                      'Vypnuto = u zápasů žádné ▶ a žádné okno se streamem.',
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 12),
-                  child: DropdownButtonFormField<KioskCorner>(
-                    initialValue: settings?.kioskStreamCorner ?? KioskCorner.bl,
-                    decoration: const InputDecoration(
-                      labelText: 'Kde se okno objeví',
-                      helperText:
-                          'Panel je vpravo; vlevo dole mu okno nepřekáží. '
-                          'Další okna do dalších rohů — nejdřív na stejné '
-                          'straně.',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: KioskCorner.tl,
-                        child: Text('Vlevo nahoře'),
-                      ),
-                      DropdownMenuItem(
-                        value: KioskCorner.tr,
-                        child: Text('Vpravo nahoře'),
-                      ),
-                      DropdownMenuItem(
-                        value: KioskCorner.bl,
-                        child: Text('Vlevo dole'),
-                      ),
-                      DropdownMenuItem(
-                        value: KioskCorner.br,
-                        child: Text('Vpravo dole'),
-                      ),
-                    ],
-                    onChanged: settings == null
-                        ? null
-                        : (c) => c == null
-                              ? null
-                              : _panel(context, settings, {
-                                  'kiosk_stream_corner': c.name,
-                                }),
+                if (settings?.kioskStreamEnabled ?? true) ...[
+                  _switch(
+                    context,
+                    settings,
+                    'Živý přenos se otevře sám',
+                    settings?.kioskStream ?? false,
+                    'kiosk_stream',
+                    subtitle:
+                        'Hraný zápas s videem se otevře bez dotyku: od hodiny '
+                        'před začátkem do půl hodiny po zapsání výsledku. '
+                        'Zavřený se sám znovu neotevře. Vypnuto = jen '
+                        'tlačítkem ▶.',
                   ),
-                ),
-                _number(
-                  context,
-                  settings,
-                  'Šířka okna',
-                  settings?.kioskStreamWidth ?? 35,
-                  'kiosk_stream_width',
-                  unit: '%',
-                  min: 20,
-                  max: 60,
-                  helper:
-                      'Procenta šířky obrazovky; výška podle videa 16:9. '
-                      'Návštěvník si okno přesune nebo zvětší sám.',
-                ),
-                _number(
-                  context,
-                  settings,
-                  'Oken najednou',
-                  settings?.kioskStreamMax ?? 1,
-                  'kiosk_stream_max',
-                  unit: '',
-                  min: 1,
-                  max: 4,
-                  helper:
-                      'Při 1 se mezi puštěnými streamy listuje šipkami v '
-                      'okně. Víc = každý stream ve svém okně; když jsou '
-                      'plná, další ▶ zavře nejstarší puštěný (živý přenos '
-                      'jen uvolní místo a pak se vrátí). Každé okno je '
-                      'další přehrávač — na slabším displeji raději 1.',
-                ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskCorner>(
+                      initialValue:
+                          settings?.kioskStreamCorner ?? KioskCorner.bl,
+                      decoration: const InputDecoration(
+                        labelText: 'Kde se okno objeví',
+                        helperText:
+                            'Panel je vpravo; vlevo dole mu okno nepřekáží. '
+                            'Další okna do dalších rohů — nejdřív na stejné '
+                            'straně.',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: KioskCorner.tl,
+                          child: Text('Vlevo nahoře'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.tr,
+                          child: Text('Vpravo nahoře'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.bl,
+                          child: Text('Vlevo dole'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.br,
+                          child: Text('Vpravo dole'),
+                        ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (c) => c == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_stream_corner': c.name,
+                                  }),
+                    ),
+                  ),
+                  _number(
+                    context,
+                    settings,
+                    'Šířka okna',
+                    settings?.kioskStreamWidth ?? 35,
+                    'kiosk_stream_width',
+                    unit: '%',
+                    min: 20,
+                    max: 60,
+                    helper:
+                        'Procenta šířky obrazovky; výška podle videa 16:9. '
+                        'Návštěvník si okno přesune nebo zvětší sám.',
+                  ),
+                  _number(
+                    context,
+                    settings,
+                    'Oken najednou',
+                    settings?.kioskStreamMax ?? 1,
+                    'kiosk_stream_max',
+                    unit: '',
+                    min: 1,
+                    max: 4,
+                    helper:
+                        'Při 1 se mezi puštěnými streamy listuje šipkami v '
+                        'okně. Víc = každý stream ve svém okně; když jsou '
+                        'plná, další ▶ zavře nejstarší puštěný (živý přenos '
+                        'jen uvolní místo a pak se vrátí). Každé okno je '
+                        'další přehrávač — na slabším displeji raději 1.',
+                  ),
+                ],
               ],
             ),
             _section(

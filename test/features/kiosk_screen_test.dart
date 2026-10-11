@@ -376,6 +376,71 @@ void main() {
     expect(lastPatch(), {'kiosk_stream_max': 3});
   });
 
+  testWidgets('the streams\' master switch comes first in its section and '
+      'PATCHes kiosk_stream_enabled', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    final master = find.widgetWithText(SwitchListTile, 'Stream na kiosku');
+    await tester.ensureVisible(master);
+    expect(
+      find.text('Vypnuto = u zápasů žádné ▶ a žádné okno se streamem.'),
+      findsOneWidget,
+    );
+    // Above the section's other options.
+    expect(
+      tester.getTopLeft(master).dy,
+      lessThan(
+        tester
+            .getTopLeft(
+              find.widgetWithText(
+                SwitchListTile,
+                'Živý přenos se otevře sám',
+              ),
+            )
+            .dy,
+      ),
+    );
+    await tester.tap(master);
+    await tester.pumpAndSettle();
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_stream_enabled': false});
+  });
+
+  testWidgets('with the streams off the section has only its master switch',
+      (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app(
+      settings: const ScheduleSettings(
+        laneCount: 4,
+        trainingWeekdays: {1, 2, 4},
+        bookingHorizonDays: 14,
+        maxActiveReservations: 3,
+        kioskStreamEnabled: false,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Stream zápasu'), findsOneWidget);
+    expect(
+      find.widgetWithText(SwitchListTile, 'Stream na kiosku'),
+      findsOneWidget,
+    );
+    expect(
+      find.widgetWithText(SwitchListTile, 'Živý přenos se otevře sám'),
+      findsNothing,
+    );
+    expect(find.text('Kde se okno objeví'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Šířka okna'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Oken najednou'), findsNothing);
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Stream na kiosku'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_stream_enabled': true});
+  });
+
   /// Types [text] into the number field [label] and presses Enter.
   Future<void> enter(WidgetTester tester, String label, String text) async {
     final field = find.widgetWithText(TextField, label);
