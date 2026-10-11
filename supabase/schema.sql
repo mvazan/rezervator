@@ -3446,21 +3446,16 @@ declare
 begin
   return jsonb_build_object(
     'tenant_name', (select name from tenants where id = v_tenant),
-    'settings', (select to_jsonb(s) - 'tenant_id'
-                          - 'duty_reminder_enabled' - 'duty_reminder_days'
-                          - 'kiosk_notices_mode' - 'kiosk_show_matches'
-                          - 'kiosk_show_upcoming' - 'kiosk_live_mode'
-                          - 'kiosk_drawer_open' - 'kiosk_drawer_columns'
-                          - 'kiosk_notices_share' - 'kiosk_zapis_percent'
-                          - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
-                          - 'kiosk_panel_enabled' - 'kiosk_past_days'
-                          - 'kiosk_notices_rotation_seconds'
-                          - 'kiosk_live_rotation_seconds'
-                          - 'kiosk_idle_seconds'
-                          - 'kiosk_live_layout' - 'kiosk_follow_board'
-                          - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_visible_days' - 'kiosk_font_size'
-                          - 'kiosk_animations' - 'kiosk_low_res'
+    -- An allow-list, not a mask: the six settings the public board reads
+    -- (the tenancy suite pins the set), so a column added later — every
+    -- kiosk option is the admin's — never reaches anon by default.
+    'settings', (select jsonb_build_object(
+                          'lane_count', s.lane_count,
+                          'training_weekdays', s.training_weekdays,
+                          'booking_horizon_days', s.booking_horizon_days,
+                          'max_active_reservations', s.max_active_reservations,
+                          'kiosk_dark', s.kiosk_dark,
+                          'kiosk_fit_day', s.kiosk_fit_day)
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5690,11 +5685,16 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
     "kiosk_animations" boolean DEFAULT true NOT NULL,
     "kiosk_low_res" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_header" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_board" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_drawer" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_share" smallint DEFAULT 30 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_drawer_columns_check" CHECK ((("kiosk_drawer_columns" >= 1) AND ("kiosk_drawer_columns" <= 13))),
+    CONSTRAINT "schedule_settings_kiosk_duty_share_check" CHECK ((("kiosk_duty_share" >= 10) AND ("kiosk_duty_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_font_size_check" CHECK ((("kiosk_font_size" >= 9) AND ("kiosk_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),

@@ -10562,10 +10562,65 @@ begin
 end $$;
 
 -- Running 0051 again put back its two read-rule functions: bring back the
--- kiosk's notices (0064), which later checks rely on — and 0065's
--- public_week, which 0064's version would otherwise have replaced.
+-- kiosk's notices (0064), which later checks rely on — and 0073's
+-- public_week, which 0064's and 0065's versions would otherwise have
+-- replaced.
 \ir ../migrations/0064_kiosk_panel.sql
 \ir ../migrations/0065_kiosk_performance.sql
+\ir ../migrations/0073_kiosk_duty.sql
+
+-- 0073: the canteen duty on the kiosk — all three places off for a new
+-- alley (its settings row comes from seed_tenant_defaults), the card's
+-- share of the drawer 10–90, and with all of it on the public overview
+-- still hands out its six settings, nothing more. The file just ran a
+-- second time: the migration is re-runnable.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_new constant uuid := '00000000-0000-0000-0000-000000000073';
+  v_keys text[];
+begin
+  insert into tenants (id, name) values (v_new, 'Kuželna (0073)');
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = v_new
+                    and not kiosk_duty_header and not kiosk_duty_board
+                    and not kiosk_duty_drawer and kiosk_duty_share = 30) then
+    raise exception 'FAIL: a new alley''s kiosk does not start with the duty off and a 30 percent card (0073)';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'schedule_settings'::regclass
+                    and conname = 'schedule_settings_kiosk_duty_share_check') then
+    raise exception 'FAIL: the duty card''s share has no named check (0073)';
+  end if;
+  begin
+    update schedule_settings set kiosk_duty_share = 9 where tenant_id = v_a;
+    raise exception 'FAIL: a duty card under 10 percent of the drawer was accepted (0073)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_duty_share = 91 where tenant_id = v_a;
+    raise exception 'FAIL: a duty card over 90 percent of the drawer was accepted (0073)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings
+     set kiosk_duty_header = true, kiosk_duty_board = true,
+         kiosk_duty_drawer = true, kiosk_duty_share = 10
+   where tenant_id = v_a;
+  update schedule_settings set kiosk_duty_share = 90 where tenant_id = v_a;
+  v_keys := array(select jsonb_object_keys(
+                           public_week('kuzelna-a', current_date)->'settings')
+                  order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations',
+                      'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s duty options may be reaching anon (0073): %', v_keys;
+  end if;
+  update schedule_settings
+     set kiosk_duty_header = false, kiosk_duty_board = false,
+         kiosk_duty_drawer = false, kiosk_duty_share = 30
+   where tenant_id = v_a;
+  raise notice 'OK: the kiosk''s duty is off for a new alley, its card 10–90 percent, and stays off the public overview (0073)';
+end $$;
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
