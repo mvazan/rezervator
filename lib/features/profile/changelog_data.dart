@@ -49,7 +49,7 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '11. 10. 2026', [
+  Release('2.0.8', '11. 10. 2026', [
     'Web: když máte Rezervátor otevřený ve více záložkách, přihlášení '
         'v jedné se zase přenese i do ostatních.',
     'Kiosk: zápis zápasu ukazuje i registrační čísla hráčů.',
