@@ -260,8 +260,9 @@ class KioskSettingsScreen extends ConsumerWidget {
   String _kioskUrl() =>
       kioskUrlFrom(kIsWeb ? Uri.base : Uri.parse(UpdateScreen.webUrl));
 
-  /// The note under the name picker's first letters (0070), typed in a
-  /// dialog — a new one starts from the default text; saved trimmed.
+  /// The note on the name picker's first page (0070: under its first
+  /// letters, or its names on a small alley), typed in a dialog — a new
+  /// one starts from the default text; saved trimmed.
   Future<void> _editPickerNote(
     BuildContext context,
     ScheduleSettings settings,
@@ -344,8 +345,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-                // Then the booking's: above the first letters of the name
-                // picker (0070).
+                // Then the booking's: on the name picker's first page,
+                // under its letters or names (0070).
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(

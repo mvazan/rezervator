@@ -907,9 +907,10 @@ class ScheduleSettings {
   /// font follows the rows instead (`kioskRowFont`).
   final int kioskFontSize;
 
-  /// A note under the first letters of the kiosk's name picker (0070) —
-  /// by default [defaultPickerNote], that a training cannot be cancelled
-  /// at the kiosk; null = none.
+  /// A note on the first page of the kiosk's name picker (0070) — under
+  /// its first letters, or under the names when a small alley lists them
+  /// at once —, by default [defaultPickerNote], that a training cannot be
+  /// cancelled at the kiosk; null = none.
   final String? kioskPickerNote;
 
   /// How a match being played is drawn in the drawer (0064).
