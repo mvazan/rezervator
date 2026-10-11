@@ -466,16 +466,20 @@ class _Card extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: scheme.primary),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.4,
-                  color: scheme.primary,
+              // In a narrow drawer (one column of many days) a long title
+              // wraps rather than running out of the card.
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    color: scheme.primary,
+                  ),
                 ),
               ),
-              if (action != null) ...[const Spacer(), action!],
+              ?action,
             ],
           ),
           const SizedBox(height: 10),
@@ -489,8 +493,9 @@ class _Card extends StatelessWidget {
 /// The canteen duty (0073, „V panelu“): who serves now, large on the duty's
 /// tint (the status bar's line and the board's band wear it too), or that
 /// nobody does today — then the next ones in date order, each its range on
-/// the left and its names on the right. It fills its slot of the drawer and
-/// scrolls when the slot is too short for the plan.
+/// the left and its names on the right (under it in a narrow drawer). It
+/// fills its slot of the drawer and scrolls when the slot is too short for
+/// the plan.
 class _DutyCard extends StatelessWidget {
   const _DutyCard({super.key, required this.plan});
 
@@ -566,31 +571,54 @@ class _DutyCard extends StatelessWidget {
                 if (i > 0) const Divider(height: 1),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(entry.range, style: const TextStyle(fontSize: 15)),
-                      const SizedBox(width: 12),
-                      // A long list of names wraps under itself; the range
-                      // keeps its line.
-                      Expanded(
-                        child: Text(
-                          entry.who,
-                          textAlign: TextAlign.end,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: _DutyNextRow(entry: entry),
                 ),
               ],
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// One of the duty card's „Další“ rows: the range on the left, the names
+/// on the right — a long list wraps under itself, the range keeps its
+/// line. A drawer too narrow for both side by side (one column of many
+/// days) puts the names under the range.
+class _DutyNextRow extends StatelessWidget {
+  const _DutyNextRow({required this.entry});
+
+  /// Under this width the names would get little or no room beside the
+  /// range (some 140 px of it).
+  static const stackBelow = 280.0;
+
+  final KioskDutyEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final range = Text(entry.range, style: const TextStyle(fontSize: 15));
+    const namesStyle = TextStyle(fontSize: 15, fontWeight: FontWeight.w600);
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < stackBelow
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [range, Text(entry.who, style: namesStyle)],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                range,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    entry.who,
+                    textAlign: TextAlign.end,
+                    style: namesStyle,
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }

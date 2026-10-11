@@ -3833,6 +3833,35 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('in a narrow drawer the names go under the range, and '
+          'nothing overflows', (tester) async {
+        fullHd(tester);
+        // One of ten day columns: under 190 px for the whole drawer.
+        await tester.pumpWidget(
+          app(
+            drawerOpen: true,
+            visibleDays: 10,
+            drawerColumns: 1,
+            dutyDrawer: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(drawerText(dutyTitle), findsOneWidget);
+        expect(inCard(both), findsOneWidget);
+        for (var i = 0; i < 2; i++) {
+          final range = tester.getRect(inCard(dutyRangeLabel(ahead[i])));
+          final names = tester.getRect(inCard(players[i + 1].displayName));
+          expect(names.top, greaterThanOrEqualTo(range.bottom));
+          expect(names.left, range.left);
+          expect(names.width, greaterThan(0));
+        }
+
+        await finish(tester);
+      });
+
       testWidgets('a card too short for the plan scrolls; the idle reset '
           'brings it back to the top', (tester) async {
         fullHd(tester);
