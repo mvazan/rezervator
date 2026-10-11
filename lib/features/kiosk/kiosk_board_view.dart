@@ -400,7 +400,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     }
     // The canteen duty's band across the headers („V kalendáři“, 0073):
     // the plan is read only while the admin has it on, and every header
-    // keeps the band's room then, a day without a duty too.
+    // keeps the band's room then, a day without a duty too — above the
+    // date, between it and the matches or under them, as the admin chose.
     ({KioskDutyEntry entry, bool starts, bool ends})? Function(Day)? dutyOn;
     if (settings.kioskDutyBoard) {
       final periods = ref.watch(dutyPeriodsProvider).value ?? const [];
@@ -504,6 +505,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           // side, inside the header: the duty's band runs on
                           // through them from day to day.
                           gap: 2,
+                          bandPosition: dutyOn == null
+                              ? null
+                              : settings.kioskDutyBandPosition,
                           band: _dutySegment(
                             dutyOn?.call(days[index].date),
                             first: index == _firstVisible,

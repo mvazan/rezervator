@@ -797,9 +797,84 @@ void main() {
           'tabule.'), findsOneWidget);
       expect(find.text('Karta se službou a plánem v postranním panelu.'),
           findsOneWidget);
-      // Without the card there is no share of the drawer to set.
+      // Without the card there is no share of the drawer to set, without
+      // the band no place for it.
       expect(find.widgetWithText(TextField, 'Podíl karty v panelu'),
           findsNothing);
+      expect(find.text('Kde je pás'), findsNothing);
+    });
+
+    testWidgets('with the band in the calendar, where it runs is picked from '
+        'a list right under its switch: between the date and the matches by '
+        'default; PATCHes kiosk_duty_band_position', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskDutyBoard: true,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final field = find.byType(DropdownButtonFormField<KioskDutyBandPosition>);
+      expect(field, findsOneWidget);
+      expect(
+        find.descendant(of: field, matching: find.text('Kde je pás')),
+        findsOneWidget,
+      );
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(
+        top(field),
+        greaterThan(top(find.widgetWithText(SwitchListTile, 'V kalendáři'))),
+      );
+      expect(
+        top(field),
+        lessThan(top(find.widgetWithText(SwitchListTile, 'V panelu'))),
+      );
+
+      await tester.ensureVisible(field);
+      await tester.tap(find.text('Mezi datem a zápasy'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nad datem'), findsOneWidget);
+      expect(find.text('Dole pod zápasy'), findsOneWidget);
+      await tester.tap(find.text('Dole pod zápasy').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_duty_band_position': 'bottom'});
+
+      await tester.tap(find.text('Dole pod zápasy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Nad datem').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_duty_band_position': 'top'});
+    });
+
+    testWidgets('the admin\'s place for the band shows chosen', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskDutyBoard: true,
+          kioskDutyBandPosition: KioskDutyBandPosition.top,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(DropdownButtonFormField<KioskDutyBandPosition>),
+          matching: find.text('Nad datem'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('with the card in the drawer its share shows: 30 % by '

@@ -635,6 +635,25 @@ class AdminTenant {
 /// all, in the drawer, one title at a time in the status bar, or both.
 enum KioskNoticesMode { off, drawer, header, both }
 
+/// Where the canteen duty's band runs in the kiosk board's day headers
+/// (0073, `kiosk_duty_band_position`): above the day label ([top]),
+/// between the label and the day's matches ([middle]) or along the
+/// headers' bottom edge under the matches ([bottom]). The names are the
+/// column's values — do not rename one.
+enum KioskDutyBandPosition {
+  top,
+  middle,
+  bottom;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [middle], the column's default.
+  static KioskDutyBandPosition parse(String? value) => switch (value) {
+        'top' => KioskDutyBandPosition.top,
+        'bottom' => KioskDutyBandPosition.bottom,
+        _ => KioskDutyBandPosition.middle,
+      };
+}
+
 /// How a match is drawn — the kiosk's live match (0064,
 /// `kiosk_live_layout`) and the app's match detail (a device preference per
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
@@ -736,6 +755,7 @@ class ScheduleSettings {
     this.kioskDutyBoard = false,
     this.kioskDutyDrawer = false,
     this.kioskDutyShare = 30,
+    this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -833,6 +853,9 @@ class ScheduleSettings {
   /// Percent of the drawer's height the duty card takes (0073); the
   /// notices and the matches share the rest as before.
   final int kioskDutyShare;
+
+  /// Where the band of [kioskDutyBoard] runs in the day headers (0073).
+  final KioskDutyBandPosition kioskDutyBandPosition;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -977,6 +1000,9 @@ class ScheduleSettings {
         kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,
         kioskDutyDrawer: json['kiosk_duty_drawer'] as bool? ?? false,
         kioskDutyShare: json['kiosk_duty_share'] as int? ?? 30,
+        kioskDutyBandPosition: KioskDutyBandPosition.parse(
+          json['kiosk_duty_band_position'] as String?,
+        ),
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

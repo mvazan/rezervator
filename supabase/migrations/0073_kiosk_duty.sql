@@ -3,8 +3,11 @@
 -- Služby (0050). Three places, each switched on by itself, all off by
 -- default: kiosk_duty_header — „Služba: …“ under the clock in the status
 -- bar, a tap shows the plan; kiosk_duty_board — a band across a duty's
--- days in the board's day headers; kiosk_duty_drawer — a card in the side
--- drawer that takes kiosk_duty_share % of its height (the notices and the
+-- days in the board's day headers, kiosk_duty_band_position saying where
+-- in them: above the day label ('top'), between the label and the day's
+-- matches ('middle', the default) or along the headers' bottom edge under
+-- the matches ('bottom'); kiosk_duty_drawer — a card in the side drawer
+-- that takes kiosk_duty_share % of its height (the notices and the
 -- matches share the rest). The kiosk already reads the roster (0050: the
 -- approved players and the kiosk) and applies all of it itself from the
 -- settings row it already reads.
@@ -17,7 +20,11 @@ alter table schedule_settings
   add column if not exists kiosk_duty_drawer boolean not null default false,
   add column if not exists kiosk_duty_share smallint not null default 30
     constraint schedule_settings_kiosk_duty_share_check
-    check (kiosk_duty_share between 10 and 90);
+    check (kiosk_duty_share between 10 and 90),
+  add column if not exists kiosk_duty_band_position text not null
+    default 'middle'
+    constraint schedule_settings_kiosk_duty_band_position_check
+    check (kiosk_duty_band_position in ('top', 'middle', 'bottom'));
 
 -- The public overview (0043) keeps handing out only what it always did,
 -- now as an allow-list of its six settings: no kiosk option — these, nor
