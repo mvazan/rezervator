@@ -5701,7 +5701,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_nameday" boolean DEFAULT false NOT NULL,
     "kiosk_warning" "text",
     "kiosk_band_font_size" smallint DEFAULT 10 NOT NULL,
-    "kiosk_picker_note" "text" DEFAULT 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby v kantýně nebo u správce kuželny.'::"text",
+    "kiosk_picker_note" "text" DEFAULT 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby na kantýně nebo u správce kuželny.'::"text",
     "kiosk_todays_matches" boolean DEFAULT true NOT NULL,
     "kiosk_stream_enabled" boolean DEFAULT true NOT NULL,
     "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,

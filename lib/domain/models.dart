@@ -940,7 +940,7 @@ class ScheduleSettings {
   /// offers it back.
   static const defaultPickerNote =
       'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci '
-      'Rezervátor, na webu rezervator.online, u služby v kantýně nebo u '
+      'Rezervátor, na webu rezervator.online, u služby na kantýně nebo u '
       'správce kuželny.';
 
   factory ScheduleSettings.fromJson(Map<String, dynamic> json) =>
