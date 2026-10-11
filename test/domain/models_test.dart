@@ -104,6 +104,47 @@ void main() {
       expect(ScheduleSettings.defaults.kioskDutyDrawer, isFalse);
       expect(ScheduleSettings.defaults.kioskDutyShare, 30);
     });
+
+    test('fromJson reads where the duty band runs (0073); between the date '
+        'and the matches when absent or unknown', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      for (final (name, position) in [
+        ('top', KioskDutyBandPosition.top),
+        ('middle', KioskDutyBandPosition.middle),
+        ('bottom', KioskDutyBandPosition.bottom),
+      ]) {
+        expect(
+          ScheduleSettings.fromJson({
+            ...base,
+            'kiosk_duty_band_position': name,
+          }).kioskDutyBandPosition,
+          position,
+        );
+        // The name is the column's value.
+        expect(position.name, name);
+      }
+      expect(
+        ScheduleSettings.fromJson(base).kioskDutyBandPosition,
+        KioskDutyBandPosition.middle,
+      );
+      expect(
+        ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_duty_band_position': 'left',
+        }).kioskDutyBandPosition,
+        KioskDutyBandPosition.middle,
+      );
+      expect(
+        ScheduleSettings.defaults.kioskDutyBandPosition,
+        KioskDutyBandPosition.middle,
+      );
+      expect(KioskDutyBandPosition.parse(null), KioskDutyBandPosition.middle);
+    });
   });
 
   group('canteen duty (0050)', () {
