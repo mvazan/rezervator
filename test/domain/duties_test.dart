@@ -971,6 +971,40 @@ void main() {
       expect(entry.who, 'Jan Novák a Petr Svoboda');
     });
 
+    test('the board\'s band says who serves and when — „má“ for one, '
+        '„mají“ for more', () {
+      expect(
+        KioskDutyEntry(now, const ['Jan Novák', 'Petr Svoboda']).bandLabel,
+        'Jan Novák a Petr Svoboda mají službu (5.–11. 10.)',
+      );
+      expect(
+        KioskDutyEntry(next1, const ['Adam Beneš']).bandLabel,
+        startsWith('Adam Beneš má službu ('),
+      );
+    });
+
+    test('a duty\'s short dates: the month once, both across a month, the '
+        'day alone', () {
+      DutyPeriod period(Day from, Day to) =>
+          DutyPeriod(id: 'p', startsOn: from, endsOn: to);
+      expect(
+        dutyShortRange(period(Day(2026, 10, 12), Day(2026, 10, 18))),
+        '12.–18. 10.',
+      );
+      expect(
+        dutyShortRange(period(Day(2026, 9, 28), Day(2026, 10, 4))),
+        '28. 9.–4. 10.',
+      );
+      expect(
+        dutyShortRange(period(Day(2026, 12, 28), Day(2027, 1, 3))),
+        '28. 12.–3. 1.',
+      );
+      expect(
+        dutyShortRange(period(Day(2026, 10, 12), Day(2026, 10, 12))),
+        '12. 10.',
+      );
+    });
+
     test('a period ending today still runs; one starting tomorrow is next',
         () {
       final plan = kioskDutyPlan(
