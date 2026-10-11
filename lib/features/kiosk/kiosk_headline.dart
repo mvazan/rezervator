@@ -1,9 +1,9 @@
 /// The notices in the kiosk's status bar, between the clock and
 /// „Rezervovat“: the title of one notice, large enough to read from across
 /// the room, and every few seconds (the admin's notice rotation) a soft
-/// cross-fade to the next. Nothing moves in between — a running news strip
-/// pulled the eye all the time. A tap opens the notice in full; its text is
-/// also in the drawer.
+/// cross-fade to the next, right where it stays. Nothing moves in between —
+/// a running news strip pulled the eye all the time. A tap opens the notice
+/// in full; its text is also in the drawer.
 library;
 
 import 'dart:async';
@@ -68,43 +68,52 @@ class _KioskHeadlineState extends State<KioskHeadline> {
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.campaign_outlined, size: 26, color: scheme.primary),
-            const SizedBox(width: 10),
-            // Loose: the counter sits right after the title, not at the far
-            // end of the bar.
-            Flexible(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 600),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                layoutBuilder: (current, previous) => Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [...previous, ?current],
-                ),
-                child: Text(
-                  (m.title ?? '').trim().isEmpty ? m.body : m.title!,
-                  key: ValueKey(m.id),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurface,
+        // The whole line fades — icon, title and counter — each centred on
+        // its own across the full width: the last one fades out where it
+        // was, the next one in where it stays. Nothing jumps after the fade.
+        child: SizedBox(
+          width: double.infinity,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 600),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            layoutBuilder: (current, previous) => Stack(
+              alignment: Alignment.center,
+              children: [...previous, ?current],
+            ),
+            child: Row(
+              key: ValueKey(m.id),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.campaign_outlined, size: 26, color: scheme.primary),
+                const SizedBox(width: 10),
+                // Loose: the counter sits right after the title, not at the
+                // far end of the bar; a long title ends in an ellipsis.
+                Flexible(
+                  child: Text(
+                    (m.title ?? '').trim().isEmpty ? m.body : m.title!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
                   ),
                 ),
-              ),
+                if (notices.length > 1) ...[
+                  const SizedBox(width: 12),
+                  Text(
+                    '${_index % notices.length + 1}/${notices.length}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
             ),
-            if (notices.length > 1) ...[
-              const SizedBox(width: 12),
-              Text(
-                '${_index % notices.length + 1}/${notices.length}',
-                style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );

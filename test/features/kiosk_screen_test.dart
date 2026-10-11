@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rezervator/data/open_meteo.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/kiosk_screen.dart';
@@ -17,6 +19,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// PATCHes `schedule_settings.kiosk_dark` — asserted here by inspecting the
 /// stubbed HTTP request rather than hitting a real backend.
 void main() {
+  /// [text] inside the admin tile titled [title] — the warning and the
+  /// booking note each have their own „Přidat…“ and „Upravit…“.
+  Finder inTile(String title, String text) => find.descendant(
+    of: find.widgetWithText(ListTile, title),
+    matching: find.text(text),
+  );
+
   const admin = Profile(
     id: 'admin1',
     displayName: 'Správce',
@@ -59,7 +68,7 @@ void main() {
   // The page is long (the panel options sit above the address): a tall
   // window keeps every section built.
   void tall(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 4200);
+    tester.view.physicalSize = const Size(800, 5600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
   }
@@ -69,6 +78,8 @@ void main() {
     Future<String> Function(String)? resetPassword,
     ScheduleSettings? settings,
     bool? panelEnabled,
+    Venue? alleyVenue,
+    http.Client? openMeteo,
   }) {
     final shown = settings ??
         (panelEnabled == null
@@ -86,6 +97,14 @@ void main() {
         settingsProvider.overrideWith((ref) => Stream.value(shown)),
         clubsProvider.overrideWith((ref) => Stream.value(const [])),
         profilesProvider.overrideWith((ref) => Stream.value(roster)),
+        if (alleyVenue != null) ...[
+          federationSyncProvider.overrideWith(
+            (ref) => Stream.value(FederationSync(venueSlug: alleyVenue.slug)),
+          ),
+          venuesProvider.overrideWith((ref) => Stream.value([alleyVenue])),
+        ],
+        if (openMeteo != null)
+          openMeteoClientProvider.overrideWithValue(openMeteo),
       ],
       child: MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -282,6 +301,333 @@ void main() {
     expect(find.text('Vrátit mezi hráče'), findsNothing);
   });
 
+  group('status line', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    final sokol = Venue(
+      id: 'v1',
+      slug: 'tj-sokol-brno-iv',
+      name: 'TJ Sokol Brno IV',
+      address: 'Štolcova 551/8, 61800 Brno',
+      lat: 49.1891783,
+      lng: 16.6354503,
+      fetchedAt: DateTime(2026, 9, 1),
+    );
+    const weatherOn = ScheduleSettings(
+      laneCount: 4,
+      trainingWeekdays: {1, 2, 4},
+      bookingHorizonDays: 14,
+      maxActiveReservations: 3,
+      kioskWeather: true,
+    );
+
+    testWidgets('switching the weather on takes the alley\'s venue as its '
+        'place when none was picked', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(alleyVenue: sokol));
+      await tester.pumpAndSettle();
+      expect(find.text('Místo pro počasí'), findsNothing);
+
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Počasí'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_weather': true,
+        'kiosk_weather_place': 'TJ Sokol Brno IV, Štolcova 551/8, 61800 Brno',
+        'kiosk_weather_lat': 49.1891783,
+        'kiosk_weather_lon': 16.6354503,
+      });
+    });
+
+    testWidgets('switching the weather on again keeps the place the admin '
+        'picked — the venue does not overwrite it', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          alleyVenue: sokol,
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1, 2, 4},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskWeatherPlace: 'Brno, Jihomoravský',
+            kioskWeatherLat: 49.19522,
+            kioskWeatherLon: 16.60796,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Počasí'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_weather': true});
+    });
+
+    testWidgets('without a known venue the switch only turns it on; the row '
+        'says the place is missing', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Počasí'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_weather': true});
+    });
+
+    // A fresh tree: a second pumpWidget never swaps the overrides.
+    testWidgets('a place found by name: the results Czech-sorted, the pick '
+        'PATCHes the three columns', (tester) async {
+      tall(tester);
+      Uri? asked;
+      final openMeteo = MockClient((req) async {
+        asked = req.url;
+        return http.Response.bytes(
+          utf8.encode(jsonEncode({
+            // Czech order differs from code units twice here: „Ch“ comes
+            // after „H“, „Č“ before „D“.
+            'results': [
+              {
+                'name': 'Chrlice',
+                'latitude': 49.13,
+                'longitude': 16.65,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Dubňany',
+                'latitude': 48.92,
+                'longitude': 17.09,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Brno',
+                'latitude': 49.19522,
+                'longitude': 16.60796,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Hodonín',
+                'latitude': 48.85,
+                'longitude': 17.13,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Čejč',
+                'latitude': 48.95,
+                'longitude': 16.96,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+            ],
+          })),
+          200,
+        );
+      });
+      await tester.pumpWidget(
+        app(settings: weatherOn, alleyVenue: sokol, openMeteo: openMeteo),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Není vybrané — kiosk počasí neukáže.'),
+        findsOneWidget,
+      );
+
+      await tester.ensureVisible(find.text('Vybrat…'));
+      await tester.tap(find.text('Vybrat…'));
+      await tester.pumpAndSettle();
+      // The alley's venue is offered first.
+      expect(
+        find.text('TJ Sokol Brno IV, Štolcova 551/8, 61800 Brno'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Hledat obec nebo město'),
+        'Brn',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(asked?.queryParameters['name'], 'Brn');
+      final labels = [
+        for (final t in tester.widgetList<ListTile>(
+          find.descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(ListTile),
+          ),
+        ))
+          ((t.title! as Text).data!),
+      ];
+      expect(labels, [
+        'Brno, Jihomoravský',
+        'Čejč, Jihomoravský',
+        'Dubňany, Jihomoravský',
+        'Hodonín, Jihomoravský',
+        'Chrlice, Jihomoravský',
+      ]);
+
+      await tester.tap(find.text('Brno, Jihomoravský'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_weather_place': 'Brno, Jihomoravský',
+        'kiosk_weather_lat': 49.19522,
+        'kiosk_weather_lon': 16.60796,
+      });
+    });
+
+    testWidgets('one search at a time: Enter again while one runs asks '
+        'nothing more', (tester) async {
+      tall(tester);
+      var asked = 0;
+      final answer = Completer<http.Response>();
+      await tester.pumpWidget(
+        app(
+          settings: weatherOn,
+          openMeteo: MockClient((_) {
+            asked++;
+            return answer.future;
+          }),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Vybrat…'));
+      await tester.tap(find.text('Vybrat…'));
+      await tester.pumpAndSettle();
+      final field = find.widgetWithText(TextField, 'Hledat obec nebo město');
+      await tester.enterText(field, 'Brno');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      // Back into the field (the search took the focus) and Enter again.
+      await tester.tap(field);
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Hledat'));
+      await tester.pump();
+      expect(asked, 1);
+
+      answer.complete(
+        http.Response.bytes(utf8.encode(jsonEncode({'results': []})), 200),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Nic nenalezeno.'), findsOneWidget);
+    });
+
+    testWidgets('a failed search says so and keeps the dialog', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: weatherOn,
+          openMeteo: MockClient((_) async => http.Response('', 503)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Vybrat…'));
+      await tester.tap(find.text('Vybrat…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Hledat obec nebo město'),
+        'Brno',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Hledání se nepovedlo'), findsOneWidget);
+      expect(find.text('Místo pro počasí'), findsWidgets);
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+    });
+
+    testWidgets('the name day switch PATCHes kiosk_nameday', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      final nameday = find.widgetWithText(SwitchListTile, 'Svátek');
+      await tester.ensureVisible(nameday);
+      await tester.tap(nameday);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_nameday': true});
+    });
+  });
+
+  group('warning', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    testWidgets('none yet: „Přidat…“ asks for the text, blank cannot be '
+        'saved, the text is saved trimmed', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Žádné. Varování'), findsOneWidget);
+      // In the screen section, first.
+      expect(
+        tester.getTopLeft(find.text('Upozornění')).dy,
+        greaterThan(tester.getTopLeft(find.text('Obrazovka kiosku')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('Upozornění')).dy,
+        lessThan(tester.getTopLeft(find.text('Tmavý režim')).dy),
+      );
+      expect(find.byTooltip('Odstranit upozornění'), findsNothing);
+
+      await tester.tap(inTile('Upozornění', 'Přidat…'));
+      await tester.pumpAndSettle();
+      final save = find.widgetWithText(FilledButton, 'Uložit');
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Text upozornění'),
+        '   ',
+      );
+      await tester.pump();
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Text upozornění'),
+        '  Dráha 3 je mimo provoz. ',
+      );
+      await tester.pump();
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_warning': 'Dráha 3 je mimo provoz.'});
+    });
+
+    testWidgets('a warning set: shown, „Upravit…“ starts from it, the bin '
+        'removes it', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1, 2, 4},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskWarning: 'Dráha 3 je mimo provoz.',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+
+      await tester.tap(inTile('Upozornění', 'Upravit…'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(
+              find.widgetWithText(TextField, 'Text upozornění'),
+            )
+            .controller!
+            .text,
+        'Dráha 3 je mimo provoz.',
+      );
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+
+      await tester.tap(find.byTooltip('Odstranit upozornění'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_warning': null});
+    });
+  });
+
   testWidgets('the panel options PATCH their own columns', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
@@ -319,7 +665,7 @@ void main() {
         ) as Map<String, dynamic>;
 
     final breathing =
-        find.widgetWithText(SwitchListTile, 'Dýchající tlačítko panelu');
+        find.widgetWithText(SwitchListTile, 'Opakující se animace');
     await tester.ensureVisible(breathing);
     await tester.tap(breathing);
     await tester.pumpAndSettle();
@@ -333,6 +679,144 @@ void main() {
     expect(lastPatch(), {'kiosk_low_res': true});
   });
 
+  testWidgets('the stream options: the switch PATCHes kiosk_stream, the '
+      'corner, the width and the windows at once PATCH their own columns — '
+      'all of them shown with the switch off too, a visitor opens streams '
+      'regardless', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    final stream = find.widgetWithText(
+      SwitchListTile,
+      'Živý přenos se otevře sám',
+    );
+    await tester.ensureVisible(stream);
+    await tester.tap(stream);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream': true});
+
+    await tester.ensureVisible(find.text('Kde se okno objeví'));
+    await tester.tap(find.text('Vlevo dole'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Vpravo nahoře').last);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream_corner': 'tr'});
+
+    final width = find.widgetWithText(TextField, 'Šířka okna');
+    await tester.ensureVisible(width);
+    await tester.enterText(width, '50');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream_width': 50});
+
+    final windows = find.widgetWithText(TextField, 'Oken najednou');
+    await tester.ensureVisible(windows);
+    await tester.enterText(windows, '3');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream_max': 3});
+  });
+
+  testWidgets('today\'s matches in the header: on by default, in the '
+      'Stavový řádek section; the switch PATCHes its own column', (
+    tester,
+  ) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    final todays =
+        find.widgetWithText(SwitchListTile, 'Dnešní zápasy v záhlaví');
+    expect(tester.widget<SwitchListTile>(todays).value, isTrue);
+    expect(
+      tester.getTopLeft(todays).dy,
+      greaterThan(tester.getTopLeft(find.text('Stavový řádek')).dy),
+    );
+    expect(
+      tester.getTopLeft(todays).dy,
+      lessThan(tester.getTopLeft(find.text('Nástěnka')).dy),
+    );
+
+    await tester.ensureVisible(todays);
+    await tester.tap(todays);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_todays_matches': false});
+  });
+
+  testWidgets('the streams\' master switch comes first in its section and '
+      'PATCHes kiosk_stream_enabled', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    final master = find.widgetWithText(SwitchListTile, 'Stream na kiosku');
+    await tester.ensureVisible(master);
+    expect(
+      find.text('Vypnuto = u zápasů žádné ▶ a žádné okno se streamem.'),
+      findsOneWidget,
+    );
+    // Above the section's other options.
+    expect(
+      tester.getTopLeft(master).dy,
+      lessThan(
+        tester
+            .getTopLeft(
+              find.widgetWithText(
+                SwitchListTile,
+                'Živý přenos se otevře sám',
+              ),
+            )
+            .dy,
+      ),
+    );
+    await tester.tap(master);
+    await tester.pumpAndSettle();
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_stream_enabled': false});
+  });
+
+  testWidgets('with the streams off the section has only its master switch',
+      (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app(
+      settings: const ScheduleSettings(
+        laneCount: 4,
+        trainingWeekdays: {1, 2, 4},
+        bookingHorizonDays: 14,
+        maxActiveReservations: 3,
+        kioskStreamEnabled: false,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Stream zápasu'), findsOneWidget);
+    expect(
+      find.widgetWithText(SwitchListTile, 'Stream na kiosku'),
+      findsOneWidget,
+    );
+    expect(
+      find.widgetWithText(SwitchListTile, 'Živý přenos se otevře sám'),
+      findsNothing,
+    );
+    expect(find.text('Kde se okno objeví'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Šířka okna'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Oken najednou'), findsNothing);
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Stream na kiosku'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_stream_enabled': true});
+  });
+
   /// Types [text] into the number field [label] and presses Enter.
   Future<void> enter(WidgetTester tester, String label, String text) async {
     final field = find.widgetWithText(TextField, label);
@@ -341,6 +825,171 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
   }
+
+  group('canteen duty (0073)', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    testWidgets('three places, each its own switch, all off by default: '
+        'each PATCHes its own column', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Služby na kantýně'), findsOneWidget);
+      expect(
+        find.textContaining('Správě → Služby. Každé místo se zapíná zvlášť.'),
+        findsOneWidget,
+      );
+      for (final (title, column) in [
+        ('V záhlaví', 'kiosk_duty_header'),
+        ('V kalendáři', 'kiosk_duty_board'),
+        ('V panelu', 'kiosk_duty_drawer'),
+      ]) {
+        final tile = find.widgetWithText(SwitchListTile, title);
+        await tester.ensureVisible(tile);
+        expect(tester.widget<SwitchListTile>(tile).value, isFalse,
+            reason: title);
+        await tester.tap(tile);
+        await tester.pumpAndSettle();
+        expect(lastPatch(), {column: true}, reason: title);
+      }
+      // What each place is.
+      expect(find.text('Pod hodinami „Služba: …“ s dnešní službou; ťuk '
+          'ukáže plán.'), findsOneWidget);
+      expect(find.text('Pás se jmény přes dny služby v hlavičkách dnů '
+          'tabule.'), findsOneWidget);
+      expect(find.text('Karta se službou a plánem v postranním panelu.'),
+          findsOneWidget);
+      // Without the card there is no share of the drawer to set, without
+      // the band no place for it.
+      expect(find.widgetWithText(TextField, 'Podíl karty v panelu'),
+          findsNothing);
+      expect(find.text('Kde je pás'), findsNothing);
+    });
+
+    testWidgets('with the band in the calendar, where it runs is picked from '
+        'a list right under its switch: between the date and the matches by '
+        'default; PATCHes kiosk_duty_band_position', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskDutyBoard: true,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final field = find.byType(DropdownButtonFormField<KioskDutyBandPosition>);
+      expect(field, findsOneWidget);
+      expect(
+        find.descendant(of: field, matching: find.text('Kde je pás')),
+        findsOneWidget,
+      );
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(
+        top(field),
+        greaterThan(top(find.widgetWithText(SwitchListTile, 'V kalendáři'))),
+      );
+      expect(
+        top(field),
+        lessThan(top(find.widgetWithText(SwitchListTile, 'V panelu'))),
+      );
+
+      await tester.ensureVisible(field);
+      await tester.tap(find.text('Mezi datem a zápasy'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nad datem'), findsOneWidget);
+      expect(find.text('Dole pod zápasy'), findsOneWidget);
+      await tester.tap(find.text('Dole pod zápasy').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_duty_band_position': 'bottom'});
+
+      await tester.tap(find.text('Dole pod zápasy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Nad datem').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_duty_band_position': 'top'});
+    });
+
+    testWidgets('the admin\'s place for the band shows chosen', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskDutyBoard: true,
+          kioskDutyBandPosition: KioskDutyBandPosition.top,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(DropdownButtonFormField<KioskDutyBandPosition>),
+          matching: find.text('Nad datem'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('with the card in the drawer its share shows: 30 % by '
+        'default, 10–90, PATCHes kiosk_duty_share', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskDutyDrawer: true,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'V panelu'),
+        ).value,
+        isTrue,
+      );
+      final share = find.widgetWithText(TextField, 'Podíl karty v panelu');
+      expect(tester.widget<TextField>(share).controller!.text, '30');
+      expect(find.text('Kolik výšky panelu karta zabere; zbytek si dělí '
+          'nástěnka a zápasy.'), findsOneWidget);
+      // Right under its switch, still in the duty's section.
+      expect(
+        tester.getTopLeft(share).dy,
+        greaterThan(
+            tester.getTopLeft(find.widgetWithText(SwitchListTile, 'V panelu'))
+                .dy),
+      );
+      expect(
+        tester.getTopLeft(share).dy,
+        lessThan(tester.getTopLeft(find.text('Postranní panel')).dy),
+      );
+
+      await enter(tester, 'Podíl karty v panelu', '95');
+      expect(find.text('Zadej číslo od 10 do 90.'), findsOneWidget);
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+      await enter(tester, 'Podíl karty v panelu', '50');
+      expect(lastPatch(), {'kiosk_duty_share': 50});
+
+      await tester.tap(find.widgetWithText(SwitchListTile, 'V panelu'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_duty_drawer': false});
+    });
+  });
 
   testWidgets('the numbers are typed in: each PATCHes its own column on '
       'Enter', (tester) async {
@@ -422,6 +1071,128 @@ void main() {
     expect(find.widgetWithText(TextField, 'Velikost zápisu'), findsOneWidget);
   });
 
+  testWidgets('the bands\' font size: 8–24 px, the app\'s 10 by default, '
+      'PATCHes its own column', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    final field = find.widgetWithText(TextField, 'Písmo zápasů a pronájmů');
+    await tester.ensureVisible(field);
+    expect(tester.widget<TextField>(field).controller!.text, '10');
+    await tester.enterText(field, '16');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(
+      jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+      {'kiosk_band_font_size': 16},
+    );
+  });
+
+  group('the note when booking (0070)', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    Finder field() => find.widgetWithText(TextField, 'Text upozornění');
+    String fieldText(WidgetTester tester) =>
+        tester.widget<TextField>(field()).controller!.text;
+
+    testWidgets('none: first in the screen block, „Přidat…“ starts from the '
+        'default text, blank cannot be saved, „Výchozí text“ puts it back', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Žádné. Upozornění pod písmeny při výběru jména na kiosku.'),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('Odstranit upozornění při rezervaci'), findsNothing);
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(
+        top(find.text('Upozornění při rezervaci')),
+        greaterThan(top(find.text('Obrazovka kiosku'))),
+      );
+      expect(
+        top(find.text('Upozornění při rezervaci')),
+        lessThan(top(find.text('Tmavý režim'))),
+      );
+
+      await tester.tap(inTile('Upozornění při rezervaci', 'Přidat…'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Upozornění při rezervaci'),
+        ),
+        findsOneWidget,
+      );
+      expect(fieldText(tester), ScheduleSettings.defaultPickerNote);
+      final restore = find.ancestor(
+        of: find.text('Výchozí text'),
+        matching: find.bySubtype<TextButton>(),
+      );
+      final save = find.widgetWithText(FilledButton, 'Uložit');
+      // Already the default: nothing to put back.
+      expect(tester.widget<TextButton>(restore).onPressed, isNull);
+      expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+
+      await tester.enterText(field(), '   ');
+      await tester.pump();
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+      await tester.tap(restore);
+      await tester.pump();
+      expect(fieldText(tester), ScheduleSettings.defaultPickerNote);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_picker_note': ScheduleSettings.defaultPickerNote,
+      });
+    });
+
+    testWidgets('a note set: shown, „Upravit…“ starts from it and saves it '
+        'trimmed, „Zrušit“ writes nothing, the bin removes it', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1, 2, 4},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskPickerNote: 'Zrušit jde jen v aplikaci.',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit jde jen v aplikaci.'), findsOneWidget);
+
+      await tester.tap(inTile('Upozornění při rezervaci', 'Upravit…'));
+      await tester.pumpAndSettle();
+      expect(fieldText(tester), 'Zrušit jde jen v aplikaci.');
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+
+      await tester.tap(inTile('Upozornění při rezervaci', 'Upravit…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), '  Zrušit jde v aplikaci i na webu. ');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_picker_note': 'Zrušit jde v aplikaci i na webu.',
+      });
+
+      await tester.tap(find.byTooltip('Odstranit upozornění při rezervaci'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_picker_note': null});
+    });
+  });
+
   testWidgets('the days on the screen: 2–14, a week by default', (
     tester,
   ) async {
@@ -490,15 +1261,17 @@ void main() {
         {'kiosk_drawer_columns': 3});
   });
 
-  testWidgets('the options come in sections: screen, notices, panel, live '
-      'match, then the address and the accounts', (tester) async {
+  testWidgets('the options come in sections: screen, notices, canteen duty, '
+      'panel, live match, then the address and the accounts', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     double top(String text) => tester.getTopLeft(find.text(text)).dy;
     final order = [
       top('Obrazovka kiosku'),
+      top('Stavový řádek'),
       top('Nástěnka'),
+      top('Služby na kantýně'),
       top('Postranní panel'),
       top('Hraný zápas'),
       top('Adresa pro tablet'),
@@ -549,11 +1322,16 @@ void main() {
       'Výchozně rozbalený',
       'Zápasy v panelu',
       'Hraný zápas přes celý panel',
+      // The duty's card has no drawer to go to; header and board stay.
+      'V panelu',
     ]) {
       expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
     }
     expect(find.text('Šířka panelu'), findsNothing);
+    expect(find.text('Podíl karty v panelu'), findsNothing);
     expect(find.text('Hraný zápas'), findsNothing);
+    expect(find.widgetWithText(SwitchListTile, 'V záhlaví'), findsOneWidget);
+    expect(find.widgetWithText(SwitchListTile, 'V kalendáři'), findsOneWidget);
     // The notices can still go to the status bar without the panel.
     expect(find.text('Kde se oznamy zobrazí'), findsOneWidget);
 

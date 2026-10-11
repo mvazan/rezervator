@@ -6,6 +6,7 @@ library;
 import 'messages.dart' show splitNotices;
 import 'models.dart';
 import 'results.dart' show isLive;
+import 'youtube.dart' show youtubeVideoId;
 
 /// The notices on the wall right now: kind notice, not expired, not hidden
 /// from the kiosk by the admin, oldest posted first (the Nástěnka order).
@@ -129,4 +130,111 @@ List<PrioritySlot> kioskLiveMatches({
       final byDay = a.date.compareTo(b.date);
       return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
     });
+}
+
+/// How long a decided match streams on after the server first saw it
+/// decided (0066, `decided_at`; the last read when a row predates it): the
+/// closing minutes of a stream run after the site stamps the result.
+const streamGrace = Duration(minutes: 30);
+
+/// How far past the planned end a decided match may stream at all: an
+/// overrun keeps its stream, a result re-read the next night does not
+/// reopen the window.
+const streamOverrun = Duration(hours: 2);
+
+/// The matches whose stream the kiosk's window shows (0066): the alley's
+/// own federation matches with a YouTube video that are on air — [isLive]
+/// (from an hour before the start until the site stamps the result, at
+/// most twelve hours), or decided and still within [streamGrace] of the
+/// moment the server first saw it decided (`decided_at`; a forced re-read
+/// in the app does not reopen the window), from an hour before the start
+/// (a forfeit the site stores days ahead opens nothing) to at most
+/// [streamOverrun] past the planned end. Not gated on the players' data
+/// like [kioskLiveMatches]: a stream starts before the first throw.
+/// Chronological.
+List<PrioritySlot> kioskStreamMatches({
+  required List<PrioritySlot> slots,
+  required Map<String, MatchResult> results,
+  required DateTime now,
+}) {
+  bool onAir(PrioritySlot s) {
+    final r = results[s.id];
+    if (isLive(s, r, now)) return true;
+    if (r == null || !_decided(r) || !s.timeKnown) return false;
+    final start = DateTime(
+      s.date.year,
+      s.date.month,
+      s.date.day,
+      s.startsAt.hour,
+      s.startsAt.minute,
+    );
+    final end = DateTime(
+      s.date.year,
+      s.date.month,
+      s.date.day,
+      s.endsAt.hour,
+      s.endsAt.minute,
+    );
+    final until = (r.decidedAt ?? r.fetchedAt).add(streamGrace);
+    final latest = end.add(streamOverrun);
+    return !now.isBefore(start.subtract(const Duration(hours: 1))) &&
+        now.isBefore(until.isBefore(latest) ? until : latest);
+  }
+
+  return [
+    for (final s in slots)
+      if (s.type.isMatch &&
+          s.parentId == null &&
+          s.fromFederation &&
+          hasKioskVideo(s) &&
+          onAir(s))
+        s,
+  ]..sort((a, b) {
+      final byDay = a.date.compareTo(b.date);
+      return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
+    });
+}
+
+/// Whether the kiosk can play [slot]'s video: a YouTube one.
+bool hasKioskVideo(PrioritySlot slot) =>
+    youtubeVideoId(slot.videoUrl ?? '') != null;
+
+/// What the kiosk's ▶ at [slot] says: live while it is being played (from
+/// an hour before the start, as [isLive]), a recording once decided, the
+/// video otherwise — a stream announced ahead.
+String kioskStreamLabel(PrioritySlot slot, MatchResult? result, DateTime now) =>
+    isLive(slot, result, now)
+    ? 'Sledovat živě'
+    : _decided(result)
+    ? 'Přehrát záznam'
+    : 'Pustit video';
+
+/// The streams the kiosk shows (0066, 0072): [live] — the matches on air
+/// the window opens by itself ([kioskStreamMatches], when the admin lets
+/// it) — less the [closed] ones, then those a visitor [opened], in the
+/// order they did; a stream opened by hand that is also live counts once,
+/// as opened. Slots gone or without a video drop out. One window ([max]
+/// 1) turns through them all; with more, each stream has its own and
+/// there are never more than [max]: what visitors opened comes first (the
+/// latest [max] of it), the live ones take the windows left.
+List<PrioritySlot> kioskVisibleStreams({
+  required List<PrioritySlot> slots,
+  required List<PrioritySlot> live,
+  required List<String> opened,
+  required Set<String> closed,
+  required int max,
+}) {
+  final byId = {for (final s in slots) s.id: s};
+  final manual = [
+    for (final id in opened) ?byId[id],
+  ].where(hasKioskVideo).toList();
+  final auto = [
+    for (final s in live)
+      if (!closed.contains(s.id) && !opened.contains(s.id)) s,
+  ];
+  if (max <= 1) return [...auto, ...manual];
+  final kept = manual.length > max
+      ? manual.sublist(manual.length - max)
+      : manual;
+  return [...auto.take(max - kept.length), ...kept];
 }

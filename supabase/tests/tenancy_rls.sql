@@ -4152,6 +4152,9 @@ begin
      or mr.discipline <> 'T120' then
     raise exception 'FAIL: match_results row wrong: %', to_jsonb(mr);
   end if;
+  if mr.decided_at is null then
+    raise exception 'FAIL: a finished result was not stamped decided_at (0066)';
+  end if;
   if (select count(*) from match_player_results where match_id = s.id) <> 1
      or (select lanes->0->>'total' from match_player_results where match_id = s.id) <> '135' then
     raise exception 'FAIL: player row not stored';
@@ -4173,11 +4176,15 @@ begin
      or (select count(*) from match_results where match_id = s.id) <> 1 then
     raise exception 'FAIL: a repeated result duplicated rows';
   end if;
+  -- A re-read moves fetched_at, never decided_at (0066).
+  if (select decided_at from match_results where match_id = s.id) <> mr.decided_at then
+    raise exception 'FAIL: a re-read of a finished result moved decided_at (0066)';
+  end if;
   if apply_federation_result(v_a, 999, v_res) then
     raise exception 'FAIL: apply_federation_result should answer false for a match with no slot';
   end if;
   perform set_config('import.run', '', true);
-  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045); a substitution rides on the starter''s row (0053)';
+  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045); a substitution rides on the starter''s row (0053); decided_at is stamped once (0066)';
 end $$;
 
 -- 7. RLS: own alley reads, the other alley sees nothing, nobody writes.
@@ -10562,10 +10569,251 @@ begin
 end $$;
 
 -- Running 0051 again put back its two read-rule functions: bring back the
--- kiosk's notices (0064), which later checks rely on — and 0065's
--- public_week, which 0064's version would otherwise have replaced.
+-- kiosk's notices (0064), which later checks rely on — and 0073's
+-- public_week, which 0064's and 0065's versions would otherwise have
+-- replaced.
 \ir ../migrations/0064_kiosk_panel.sql
 \ir ../migrations/0065_kiosk_performance.sql
+\ir ../migrations/0066_kiosk_stream.sql
+\ir ../migrations/0067_kiosk_weather_nameday.sql
+
+-- 0067: the weather's place comes whole — both coordinates or neither, on
+-- Earth — and none of the status line's settings reach the public overview.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_weather_lat = 49.19 where tenant_id = v_a;
+    raise exception 'FAIL: a latitude without a longitude was accepted (0067)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings
+       set kiosk_weather_lat = 91, kiosk_weather_lon = 16 where tenant_id = v_a;
+    raise exception 'FAIL: a latitude past the pole was accepted (0067)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings
+     set kiosk_weather = true, kiosk_nameday = true,
+         kiosk_weather_place = 'Brno, Jihomoravský',
+         kiosk_weather_lat = 49.19522, kiosk_weather_lon = 16.60796
+   where tenant_id = v_a;
+  if exists (select 1 from jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') k
+              where k like 'kiosk\_weather%' or k = 'kiosk_nameday') then
+    raise exception 'FAIL: the public overview hands out the status line settings (0067)';
+  end if;
+  update schedule_settings
+     set kiosk_weather = false, kiosk_nameday = false, kiosk_weather_place = null,
+         kiosk_weather_lat = null, kiosk_weather_lon = null
+   where tenant_id = v_a;
+  raise notice 'OK: the weather''s place comes whole, the status line stays off the public overview (0067)';
+end $$;
+
+\ir ../migrations/0068_kiosk_warning.sql
+
+-- 0068: the kiosk's warning — some text or none, never blank or a page
+-- long — stays off the public overview.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_warning = '   ' where tenant_id = v_a;
+    raise exception 'FAIL: a blank warning was accepted (0068)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_warning = repeat('x', 201)
+     where tenant_id = v_a;
+    raise exception 'FAIL: a warning over 200 characters was accepted (0068)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_warning = 'Dráha 3 je mimo provoz.'
+   where tenant_id = v_a;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_warning' then
+    raise exception 'FAIL: the public overview hands out the kiosk warning (0068)';
+  end if;
+  update schedule_settings set kiosk_warning = null where tenant_id = v_a;
+  raise notice 'OK: the kiosk warning is some text or none and stays off the public overview (0068)';
+end $$;
+
+\ir ../migrations/0069_kiosk_band_font.sql
+
+-- 0069: the kiosk's band text size stays in its range and off the public
+-- overview.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_band_font_size = 30 where tenant_id = v_a;
+    raise exception 'FAIL: a band font size of 30 px was accepted (0069)';
+  exception when check_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_band_font_size' then
+    raise exception 'FAIL: the public overview hands out the band font size (0069)';
+  end if;
+  raise notice 'OK: the band font size keeps to 8–24 px and off the public overview (0069)';
+end $$;
+
+-- 0071: today's matches in the kiosk's status bar — on for a new alley
+-- (its settings row comes from seed_tenant_defaults), and on or off the
+-- public overview still hands out its six settings, nothing more. Run
+-- again first: the migration is re-runnable.
+\ir ../migrations/0071_kiosk_todays_matches.sql
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_new constant uuid := '00000000-0000-0000-0000-000000000071';
+  v_keys text[];
+begin
+  insert into tenants (id, name) values (v_new, 'Kuželna (0071)');
+  if (select kiosk_todays_matches from schedule_settings
+       where tenant_id = v_new) is distinct from true then
+    raise exception 'FAIL: a new alley''s kiosk does not show today''s matches (0071)';
+  end if;
+  update schedule_settings set kiosk_todays_matches = false
+   where tenant_id = v_a;
+  v_keys := array(select jsonb_object_keys(
+                           public_week('kuzelna-a', current_date)->'settings')
+                  order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations',
+                      'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — kiosk_todays_matches may be reaching anon (0071): %', v_keys;
+  end if;
+  update schedule_settings set kiosk_todays_matches = true
+   where tenant_id = v_a;
+  raise notice 'OK: today''s matches are on for a new alley and stay off the public overview (0071)';
+end $$;
+
+-- 0070: the note above the kiosk picker's first letters. The alleys that
+-- already exist get the default text too — the column is dropped and 0070
+-- run over the suite's alleys again (rolled back with the rest), then once
+-- more to show it re-runs — and so does a new alley.
+alter table schedule_settings drop column kiosk_picker_note;
+\ir ../migrations/0070_kiosk_picker_note.sql
+\ir ../migrations/0070_kiosk_picker_note.sql
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000000070', 'Kuželna N (0070)');
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_n constant uuid := '00000000-0000-0000-0000-000000000070';
+  v_note text;
+  v_keys text[];
+begin
+  select kiosk_picker_note into v_note from schedule_settings where tenant_id = v_n;
+  if v_note is null
+     or v_note not like 'Na kiosku se z tréninku odhlásit nedá. %' then
+    raise exception 'FAIL: a new alley did not get the default picker note (0070): %', v_note;
+  end if;
+  if exists (select 1 from schedule_settings
+              where tenant_id in (v_a, v_b)
+                and kiosk_picker_note is distinct from v_note) then
+    raise exception 'FAIL: an existing alley did not get the default picker note (0070)';
+  end if;
+  begin
+    update schedule_settings set kiosk_picker_note = '   ' where tenant_id = v_a;
+    raise exception 'FAIL: a blank picker note was accepted (0070)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_picker_note = repeat('x', 201)
+     where tenant_id = v_a;
+    raise exception 'FAIL: a picker note over 200 characters was accepted (0070)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_picker_note = 'Zrušit jde jen v aplikaci.'
+   where tenant_id = v_a;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_picker_note' then
+    raise exception 'FAIL: the public overview hands out the picker note (0070)';
+  end if;
+  v_keys := array(select jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations', 'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings are not the six allow-listed ones (0070): %', v_keys;
+  end if;
+  update schedule_settings set kiosk_picker_note = null where tenant_id = v_a;
+  update schedule_settings set kiosk_picker_note = v_note where tenant_id = v_a;
+  raise notice 'OK: every alley starts with the picker note, it is some text or none, and public_week hands out only its six settings (0070)';
+end $$;
+
+\ir ../migrations/0073_kiosk_duty.sql
+
+-- 0073: the canteen duty on the kiosk — all three places off for a new
+-- alley (its settings row comes from seed_tenant_defaults), the band
+-- between the date and the matches, the card's share of the drawer 10–90,
+-- the band at the top, in the middle or at the bottom and nowhere else,
+-- and with all of it on the public overview still hands out its six
+-- settings, nothing more. The file just ran a second time: the migration
+-- is re-runnable.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_new constant uuid := '00000000-0000-0000-0000-000000000073';
+  v_keys text[];
+begin
+  insert into tenants (id, name) values (v_new, 'Kuželna (0073)');
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = v_new
+                    and not kiosk_duty_header and not kiosk_duty_board
+                    and not kiosk_duty_drawer and kiosk_duty_share = 30
+                    and kiosk_duty_band_position = 'middle') then
+    raise exception 'FAIL: a new alley''s kiosk does not start with the duty off, a 30 percent card and the band in the middle (0073)';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'schedule_settings'::regclass
+                    and conname = 'schedule_settings_kiosk_duty_share_check') then
+    raise exception 'FAIL: the duty card''s share has no named check (0073)';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'schedule_settings'::regclass
+                    and conname =
+                      'schedule_settings_kiosk_duty_band_position_check') then
+    raise exception 'FAIL: the duty band''s position has no named check (0073)';
+  end if;
+  begin
+    update schedule_settings set kiosk_duty_band_position = 'left'
+     where tenant_id = v_a;
+    raise exception 'FAIL: a duty band position other than top, middle or bottom was accepted (0073)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_duty_share = 9 where tenant_id = v_a;
+    raise exception 'FAIL: a duty card under 10 percent of the drawer was accepted (0073)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_duty_share = 91 where tenant_id = v_a;
+    raise exception 'FAIL: a duty card over 90 percent of the drawer was accepted (0073)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings
+     set kiosk_duty_header = true, kiosk_duty_board = true,
+         kiosk_duty_drawer = true, kiosk_duty_share = 10,
+         kiosk_duty_band_position = 'top'
+   where tenant_id = v_a;
+  update schedule_settings
+     set kiosk_duty_share = 90, kiosk_duty_band_position = 'bottom'
+   where tenant_id = v_a;
+  v_keys := array(select jsonb_object_keys(
+                           public_week('kuzelna-a', current_date)->'settings')
+                  order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations',
+                      'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s duty options may be reaching anon (0073): %', v_keys;
+  end if;
+  update schedule_settings
+     set kiosk_duty_header = false, kiosk_duty_board = false,
+         kiosk_duty_drawer = false, kiosk_duty_share = 30,
+         kiosk_duty_band_position = 'middle'
+   where tenant_id = v_a;
+  raise notice 'OK: the kiosk''s duty is off for a new alley, its card 10–90 percent, its band top, middle or bottom, and stays off the public overview (0073)';
+end $$;
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
@@ -11706,6 +11954,33 @@ begin
       (select training_weekdays from schedule_settings where tenant_id = v_t);
   end if;
   raise notice 'OK: a new kuželna starts with no training day (0063)';
+end $$;
+
+-- 0072: the streams on by default; one stream window by default; one to
+-- four.
+do $$
+declare
+  v_t uuid;
+begin
+  insert into tenants (name) values ('Nová kuželna 0072') returning id into v_t;
+  if not (select kiosk_stream_enabled from schedule_settings where tenant_id = v_t) then
+    raise exception 'FAIL: a new kuželna starts with the kiosk streams off';
+  end if;
+  if (select kiosk_stream_max from schedule_settings where tenant_id = v_t) <> 1 then
+    raise exception 'FAIL: a new kuželna does not start with one stream window';
+  end if;
+  begin
+    update schedule_settings set kiosk_stream_max = 5 where tenant_id = v_t;
+    raise exception 'FAIL: five stream windows were accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_stream_max = 0 where tenant_id = v_t;
+    raise exception 'FAIL: no stream window was accepted';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_stream_max = 4 where tenant_id = v_t;
+  raise notice 'OK: streams on, one to four stream windows, one by default (0072)';
 end $$;
 
 -- 0064: a notice is hidden from, or shown on, the kiosk by its alley's admin

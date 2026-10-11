@@ -2,28 +2,38 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
-import 'package:rezervator/core/ui.dart' show today;
+import 'package:rezervator/core/ui.dart' show dayFull, dayLabel, today;
+import 'package:rezervator/core/widgets/emoji_text.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/duties.dart'
+    show KioskDutyEntry, dutyRangeLabel;
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
+import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
+import 'package:rezervator/features/kiosk/kiosk_day_info.dart';
 import 'package:rezervator/features/kiosk/kiosk_display.dart';
+import 'package:rezervator/features/kiosk/kiosk_duty.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
+import 'package:rezervator/features/kiosk/kiosk_warning.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
+import '../support/band_label_finders.dart';
 import '../support/emoji_finders.dart';
 
 /// Stands in for the display: records the shell's holds and releases, in
@@ -115,6 +125,7 @@ void main() {
     int? maxActiveReservations,
     KioskDisplay? display,
     bool kioskLowRes = false,
+    String? kioskPickerNote,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -126,6 +137,7 @@ void main() {
       kioskDark: kioskDark,
       kioskFitDay: kioskFitDay,
       kioskLowRes: kioskLowRes,
+      kioskPickerNote: kioskPickerNote,
     );
     return ProviderScope(
       overrides: [
@@ -222,6 +234,255 @@ void main() {
     expect(find.text(anna.displayName), findsNothing);
     expect(find.text(petr.displayName), findsNothing);
 
+    await finish(tester);
+  });
+
+  // A letter of the picker as the tile it paints: SizedBox → Ink (the
+  // decoration) → InkWell, as in name_picker_test.dart.
+  Finder letterTile(String letter) =>
+      find.ancestor(of: find.text(letter), matching: find.byType(Ink));
+
+  testWidgets('b2: above the first letters the picker says which letter to '
+      'pick — not once a letter is picked, nor when it lists names at once', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(kioskApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+
+    final hint = find.text(firstLetterHint);
+    expect(hint, findsOneWidget);
+    // Above the letters.
+    expect(
+      tester.getBottomLeft(hint).dy,
+      lessThan(tester.getTopLeft(find.text('A')).dy),
+    );
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(hint, findsNothing);
+    await finish(tester);
+
+    // Few players: their names straight away, no letters to explain.
+    await tester.pumpWidget(kioskApp(roster: [anna, petr]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(find.text(anna.displayName), findsOneWidget);
+    expect(hint, findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('b3: the admin\'s note (0070) stands under the first letters, '
+      'the hint above them — the default text or the admin\'s own; none, '
+      'nothing; gone once a letter is picked', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: ScheduleSettings.defaultPickerNote),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+
+    final note = find.byType(KioskWarning);
+    final hint = find.text(firstLetterHint);
+    expect(note, findsOneWidget);
+    expect(find.text(ScheduleSettings.defaultPickerNote), findsOneWidget);
+    expect(
+      tester.getBottomLeft(hint).dy,
+      lessThan(tester.getTopLeft(letterTile('A')).dy),
+    );
+    // Under the letters — the last row too — and still on the kiosk's
+    // screen, no scrolling to it.
+    expect(
+      tester.getTopLeft(note).dy,
+      greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
+    );
+    expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(1080));
+    // Not stretched across a wide screen: centred, at most 1000 px.
+    expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
+    expect(tester.getCenter(note).dx, closeTo(960, 1));
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(note, findsNothing);
+    await finish(tester);
+
+    // The fixture has one player per letter, so 'A' above goes straight to
+    // the names; the later pages of letters must go without the note too.
+    // More than `_capacity` (24) players under 'A' keep the picker on
+    // letters for the second one.
+    final aPlayers = [
+      for (var i = 0; i < 25; i++)
+        PlayerName(
+          id: 'a$i',
+          displayName: 'A${String.fromCharCode(66 + i)} Hráč',
+        ),
+    ];
+    await tester.pumpWidget(
+      kioskApp(
+        roster: [...aPlayers, players[10], petr],
+        kioskPickerNote: ScheduleSettings.defaultPickerNote,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(note, findsOneWidget);
+    expect(hint, findsOneWidget);
+    expect(find.text('B'), findsNothing);
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    // Still letters — the second ones, AB…AZ — but no note, no hint.
+    expect(find.text('A…'), findsOneWidget);
+    expect(find.text('B'), findsOneWidget);
+    expect(find.text('Z'), findsOneWidget);
+    expect(note, findsNothing);
+    expect(hint, findsNothing);
+    await finish(tester);
+
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: 'Zrušit jde jen v aplikaci.'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: note,
+        matching: find.text('Zrušit jde jen v aplikaci.'),
+      ),
+      findsOneWidget,
+    );
+    await finish(tester);
+
+    await tester.pumpWidget(kioskApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(hint, findsOneWidget);
+    expect(note, findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('b3: a small alley\'s picker lists the names at once — the '
+      'note stands under them, the hint stays the letters\'; not once a '
+      'letter led to the names', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final note = find.byType(KioskWarning);
+    final hint = find.text(firstLetterHint);
+    // Up to `_capacity` (24) players: no letters, the names straight away.
+    for (final roster in [
+      [anna, petr],
+      players.take(24).toList(),
+    ]) {
+      await tester.pumpWidget(
+        kioskApp(
+          roster: roster,
+          kioskPickerNote: ScheduleSettings.defaultPickerNote,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(anna.displayName), findsOneWidget);
+      expect(hint, findsNothing);
+      expect(note, findsOneWidget);
+      expect(find.text(ScheduleSettings.defaultPickerNote), findsOneWidget);
+      // Under the names — the last one too — on the screen, centred and
+      // not stretched across it.
+      expect(
+        tester.getTopLeft(note).dy,
+        greaterThan(tester.getBottomLeft(find.text(roster.last.displayName)).dy),
+      );
+      expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(1080));
+      expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
+      expect(tester.getCenter(note).dx, closeTo(960, 1));
+      expect(tester.takeException(), isNull);
+      await finish(tester);
+    }
+
+    // Names reached through a letter are a later page: no note there.
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: ScheduleSettings.defaultPickerNote),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(find.text(anna.displayName), findsOneWidget);
+    expect(note, findsNothing);
+    await finish(tester);
+
+    // No note set: the names alone.
+    await tester.pumpWidget(kioskApp(roster: [anna, petr]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(find.text(anna.displayName), findsOneWidget);
+    expect(note, findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('b3: on a phone the note under the letters scrolls into view '
+      'and keeps to the screen', (tester) async {
+    tester.view.physicalSize = const Size(375, 812);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // The picker alone: the shell's status bar is not made for a phone.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsProvider.overrideWith(
+            (ref) => Stream.value(
+              ScheduleSettings(
+                laneCount: settings.laneCount,
+                trainingWeekdays: settings.trainingWeekdays,
+                bookingHorizonDays: settings.bookingHorizonDays,
+                maxActiveReservations: settings.maxActiveReservations,
+                kioskPickerNote: ScheduleSettings.defaultPickerNote,
+              ),
+            ),
+          ),
+          playersProvider.overrideWith((ref) async => players),
+        ],
+        child: const MaterialApp(home: NamePicker()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final note = find.byType(KioskWarning);
+    expect(note, findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getBottomLeft(find.text(firstLetterHint)).dy,
+      lessThan(tester.getTopLeft(letterTile('A')).dy),
+    );
+    // Two letters a row: the note is far below the fold, and the page
+    // scrolls down to it.
+    expect(
+      tester.getTopLeft(note).dy,
+      greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
+    );
+    await tester.scrollUntilVisible(note, 300);
+    await tester.pumpAndSettle();
+    expect(note.hitTestable(), findsOneWidget);
+    expect(tester.getTopLeft(note).dx, greaterThanOrEqualTo(0));
+    expect(tester.getTopRight(note).dx, lessThanOrEqualTo(375));
+    expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(812));
+    expect(tester.takeException(), isNull);
     await finish(tester);
   });
 
@@ -1183,9 +1444,10 @@ void main() {
 
   testWidgets(
     's: the day dialog opens non-interactively from the kiosk header — '
-    'score shows, but no video button and no tap-through (PR B fix round 1: '
-    'the 60 s idle-reset Listener never sees touches on a pushed route, and '
-    'an external video browser on a kiosk tablet is undesirable)',
+    'score shows, a video not on YouTube has no button and no tap-through '
+    'to the app\'s detail (PR B fix round 1: the 60 s idle-reset Listener '
+    'never sees touches on a pushed route, and an external video browser on '
+    'a kiosk tablet is undesirable)',
     (tester) async {
       final match = PrioritySlot(
         type: PrioritySlot.fallbackMatchType,
@@ -1247,9 +1509,17 @@ void main() {
         find.descendant(of: dialog, matching: find.text('5 : 3')),
         findsOneWidget,
       );
-      // No video control at all — the fallback trophy/block icon instead.
+      // A video the kiosk cannot play (not YouTube): no video control at
+      // all — the fallback trophy instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
       expect(find.byIcon(Icons.videocam), findsNothing);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.byIcon(Icons.emoji_events_outlined),
+        ),
+        findsOneWidget,
+      );
 
       // Tapping the match row never leaves the kiosk for the app's match
       // detail: it opens the kiosk's own Zápis modal (no players here, so
@@ -1292,25 +1562,38 @@ void main() {
       createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
       updatedAt: DateTime(2026, 9, 1),
     );
-    PrioritySlot fed(String id, Day date, String home, {int hour = 14}) =>
-        PrioritySlot(
-          type: PrioritySlot.fallbackMatchType,
-          id: id,
-          date: date,
-          startsAt: HourMinute(hour, 0),
-          endsAt: HourMinute(hour + 3, 0),
-          homeTeam: home,
-          awayTeam: 'Soupeř',
-          importKey: 'cka:$id',
-        );
-    MatchResult res(String id, String status, num home, num away) =>
-        MatchResult.fromJson({
-          'match_id': id,
-          'status': status,
-          'home_points': home,
-          'away_points': away,
-          'fetched_at': '2026-09-17T21:00:00+00:00',
-        });
+    // Each stand-in player's „the video has ended“, by video id.
+    final streamEnded = <String, VoidCallback?>{};
+    PrioritySlot fed(
+      String id,
+      Day date,
+      String home, {
+      int hour = 14,
+      String? video,
+    }) => PrioritySlot(
+      type: PrioritySlot.fallbackMatchType,
+      id: id,
+      date: date,
+      startsAt: HourMinute(hour, 0),
+      endsAt: HourMinute(hour + 3, 0),
+      homeTeam: home,
+      awayTeam: 'Soupeř',
+      importKey: 'cka:$id',
+      videoUrl: video,
+    );
+    MatchResult res(
+      String id,
+      String status,
+      num home,
+      num away, {
+      String fetched = '2026-09-17T21:00:00+00:00',
+    }) => MatchResult.fromJson({
+      'match_id': id,
+      'status': status,
+      'home_points': home,
+      'away_points': away,
+      'fetched_at': fetched,
+    });
     MatchPlayerResult player(String matchId, String side, int pos) =>
         MatchPlayerResult(
           id: '$matchId-$side-$pos',
@@ -1351,48 +1634,90 @@ void main() {
       MatchLayout liveLayout = MatchLayout.full,
       int visibleDays = 7,
       int fontSize = 11,
+      int bandFontSize = 10,
       bool fitDay = true,
       bool animations = true,
+      bool stream = false,
+      bool nameday = false,
+      String? warning,
+      bool todaysMatches = true,
+      Set<int>? trainingWeekdays,
+      int streamMax = 1,
+      bool streamEnabled = true,
+      // The admin flipping the streams' master switch while the kiosk runs.
+      Stream<bool>? streamSwitch,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
+      bool dutyHeader = false,
+      bool dutyBoard = false,
+      bool dutyDrawer = false,
+      int dutyShare = 30,
+      KioskDutyBandPosition dutyBandPosition = KioskDutyBandPosition.middle,
+      List<DutyPeriod> dutyPeriods = const [],
+      List<DutyAssignment> dutyAssignments = const [],
+      List<Reservation> reservations = const [],
+      int? maxActiveReservations,
     }) => ProviderScope(
       overrides: [
-        settingsProvider.overrideWith(
-          (ref) => Stream.value(
-            ScheduleSettings(
-              laneCount: settings.laneCount,
-              trainingWeekdays: settings.trainingWeekdays,
-              bookingHorizonDays: settings.bookingHorizonDays,
-              maxActiveReservations: settings.maxActiveReservations,
-              kioskDrawerOpen: drawerOpen,
-              kioskNoticesMode: switch ((showNotices, headerNotices)) {
-                (true, true) => KioskNoticesMode.both,
-                (true, false) => KioskNoticesMode.drawer,
-                (false, true) => KioskNoticesMode.header,
-                (false, false) => KioskNoticesMode.off,
-              },
-              kioskShowMatches: showMatches,
-              kioskShowUpcoming: showUpcoming,
-              kioskLiveMode: liveMode,
-              kioskWeeksBack: weeksBack,
-              kioskWeeksAhead: weeksAhead,
-              kioskDrawerColumns: drawerColumns,
-              kioskNoticesShare: share,
-              kioskZapisPercent: zapisPercent,
-              kioskNoticesRotationSeconds: noticeRotation,
-              kioskLiveRotationSeconds: liveRotation,
-              kioskPanelEnabled: panelEnabled,
-              kioskPastDays: pastDays,
-              kioskIdleSeconds: idleSeconds,
-              kioskFollowBoard: followBoard,
-              kioskLiveRefreshSeconds: liveRefresh,
-              kioskLiveLayout: liveLayout,
-              kioskVisibleDays: visibleDays,
-              kioskFontSize: fontSize,
-              kioskFitDay: fitDay,
-              kioskAnimations: animations,
-            ),
-          ),
+        settingsProvider.overrideWith((ref) {
+          ScheduleSettings shown(bool streamOn) => ScheduleSettings(
+            laneCount: settings.laneCount,
+            trainingWeekdays: trainingWeekdays ?? settings.trainingWeekdays,
+            bookingHorizonDays: settings.bookingHorizonDays,
+            maxActiveReservations:
+                maxActiveReservations ?? settings.maxActiveReservations,
+            kioskDrawerOpen: drawerOpen,
+            kioskNoticesMode: switch ((showNotices, headerNotices)) {
+              (true, true) => KioskNoticesMode.both,
+              (true, false) => KioskNoticesMode.drawer,
+              (false, true) => KioskNoticesMode.header,
+              (false, false) => KioskNoticesMode.off,
+            },
+            kioskShowMatches: showMatches,
+            kioskShowUpcoming: showUpcoming,
+            kioskLiveMode: liveMode,
+            kioskWeeksBack: weeksBack,
+            kioskWeeksAhead: weeksAhead,
+            kioskDrawerColumns: drawerColumns,
+            kioskNoticesShare: share,
+            kioskZapisPercent: zapisPercent,
+            kioskNoticesRotationSeconds: noticeRotation,
+            kioskLiveRotationSeconds: liveRotation,
+            kioskPanelEnabled: panelEnabled,
+            kioskPastDays: pastDays,
+            kioskIdleSeconds: idleSeconds,
+            kioskFollowBoard: followBoard,
+            kioskLiveRefreshSeconds: liveRefresh,
+            kioskLiveLayout: liveLayout,
+            kioskVisibleDays: visibleDays,
+            kioskFontSize: fontSize,
+            kioskBandFontSize: bandFontSize,
+            kioskFitDay: fitDay,
+            kioskAnimations: animations,
+            kioskStream: stream,
+            kioskNameday: nameday,
+            kioskWarning: warning,
+            kioskTodaysMatches: todaysMatches,
+            kioskStreamMax: streamMax,
+            kioskStreamEnabled: streamOn,
+            kioskDutyHeader: dutyHeader,
+            kioskDutyBoard: dutyBoard,
+            kioskDutyDrawer: dutyDrawer,
+            kioskDutyShare: dutyShare,
+            kioskDutyBandPosition: dutyBandPosition,
+          );
+          return streamSwitch?.map(shown) ?? Stream.value(shown(streamEnabled));
+        }),
+        // The stream's player stands in as text: a platform view does not
+        // run under flutter_test.
+        kioskStreamContentProvider.overrideWithValue(
+          (videoId, {required interactive, onEnded}) {
+            streamEnded[videoId] = onEnded;
+            return Text(
+              'player $videoId ${interactive ? 'on' : 'off'}',
+              key: const ValueKey('player'),
+            );
+          },
         ),
         nowProvider.overrideWith((ref) => Stream.value(nowAt)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
@@ -1400,7 +1725,12 @@ void main() {
         prioritySlotsProvider.overrideWithValue(slots),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
         weekReservationsProvider.overrideWith(
-          (ref, monday) => Stream.value(const []),
+          (ref, monday) => Stream.value([
+            for (final r in reservations)
+              if (!r.date.isBefore(monday) &&
+                  r.date.differenceInDays(monday) < 7)
+                r,
+          ]),
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
@@ -1413,6 +1743,10 @@ void main() {
         ),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(lineups[id] ?? const []),
+        ),
+        dutyPeriodsProvider.overrideWith((ref) => Stream.value(dutyPeriods)),
+        dutyAssignmentsProvider.overrideWith(
+          (ref) => Stream.value(dutyAssignments),
         ),
       ],
       child: const MaterialApp(home: KioskShell()),
@@ -1435,6 +1769,1152 @@ void main() {
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+
+    group('stream window', () {
+      const video = 'https://www.youtube.com/watch?v=wOq9EODb8w8';
+      final player = find.byKey(const ValueKey('player'));
+      // 11:00–14:00, being played at the kiosk's noon.
+      final onAir = [fed('m', day, 'Domácí', hour: 11, video: video)];
+      final playing = {'m': res('m', 'in_progress', 2, 1)};
+      // A day's list with the match on air: its live badge pulses for as
+      // long as the list is open, and pumpAndSettle would run on to the idle
+      // reset — which closes every route by itself.
+      Future<void> pumpDialog(WidgetTester tester) async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+
+      testWidgets('with the switch on, the match on air with a video plays '
+          'in the window; off, or without a video, nothing', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        expect(find.text('Domácí – Soupeř'), findsWidgets);
+        await finish(tester);
+
+        await tester.pumpWidget(app(slots: onAir, results: playing));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [fed('m', day, 'Domácí', hour: 11)],
+            results: playing,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('a dragged window keeps its place across the idle reset',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing, idleSeconds: 30),
+        );
+        await tester.pumpAndSettle();
+        final titleBar = find.descendant(
+          of: find.byType(KioskStreamWindow),
+          matching: find.text('Domácí – Soupeř'),
+        );
+        await tester.drag(titleBar, const Offset(300, -200));
+        await tester.pumpAndSettle();
+        final moved = tester.getRect(player);
+
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pumpAndSettle();
+        expect(tester.getRect(player), moved);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while a notice is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: onAir,
+            results: playing,
+            // A long notice: its „Více“ opens the dialog.
+            notices: [notice('1', 'Brigáda', body: 'Sejdeme se. ' * 120)],
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        await tester.tap(find.text('Více'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a stream starting leaves the drawer as it was: the same '
+          'element, nothing of its state lost', (tester) async {
+        fullHd(tester);
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        // 15:00: three hours ahead at the kiosk's noon — on air only once
+        // the site says it is being played.
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [fed('m', day, 'Domácí', hour: 15, video: video)],
+            resultsStream: results.stream,
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+          ),
+        );
+        results.add(const {});
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        final drawer = tester.element(find.byType(KioskDrawer));
+
+        results.add({'m': res('m', 'in_progress', 0, 0)});
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(identical(tester.element(find.byType(KioskDrawer)), drawer), isTrue);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the name picker is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        expect(find.byType(NamePicker), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the booking confirm is '
+          'open', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // A free lane far from the window (the last ＋ is in the last day).
+        final addCell = find.byIcon(Icons.add).last;
+        await tester.ensureVisible(addCell);
+        await tester.tap(addCell);
+        await tester.pumpAndSettle();
+        expect(find.text('Rezervovat termín?'), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zrušit'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the Zápis is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [...onAir, fed('f', day.addDays(-3), 'Hotovo')],
+            results: {...playing, 'f': res('f', 'finished', 6, 2)},
+            lineups: {'f': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tapAt(const Offset(20, 20));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsNothing);
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while a day\'s matches are '
+          'open from the board\'s header', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // The status bar names today's match too: the board's header it is.
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        await pumpDialog(tester);
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zavřít'));
+        await pumpDialog(tester);
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the window goes with the match: decided, and its result '
+          'read more than half an hour ago', (tester) async {
+        fullHd(tester);
+        // Noon at the kiosk is 10:00 UTC; the result was read at 09:20.
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: onAir,
+            results: {
+              'm': res('m', 'finished', 6, 2,
+                  fetched: '2026-10-08T09:20:00+00:00'),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      const video2 = 'https://youtu.be/abcdefghijk';
+      const video3 = 'https://youtu.be/ABCDEFGHIJK';
+      // Finished three and two days back, each with its recording.
+      final recorded = [
+        fed('f1', day.addDays(-3), 'Hotovo', video: video2),
+        fed('f2', day.addDays(-2), 'Včera', video: video3),
+      ];
+      final decided = {
+        'f1': res('f1', 'finished', 6, 2),
+        'f2': res('f2', 'finished', 3, 5),
+      };
+
+      testWidgets('anyone plays a recording: ▶ at a finished match in the '
+          'drawer, the switch off; the × closes it', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(slots: [recorded.first], results: decided, drawerOpen: true),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít stream'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('the Zápis of a match with a video has its button: the '
+          'Zápis closes, the stream opens', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [recorded.first],
+            results: decided,
+            lineups: {'f1': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        // Above the sheet, not over its corner (the away team's totals).
+        expect(
+          tester.getRect(find.text('Přehrát záznam')).bottom,
+          lessThanOrEqualTo(
+            tester.getRect(find.byType(LegacyScoreSheetPage)).top,
+          ),
+        );
+
+        await tester.tap(find.text('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsNothing);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a tap on today\'s match without a score yet, but with a '
+          'video, opens its stream — in the header and on the board',
+          (tester) async {
+        fullHd(tester);
+        // 15:00, three hours ahead at the kiosk's noon: no score, not live.
+        final later = [fed('l', day, 'Odpoledne', hour: 15, video: video2)];
+        await tester.pumpWidget(app(slots: later));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        // The header's line (the board's day header says it too, after).
+        await tester.tap(
+          find.textContaining('Odpoledne – Soupeř · 15:00').first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await tester.tap(find.byTooltip('Zavřít stream'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(CalendarEventBand),
+                matching: find.textContaining('Odpoledne'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a day\'s matches from the board\'s header have the app\'s '
+          'video control: a tap closes the list and plays the match on the '
+          'kiosk', (tester) async {
+        fullHd(tester);
+        // The match on air (the switch off: no window by itself) and one
+        // finished this morning, each with its video.
+        await tester.pumpWidget(
+          app(
+            slots: [...onAir, fed('r', day, 'Ráno', hour: 8, video: video2)],
+            results: {...playing, 'r': res('r', 'finished', 6, 2)},
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        final header = find
+            .descendant(
+              of: find.byType(BoardColumnHeader),
+              matching: find.textContaining('Domácí'),
+            )
+            .first;
+        final dialog = find.byType(AlertDialog);
+        Finder inDialog(IconData icon) =>
+            find.descendant(of: dialog, matching: find.byIcon(icon));
+        await tester.tap(header);
+        await pumpDialog(tester);
+        // Live: the red camera; the recording: the play button — no trophy.
+        expect(inDialog(Icons.videocam), findsOneWidget);
+        expect(inDialog(Icons.play_circle_fill), findsOneWidget);
+        expect(inDialog(Icons.emoji_events_outlined), findsNothing);
+
+        await tester.tap(inDialog(Icons.videocam));
+        await pumpDialog(tester);
+        expect(dialog, findsNothing);
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // The recording turns the window to it; its Zápis stays shut (the
+        // button's tap is not the row's).
+        await tester.tap(header);
+        await pumpDialog(tester);
+        await tester.tap(inDialog(Icons.play_circle_fill));
+        await pumpDialog(tester);
+        expect(dialog, findsNothing);
+        await tester.pumpAndSettle();
+        expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('with the animations off the live badge in the day\'s list '
+          'stays still', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(slots: onAir, results: playing, animations: false),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        // Settles: nothing repeats.
+        await tester.pumpAndSettle();
+        final badge = find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(MatchLeading),
+        );
+        expect(
+          find.descendant(of: badge, matching: find.byIcon(Icons.videocam)),
+          findsOneWidget,
+        );
+        expect(
+          (tester.state(badge) as dynamic).debugHasPulseController,
+          isFalse,
+        );
+        await finish(tester);
+      });
+
+      testWidgets('a live stream closed by the × does not open by itself '
+          'again; its ▶ does', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing, drawerOpen: true),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít stream'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        await tester.tap(find.byTooltip('Sledovat živě'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the match being played in the drawer has the live badge '
+          'of everywhere else — pulsing, still with the animations off; a '
+          'tap opens its stream', (tester) async {
+        fullHd(tester);
+        // Played, with players: the drawer shows it across.
+        Widget kiosk({required bool animations}) => app(
+          slots: onAir,
+          results: playing,
+          lineups: {'m': lineup},
+          animations: animations,
+        );
+        final badge = find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.byType(MatchLeading),
+        );
+        bool pulsing(WidgetTester tester) =>
+            (tester.state(badge) as dynamic).debugHasPulseController as bool;
+
+        await tester.pumpWidget(kiosk(animations: true));
+        // The ring repeats: frames by hand, pumpAndSettle would wait forever.
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(liveView, findsOneWidget);
+        expect(badge, findsOneWidget);
+        expect(
+          find.descendant(of: badge, matching: find.byIcon(Icons.videocam)),
+          findsOneWidget,
+        );
+        expect(pulsing(tester), isTrue);
+        expect(player, findsNothing);
+
+        await tester.tap(badge);
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+
+        await tester.pumpWidget(kiosk(animations: false));
+        await tester.pumpAndSettle();
+        expect(badge, findsOneWidget);
+        expect(pulsing(tester), isFalse);
+        await finish(tester);
+      });
+
+      testWidgets('the live view\'s header: how old the score is sits at the '
+          'right edge — against the live badge, or alone — and gives way '
+          'only when nothing is left', (tester) async {
+        fullHd(tester);
+        final inDrawer = find.byType(KioskDrawer);
+        // „⟳ před … dny“: its icon and text, in a row of their own.
+        final age = find
+            .ancestor(
+              of: find.descendant(
+                of: inDrawer,
+                matching: find.byIcon(Icons.refresh),
+              ),
+              matching: find.byType(Row),
+            )
+            .first;
+        final ageText = find.descendant(
+          of: age,
+          matching: find.textContaining('před'),
+        );
+        final badge = find.descendant(
+          of: inDrawer,
+          matching: find.byType(MatchLeading),
+        );
+        // The header row ends where the drawer does, less its padding.
+        double rowEnd() => tester.getTopRight(inDrawer).dx - 12;
+        bool cut() => tester
+            .renderObject<RenderParagraph>(
+              find.descendant(of: ageText, matching: find.byType(RichText)),
+            )
+            .didExceedMaxLines;
+
+        // With the live badge: the age right beside it, the badge at the end.
+        await tester.pumpWidget(
+          app(
+            slots: onAir,
+            results: playing,
+            lineups: {'m': lineup},
+            animations: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(tester.getTopRight(badge).dx, closeTo(rowEnd(), 0.5));
+        expect(
+          tester.getTopRight(age).dx,
+          closeTo(tester.getTopLeft(badge).dx - 4, 0.5),
+        );
+        expect(cut(), isFalse);
+        await finish(tester);
+
+        // No video: the age at the end itself.
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Domácí', hour: 11)],
+            results: playing,
+            lineups: {'m': lineup},
+            animations: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(badge, findsNothing);
+        expect(tester.getTopRight(age).dx, closeTo(rowEnd(), 0.5));
+        expect(cut(), isFalse);
+        await finish(tester);
+
+        // A one-column drawer, two matches taking turns: back, the dots,
+        // the age and the badge do not all fit. The age gives way — but
+        // only by what is missing: no gap left on either side of it, and
+        // the badge whole at the end.
+        await tester.pumpWidget(
+          app(
+            slots: [
+              ...onAir,
+              fed('n', day, 'Druzí', hour: 11, video: video2),
+            ],
+            results: {...playing, 'n': res('n', 'in_progress', 1, 2)},
+            lineups: {
+              'm': lineup,
+              'n': [
+                for (final side in ['home', 'away'])
+                  MatchPlayerResult(
+                    id: 'n-$side',
+                    matchId: 'n',
+                    side: side,
+                    position: 1,
+                    playerName: side,
+                    total: 400,
+                  ),
+              ],
+            },
+            drawerColumns: 1,
+            animations: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final dots = find.descendant(
+          of: inDrawer,
+          matching: find.byIcon(Icons.lock_open),
+        );
+        expect(dots, findsOneWidget);
+        expect(cut(), isTrue);
+        expect(tester.getTopRight(badge).dx, closeTo(rowEnd(), 0.5));
+        expect(
+          tester.getTopRight(age).dx,
+          closeTo(tester.getTopLeft(badge).dx - 4, 0.5),
+        );
+        // The dots' tap target (the lock and the dots, padded) ends where
+        // the age begins.
+        final dotsTarget = find
+            .ancestor(of: dots, matching: find.byType(GestureDetector))
+            .first;
+        expect(
+          tester.getTopLeft(age).dx,
+          closeTo(tester.getTopRight(dotsTarget).dx, 0.5),
+        );
+        await finish(tester);
+      });
+
+      testWidgets('the end of the video closes its window', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+
+        streamEnded['wOq9EODb8w8']!();
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: no window by itself, no ▶ at the drawer\'s '
+          'matches, no button in the Zápis', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            streamEnabled: false,
+            stream: true,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            lineups: {'f1': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(drawerText('6 : 2'), findsOneWidget);
+        expect(player, findsNothing);
+        expect(find.byTooltip('Sledovat živě'), findsNothing);
+        expect(find.byTooltip('Přehrát záznam'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.byIcon(Icons.play_circle_outline),
+          ),
+          findsNothing,
+        );
+
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(find.text('Přehrát záznam'), findsNothing);
+        expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: the match being played in the drawer has no '
+          'live badge', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            streamEnabled: false,
+            slots: onAir,
+            results: playing,
+            lineups: {'m': lineup},
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.byType(MatchLeading),
+          ),
+          findsNothing,
+        );
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: a day\'s matches from the board\'s header '
+          'show the trophy, no video control', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            streamEnabled: false,
+            slots: [...onAir, fed('r', day, 'Ráno', hour: 8, video: video2)],
+            results: {...playing, 'r': res('r', 'finished', 6, 2)},
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        final dialog = find.byType(AlertDialog);
+        Finder inDialog(IconData icon) =>
+            find.descendant(of: dialog, matching: find.byIcon(icon));
+        expect(inDialog(Icons.emoji_events_outlined), findsNWidgets(2));
+        expect(inDialog(Icons.videocam), findsNothing);
+        expect(inDialog(Icons.play_circle_fill), findsNothing);
+
+        await tester.tap(find.text('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: a tap on today\'s match without a score, but '
+          'with a video, does nothing — in the header and on the board',
+          (tester) async {
+        fullHd(tester);
+        final later = [fed('l', day, 'Odpoledne', hour: 15, video: video2)];
+        await tester.pumpWidget(app(streamEnabled: false, slots: later));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.textContaining('Odpoledne – Soupeř · 15:00').first,
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(CalendarEventBand),
+                matching: find.textContaining('Odpoledne'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('the admin switching the streams off closes every window — '
+          'the match on air and a visitor\'s; on again, only the one on air '
+          'comes back', (tester) async {
+        fullHd(tester);
+        final on = StreamController<bool>();
+        addTearDown(on.close);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            streamMax: 2,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+            streamSwitch: on.stream,
+          ),
+        );
+        on.add(true);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('player wOq9EODb8w8'), findsOneWidget);
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('player abcdefghijk'), findsOneWidget);
+
+        on.add(false);
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        expect(find.byTooltip('Přehrát záznam'), findsNothing);
+
+        // What the visitor opened is forgotten with the switch.
+        on.add(true);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('player wOq9EODb8w8'), findsOneWidget);
+        expect(find.textContaining('player abcdefghijk'), findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('one window at once: a ▶ turns it to the new stream',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        expect(find.text('2/2'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('two windows at once: each stream its own, one above the '
+          'other; what a visitor opens comes before the live one',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            streamMax: 2,
+            slots: [...onAir, ...recorded],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final live = find.text('player wOq9EODb8w8 on');
+        // The list has the later match higher up: first ▶ = f2.
+        final first = find.text('player ABCDEFGHIJK on');
+        final second = find.text('player abcdefghijk on');
+        expect(live, findsOneWidget);
+
+        await tester.tap(find.byTooltip('Přehrát záznam').first);
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(live, findsOneWidget);
+        expect(first, findsOneWidget);
+        // The admin's corner (bottom left), then the one above it — the
+        // drawer's side last.
+        expect(tester.getRect(first).left, tester.getRect(live).left);
+        expect(tester.getRect(first).bottom,
+            lessThan(tester.getRect(live).top));
+
+        // A second recording: the live one gives way, not the first.
+        await tester.tap(find.byTooltip('Přehrát záznam').last);
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(live, findsNothing);
+        expect(first, findsOneWidget);
+        expect(second, findsOneWidget);
+
+        // Closed, it makes room: the live one is back.
+        await tester.tap(find.byTooltip('Zavřít stream').last);
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(live, findsOneWidget);
+        await finish(tester);
+      });
+
+      KioskStreamsNotifier streams(WidgetTester tester) =>
+          ProviderScope.containerOf(tester.element(find.byType(KioskShell)))
+              .read(kioskStreamsProvider.notifier);
+      // Two windows: the live match by itself, a recording by hand.
+      Widget twoWindows({bool stream = true}) => app(
+        stream: stream,
+        streamMax: 2,
+        slots: [...onAir, ...recorded],
+        results: {...playing, ...decided},
+        drawerOpen: true,
+      );
+
+      testWidgets('a maximized window collapsed gives the area back: the '
+          'other window comes out', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows());
+        await tester.pumpAndSettle();
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Na celou obrazovku').first);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Sbalit'));
+        await tester.pumpAndSettle();
+        // The pill's × and the other window's.
+        expect(find.byTooltip('Zavřít stream'), findsNWidgets(2));
+        final other = find.text('player abcdefghijk on');
+        expect(other, findsOneWidget);
+        expect(tester.getRect(other).width, greaterThan(1));
+        await finish(tester);
+      });
+
+      testWidgets('a ▶ at a stream hidden under a maximized window brings it '
+          'out', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows());
+        await tester.pumpAndSettle();
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Na celou obrazovku').first);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsOneWidget);
+
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsNWidgets(2));
+        expect(find.byTooltip('Zmenšit'), findsNothing);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('past the windows, the oldest opened closes for good: '
+          'closing a newer one does not bring it back', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows(stream: false));
+        await tester.pumpAndSettle();
+        streams(tester)
+          ..open('m')
+          ..open('f1')
+          ..open('f2');
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(find.text('player wOq9EODb8w8 on'), findsNothing);
+
+        // The newest (f2, the later window) closes: only f1 stays.
+        await tester.tap(find.byTooltip('Zavřít stream').last);
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a new window takes the corner a closed one gave up',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows(stream: false));
+        await tester.pumpAndSettle();
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        final corner = tester.getRect(find.text('player abcdefghijk on'));
+        streams(tester).open('f2');
+        await tester.pumpAndSettle();
+        final above = tester.getRect(find.text('player ABCDEFGHIJK on'));
+        expect(above.bottom, lessThan(corner.top));
+
+        await tester.tap(find.byTooltip('Zavřít stream').first);
+        await tester.pumpAndSettle();
+        streams(tester).open('m');
+        await tester.pumpAndSettle();
+        expect(tester.getRect(find.text('player wOq9EODb8w8 on')), corner);
+        expect(tester.getRect(find.text('player ABCDEFGHIJK on')), above);
+        await finish(tester);
+      });
+
+      testWidgets('a player under another window takes no touches, nor any '
+          'while a window is dragged', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows(stream: false));
+        await tester.pumpAndSettle();
+        streams(tester)
+          ..open('f1')
+          ..open('f2');
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        expect(find.text('player ABCDEFGHIJK on'), findsOneWidget);
+        final upper = find.descendant(
+          of: find.byType(KioskStreamWindow),
+          matching: find.text('Včera – Soupeř'),
+        );
+
+        final drag = await tester.startGesture(tester.getCenter(upper));
+        await drag.moveBy(const Offset(0, 100));
+        await tester.pump();
+        await drag.moveBy(const Offset(0, 100));
+        await tester.pump();
+        expect(find.text('player abcdefghijk off'), findsOneWidget);
+        expect(find.text('player ABCDEFGHIJK off'), findsOneWidget);
+        await drag.up();
+        await tester.pumpAndSettle();
+        // f2's window now lies over f1's: f1 waits, f2 plays on.
+        expect(find.text('player abcdefghijk off'), findsOneWidget);
+        expect(find.text('player ABCDEFGHIJK on'), findsOneWidget);
+
+        await tester.drag(upper, const Offset(0, -200));
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('one of two windows maximized: the other hides, its player '
+          'running on in a pixel', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            streamMax: 2,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        final before = tester.getRect(find.text('player abcdefghijk on'));
+
+        await tester.tap(find.byTooltip('Na celou obrazovku').first);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsOneWidget);
+        expect(
+          tester.getRect(find.text('player abcdefghijk off')).size,
+          const Size(1, 1),
+        );
+
+        await tester.tap(find.byTooltip('Zmenšit'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsNWidgets(2));
+        expect(tester.getRect(find.text('player abcdefghijk on')), before);
+        await finish(tester);
+      });
+    });
+
+    testWidgets('the name day sits in the status bar between the clock and '
+        '„Rezervovat“ — only when the admin wants it', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(nameday: true));
+      await tester.pumpAndSettle();
+      // Thursday 8 October: Věra.
+      final nameday = find.text('Svátek: Věra');
+      expect(nameday, findsOneWidget);
+      expect(
+        tester.getTopLeft(nameday).dx,
+        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+      );
+      expect(
+        tester.getTopRight(nameday).dx,
+        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+      );
+      await finish(tester);
+
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('Svátek: Věra'), findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('the admin\'s warning sits in the status bar between the '
+        'clock and „Rezervovat“, with its icon; none, nothing', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(warning: 'Dráha 3 je mimo provoz.'));
+      await tester.pumpAndSettle();
+      final text = find.text('Dráha 3 je mimo provoz.');
+      final icon = find.byIcon(Icons.warning_amber_rounded);
+      expect(text, findsOneWidget);
+      expect(icon, findsOneWidget);
+      expect(
+        tester.getTopLeft(icon).dx,
+        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+      );
+      expect(
+        tester.getTopRight(text).dx,
+        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+      );
+      await finish(tester);
+
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(icon, findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('while a warning hangs, the rest of the status bar steps '
+        'aside: no notice headline, no today\'s matches beside it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      int matchLabels() =>
+          findEmojiTextContaining('Domácí – Soupeř').evaluate().length;
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Domácí')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(KioskHeadline), findsOneWidget);
+      final without = matchLabels();
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Domácí')],
+          warning: 'Dráha 3 je mimo provoz.',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+      expect(find.byType(KioskHeadline), findsNothing);
+      // The board's own day header still names the match; the bar does not.
+      expect(matchLabels(), without - 1);
+      await finish(tester);
+    });
+
+    testWidgets('while a warning hangs, the weather and the name day step '
+        'aside too', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(nameday: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Svátek: Věra'), findsOneWidget);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(nameday: true, warning: 'Dráha 3 je mimo provoz.'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+      expect(find.byType(KioskDayInfo), findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('today\'s matches in the status bar: there by default; '
+        'switched off, the bar reads as on a day without a match — the '
+        'warning still wins', (tester) async {
+      fullHd(tester);
+      // The status bar's match list is its only Wrap.
+      final inBar = find.descendant(
+        of: find.byType(Wrap),
+        matching: findEmojiTextContaining('Domácí – Soupeř'),
+      );
+      // Thursday is no training day here: without a match, the bar says
+      // when the next one is.
+      final nextTraining = findEmojiTextContaining('Další trénink');
+      Widget kiosk({bool todaysMatches = true, String? warning}) => app(
+        slots: [fed('m', day, 'Domácí')],
+        trainingWeekdays: const {1, 2, 3, 5, 6, 7},
+        todaysMatches: todaysMatches,
+        warning: warning,
+      );
+
+      await tester.pumpWidget(kiosk());
+      await tester.pumpAndSettle();
+      expect(inBar, findsOneWidget);
+      expect(nextTraining, findsNothing);
+      await finish(tester);
+
+      await tester.pumpWidget(kiosk(todaysMatches: false));
+      await tester.pumpAndSettle();
+      expect(inBar, findsNothing);
+      expect(nextTraining, findsOneWidget);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        kiosk(todaysMatches: false, warning: 'Dráha 3 je mimo provoz.'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+      expect(inBar, findsNothing);
+      expect(nextTraining, findsNothing);
+      await finish(tester);
+    });
 
     testWidgets('closed by default: only the button shows, tap opens it, tap '
         'closes it', (tester) async {
@@ -2923,6 +4403,36 @@ void main() {
       });
     }
 
+    testWidgets('a match band on the board stacks home, dash and away, so '
+        'no team name breaks in half', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
+      await tester.pumpAndSettle();
+      Finder inBand(Finder f) =>
+          find.descendant(of: find.byType(CalendarEventBand), matching: f);
+      expect(inBand(findEmojiText('🏆')), findsOneWidget);
+      expect(inBand(find.text('Domácí')), findsOneWidget);
+      expect(inBand(find.text('–')), findsOneWidget);
+      expect(inBand(find.text('Soupeř')), findsOneWidget);
+      expect(inBand(find.text('14:00–17:00')), findsOneWidget);
+      await finish(tester);
+    });
+
+    testWidgets('the admin\'s font size reaches the board\'s bands', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(slots: [fed('m', day, 'Domácí')], bandFontSize: 18),
+      );
+      await tester.pumpAndSettle();
+      final band = tester.widget<CalendarEventBand>(
+        find.byType(CalendarEventBand),
+      );
+      expect(band.fontSize, 18);
+      await finish(tester);
+    });
+
     testWidgets('a finished match of the board opens its Zápis, from its band '
         'and from the day header', (tester) async {
       fullHd(tester);
@@ -3190,5 +4700,1152 @@ void main() {
 
       await finish(tester);
     });
+
+    group('canteen duty (0073)', () {
+      DutyPeriod duty(String id, Day from, int days) =>
+          DutyPeriod(id: id, startsOn: from, endsOn: from.addDays(days - 1));
+      DutyAssignment assign(String periodId, PlayerName player) =>
+          DutyAssignment(periodId: periodId, userId: player.id);
+
+      // Monday 5. 10. to Sunday 11. 10. holds today (Thursday 8. 10.); six
+      // weeks follow, one player each (BB, CC, …), and one was over.
+      final current = duty('now', Day(2026, 10, 5), 7);
+      final ahead = [
+        for (var i = 0; i < 6; i++)
+          duty('w$i', Day(2026, 10, 12).addDays(7 * i), 7),
+      ];
+      final over = duty('over', Day(2026, 9, 28), 7);
+      final periods = [...ahead.reversed, current, over];
+      final assignments = [
+        assign('now', petr),
+        assign('now', anna),
+        for (var i = 0; i < 6; i++) assign('w$i', players[i + 1]),
+        assign('over', players[25]),
+      ];
+      final line = find.text('Služba: AA Hráč a PP Hráč');
+      final dialog = find.byType(AlertDialog);
+      Finder inDialog(String t) =>
+          find.descendant(of: dialog, matching: find.text(t));
+      const nothingAhead = 'Další služby zatím nejsou naplánované.';
+
+      testWidgets('„V záhlaví“: who serves today, under the date', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(line, findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDutyLine),
+            matching: find.byIcon(Icons.local_cafe_outlined),
+          ),
+          findsOneWidget,
+        );
+        final date = find.text(dayFull(day)).first;
+        expect(
+          tester.getRect(line).top,
+          greaterThanOrEqualTo(tester.getRect(date).bottom),
+        );
+        expect(
+          tester.getRect(find.byType(KioskDutyLine)).left,
+          tester.getRect(date).left,
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('while a warning hangs, the duty\'s line steps aside too',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+            warning: 'Dráha 3 je mimo provoz.',
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+        expect(find.byType(KioskDutyLine), findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('the mode off, or nobody serving today: no line', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(dutyPeriods: periods, dutyAssignments: assignments),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.textContaining('Služba:'), findsNothing);
+        await finish(tester);
+
+        // Today's period without anyone on it says nothing either.
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now') a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.textContaining('Služba:'), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a long line stays one line, cut, at most 420 px wide', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: [current],
+            dutyAssignments: [for (final p in players) assign('now', p)],
+          ),
+        );
+        await tester.pumpAndSettle();
+        final text = find.textContaining('Služba: AA Hráč, BB Hráč');
+        expect(text, findsOneWidget);
+        expect(tester.widget<Text>(text).maxLines, 1);
+        expect(tester.widget<Text>(text).overflow, TextOverflow.ellipsis);
+        expect(
+          tester.getSize(find.byType(KioskDutyLine)).width,
+          lessThanOrEqualTo(420),
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('a tap shows the plan: who serves now, then the next five '
+          'in date order', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(line);
+        await tester.pumpAndSettle();
+
+        expect(inDialog('Služby na kantýně'), findsOneWidget);
+        expect(inDialog('Teď slouží: AA Hráč a PP Hráč'), findsOneWidget);
+        expect(inDialog('po 5. 10. – ne 11. 10.'), findsOneWidget);
+        expect(inDialog('Další'), findsOneWidget);
+        // The five weeks ahead, top to bottom, range left of the names; the
+        // sixth is not listed and the one over is gone.
+        double? lastTop;
+        for (var i = 0; i < 5; i++) {
+          final range = inDialog(dutyRangeLabel(ahead[i]));
+          final names = inDialog(players[i + 1].displayName);
+          expect(range, findsOneWidget);
+          expect(names, findsOneWidget);
+          expect(
+            tester.getRect(range).right,
+            lessThan(tester.getRect(names).left),
+          );
+          final top = tester.getRect(range).top;
+          if (lastTop != null) expect(top, greaterThan(lastTop));
+          lastTop = top;
+        }
+        expect(inDialog('po 12. 10. – ne 18. 10.'), findsOneWidget);
+        expect(inDialog(dutyRangeLabel(ahead[5])), findsNothing);
+        expect(inDialog(players[6].displayName), findsNothing);
+        expect(inDialog(players[25].displayName), findsNothing);
+        expect(inDialog(nothingAhead), findsNothing);
+
+        await tester.tap(inDialog('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('nothing planned ahead says so', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: [current, over],
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(line);
+        await tester.pumpAndSettle();
+
+        expect(inDialog('Teď slouží: AA Hráč a PP Hráč'), findsOneWidget);
+        expect(inDialog(nothingAhead), findsOneWidget);
+
+        await finish(tester);
+      });
+
+      testWidgets('touching the plan counts for the idle timer; the idle '
+          'reset closes it', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(line);
+        await tester.pumpAndSettle();
+        expect(dialog, findsOneWidget);
+
+        // Read for 50 s, touched: another full minute from then on.
+        await tester.pump(const Duration(seconds: 50));
+        await tester.tap(inDialog('Služby na kantýně'));
+        await tester.pump(const Duration(seconds: 20));
+        // (A reset in those 20 s would still be fading the dialog out.)
+        await tester.pumpAndSettle();
+        expect(dialog, findsOneWidget);
+
+        await tester.pump(const Duration(seconds: 41));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await finish(tester);
+      });
+
+      // „V kalendáři“: the band's piece over one day's header, if any.
+      Finder headerOf(Day date) => find.byWidgetPredicate(
+        (w) => w is BoardColumnHeader && w.date == date,
+      );
+      BoardBandSegment? bandOn(WidgetTester tester, Day date) {
+        final band = find.descendant(
+          of: headerOf(date),
+          matching: find.byType(BoardBand),
+        );
+        if (band.evaluate().isEmpty) return null;
+        return tester.widget<BoardBand>(band).segment;
+      }
+
+      const both = 'AA Hráč a PP Hráč';
+
+      // A band's strip over one day's header.
+      Rect stripOn(WidgetTester tester, Day date) => tester.getRect(
+        find.descendant(
+          of: find.descendant(
+            of: headerOf(date),
+            matching: find.byType(BoardBand),
+          ),
+          matching: find.byType(Material),
+        ),
+      );
+      // Where the board's header row starts on the screen.
+      const rowLeft = calendarRulerWidth;
+      final monday = Day(2026, 10, 12);
+
+      testWidgets('„V kalendáři“: a band over each duty\'s days, rounded '
+          'where it starts and ends (a one-day duty at both), who once per '
+          'duty — at its start, or at the row\'s left edge for one begun off '
+          'it', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        (bool, bool) piece(Day date) {
+          final s = bandOn(tester, date)!;
+          return (s.starts, s.ends);
+        }
+
+        expect(piece(day), (false, false));
+        expect(piece(Day(2026, 10, 9)), (false, false));
+        expect(piece(Day(2026, 10, 10)), (false, false));
+        expect(piece(Day(2026, 10, 11)), (false, true));
+        expect(piece(monday), (true, false));
+        expect(piece(Day(2026, 10, 13)), (false, false));
+        // Today is the first column: the duty began on Monday, off the
+        // board, and still says who — one label, at the row's left edge.
+        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+        // The next week's starts on Monday, its name at its start.
+        expect(
+          bandLabelRun(tester, 'BB Hráč').left,
+          closeTo(stripOn(tester, monday).left + 6, 0.01),
+        );
+        // Only the band: the status bar's line is the other switch.
+        expect(find.byType(KioskDutyLine), findsNothing);
+        await finish(tester);
+
+        // A one-day duty: one piece, its first day and its last.
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: [duty('one', Day(2026, 10, 9), 1)],
+            dutyAssignments: [assign('one', petr)],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(piece(Day(2026, 10, 9)), (true, true));
+        expect(bandOn(tester, day), isNull);
+        expect(bandOn(tester, Day(2026, 10, 10)), isNull);
+
+        await finish(tester);
+      });
+
+      testWidgets('a duty\'s last day the board\'s first column, like a '
+          'weekly one on its Sunday: at rest who serves starts at the row\'s '
+          'left edge, cut with „…“ at the duty\'s end — not cut off at its '
+          'start by the row\'s edge', (tester) async {
+        fullHd(tester);
+        // Friday 2. 10. to today, four on it: a line longer than a column.
+        const four = 'AA Hráč, BB Hráč, CC Hráč a DD Hráč';
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: [duty('ending', Day(2026, 10, 2), 7)],
+            dutyAssignments: [
+              for (var i = 0; i < 4; i++) assign('ending', players[i]),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bandOn(tester, day)!.label, four);
+        expect(bandOn(tester, day)!.ends, isTrue);
+
+        final run = bandLabelRun(tester, four);
+        expect(run.left, closeTo(rowLeft + 6, 0.01));
+        expect(run.right, closeTo(stripOn(tester, day).right - 6, 0.01));
+        final text = find.descendant(
+          of: bandPieces(four),
+          matching: find.text(four),
+        );
+        expect(text, findsOneWidget);
+        expect(tester.widget<Text>(text).overflow, TextOverflow.ellipsis);
+        expect(bandLabelParagraph(tester, four).didExceedMaxLines, isTrue);
+
+        await finish(tester);
+      });
+
+      testWidgets('the band runs on unbroken from day to day, through the '
+          'gap between the headers, wherever in them it runs; the next duty '
+          'starts apart', (tester) async {
+        fullHd(tester);
+        Rect strip(int d) => tester.getRect(
+          find.descendant(
+            of: find.descendant(
+              of: headerOf(Day(2026, 10, d)),
+              matching: find.byType(BoardBand),
+            ),
+            matching: find.byType(Material),
+          ),
+        );
+        // A header's background: the first box it decorates.
+        Rect background(int d) => tester.getRect(
+          find
+              .descendant(
+                of: headerOf(Day(2026, 10, d)),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        );
+
+        for (final position in KioskDutyBandPosition.values) {
+          await tester.pumpWidget(
+            app(
+              // Matches on one day only: the band still one straight line.
+              slots: [fed('m', day, 'Domácí')],
+              dutyBoard: true,
+              dutyBandPosition: position,
+              dutyPeriods: periods,
+              dutyAssignments: assignments,
+            ),
+          );
+          await tester.pumpAndSettle();
+          for (var d = 8; d < 11; d++) {
+            expect(strip(d).right, strip(d + 1).left, reason: '$position');
+            expect(strip(d).top, strip(d + 1).top, reason: '$position');
+            expect(strip(d).bottom, strip(d + 1).bottom, reason: '$position');
+            // The headers themselves keep their gap.
+            expect(
+              background(d + 1).left - background(d).right,
+              4,
+              reason: '$position',
+            );
+          }
+          // Sunday ends one duty, Monday starts the next: rounded, apart.
+          expect(
+            strip(12).left,
+            greaterThan(strip(11).right),
+            reason: '$position',
+          );
+          await finish(tester);
+        }
+      });
+
+      testWidgets('where the admin wants it: above the date, between the '
+          'date and the matches, or under the matches on the headers\' '
+          'bottom edge — the headers as tall in each', (tester) async {
+        fullHd(tester);
+        Finder within(Day date, Finder f) =>
+            find.descendant(of: headerOf(date), matching: f);
+        Rect strip(Day date) => tester.getRect(
+          within(
+            date,
+            find.descendant(
+              of: find.byType(BoardBand),
+              matching: find.byType(Material),
+            ),
+          ),
+        );
+        Rect label(Day date) =>
+            tester.getRect(within(date, find.textContaining(dayLabel(date))));
+        Rect header(Day date) => tester.getRect(headerOf(date));
+        // Today's two matches, Saturday's none.
+        final lines = within(day, find.byType(EmojiText));
+        final saturday = Day(2026, 10, 10);
+
+        for (final position in KioskDutyBandPosition.values) {
+          await tester.pumpWidget(
+            app(
+              slots: [
+                fed('m', day, 'Domácí'),
+                fed('m2', day, 'Domácí B', hour: 18),
+              ],
+              dutyBoard: true,
+              dutyBandPosition: position,
+              dutyPeriods: periods,
+              dutyAssignments: assignments,
+            ),
+          );
+          await tester.pumpAndSettle();
+          final why = '$position';
+          expect(lines, findsNWidgets(2), reason: why);
+          expect(
+            header(day).height,
+            boardHeaderHeight(2) + boardBandHeight,
+            reason: why,
+          );
+          switch (position) {
+            case KioskDutyBandPosition.top:
+              expect(strip(day).top, header(day).top, reason: why);
+              expect(
+                strip(day).bottom,
+                lessThanOrEqualTo(label(day).top),
+                reason: why,
+              );
+            case KioskDutyBandPosition.middle:
+              expect(
+                strip(day).top,
+                greaterThanOrEqualTo(label(day).bottom),
+                reason: why,
+              );
+              expect(
+                strip(day).bottom,
+                lessThanOrEqualTo(tester.getRect(lines.first).top),
+                reason: why,
+              );
+            case KioskDutyBandPosition.bottom:
+              expect(
+                strip(day).top,
+                greaterThanOrEqualTo(tester.getRect(lines.last).bottom),
+                reason: why,
+              );
+              expect(strip(day).bottom, header(day).bottom, reason: why);
+              // A day without matches: the band on the same bottom edge.
+              expect(strip(saturday).top, strip(day).top, reason: why);
+              expect(strip(saturday).bottom, strip(day).bottom, reason: why);
+          }
+          // The date above the matches, on one line across the days.
+          expect(
+            label(day).bottom,
+            lessThanOrEqualTo(tester.getRect(lines.first).top),
+            reason: why,
+          );
+          expect(label(saturday).top, label(day).top, reason: why);
+          await finish(tester);
+        }
+      });
+
+      testWidgets('above the date, a day without a duty keeps the band\'s '
+          'room: the dates stay on one line', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyBandPosition: KioskDutyBandPosition.top,
+            dutyPeriods: periods,
+            // Nobody on this week's duty: no band until Monday.
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now') a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        final monday = Day(2026, 10, 12);
+        expect(bandOn(tester, day), isNull);
+        expect(bandOn(tester, monday)!.label, 'BB Hráč');
+        double labelTop(Day date) => tester
+            .getRect(
+              find.descendant(
+                of: headerOf(date),
+                matching: find.textContaining(dayLabel(date)),
+              ),
+            )
+            .top;
+        // Monday's band on the top edge, its date under it — today's date
+        // on the same line, over nothing.
+        expect(
+          tester
+              .getRect(
+                find.descendant(
+                  of: find.descendant(
+                    of: headerOf(monday),
+                    matching: find.byType(BoardBand),
+                  ),
+                  matching: find.byType(Material),
+                ),
+              )
+              .top,
+          tester.getRect(headerOf(monday)).top,
+        );
+        expect(labelTop(day), labelTop(monday));
+        expect(
+          tester.getSize(headerOf(day)).height,
+          boardHeaderHeight(0) + boardBandHeight,
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('while the board moves, mid-drag too, each duty keeps one '
+          'label: stuck to the row\'s left edge, cut with „…“ where less of '
+          'the duty is left, pushed off the row only at its very end, at the '
+          'next one\'s start — and the board is not rebuilt for it; the idle '
+          'reset brings it back', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            pastDays: 3,
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        const columnWidth = (1920 - rowLeft) / 7;
+        final sunday = Day(2026, 10, 11);
+        final board = find.byType(ListView).last;
+        expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
+
+        // The names uncut, and the least they are cut to.
+        final whole = bandLabelParagraph(
+          tester,
+          both,
+        ).getMaxIntrinsicWidth(double.infinity);
+        final least = bandLabelLeast(tester, both);
+
+        // Where and how wide the geometry puts the current duty's names: the
+        // duty began on Monday 5. 10., seven columns before its end on
+        // Sunday.
+        void expectLabels(String why) {
+          final run = bandLabelRun(tester, both);
+          final end = stripOn(tester, sunday).right;
+          final at = stickyBandLabel(
+            viewportLeft: rowLeft,
+            bandStart: end + 12 - 7 * columnWidth,
+            bandEnd: end,
+            labelWidth: whole,
+            minWidth: least,
+          );
+          expect(run.left, closeTo(at.left, 0.01), reason: why);
+          expect(run.width, closeTo(at.width, 0.01), reason: why);
+          // The next duty's at its start, while its Monday is in view.
+          if (headerOf(monday).evaluate().isNotEmpty) {
+            expect(
+              bandLabelRun(tester, 'BB Hráč').left,
+              closeTo(stripOn(tester, monday).left + 6, 0.01),
+              reason: why,
+            );
+          }
+        }
+
+        expectLabels('at rest');
+        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+
+        // The finger stays down: no settling, frame by frame.
+        final sundayHeader = tester.widget(headerOf(sunday));
+        final gesture = await tester.startGesture(tester.getCenter(board));
+        var cut = false;
+        var pushed = false;
+        // On to Sunday's end and back: it settles on Sunday.
+        for (final dx in <double>[
+          -30,
+          -77,
+          -150,
+          -200,
+          -250,
+          -150,
+          -100,
+          -90,
+          150,
+        ]) {
+          await gesture.moveBy(Offset(dx, 0));
+          await tester.pump();
+          expectLabels('$dx');
+          final run = bandLabelRun(tester, both);
+          final stuck = run.left >= rowLeft + 6 - 0.01;
+          final cutShort = run.width < whole - 0.01;
+          if (!stuck) pushed = true;
+          if (stuck && cutShort) cut = true;
+          if (cutShort) {
+            // Never past the duty's end, „…“ where it is cut.
+            expect(
+              run.right,
+              closeTo(stripOn(tester, sunday).right - 6, 0.01),
+              reason: '$dx',
+            );
+            expect(
+              bandLabelParagraph(tester, both).didExceedMaxLines,
+              isTrue,
+              reason: '$dx',
+            );
+          }
+          // Only the labels moved: the headers were not built again.
+          expect(
+            identical(tester.widget(headerOf(sunday)), sundayHeader),
+            isTrue,
+            reason: '$dx',
+          );
+        }
+        expect(cut, isTrue, reason: 'the drag nears the duty\'s end');
+        expect(pushed, isTrue, reason: 'the drag reaches the duty\'s end');
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(headerOf(sunday)).dx, closeTo(rowLeft, 0.01));
+        expectLabels('settled');
+
+        // Back to the board's first day, the duty's first: the names ride
+        // its start again.
+        final back = await tester.startGesture(tester.getCenter(board));
+        for (final dx in <double>[30, 400, 400, 400, 400, 400]) {
+          await back.moveBy(Offset(dx, 0));
+          await tester.pump();
+          expectLabels('back $dx');
+        }
+        expect(
+          bandLabelRun(tester, both).left,
+          closeTo(stripOn(tester, Day(2026, 10, 5)).left + 6, 0.01),
+        );
+        await back.up();
+        await tester.pumpAndSettle();
+
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
+        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+
+        await finish(tester);
+      });
+
+      testWidgets('a player at the limit picks their name, then lets go of '
+          'it: the note comes and goes above the board, which stays where '
+          'it was, each duty\'s label drawn throughout', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+            // Anna's one live reservation is all she may hold.
+            maxActiveReservations: 1,
+            reservations: [
+              Reservation(
+                id: 'r1',
+                playerId: anna.id,
+                date: day.addDays(1),
+                blockId: 'b1',
+                lane: 2,
+                createdVia: 'app',
+                createdAt: DateTime.utc(2026, 1, 1),
+              ),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Two columns on: Saturday first, the current duty's names stuck
+        // to the row's left edge, the next one's at its Monday.
+        const columnWidth = (1920 - rowLeft) / 7;
+        final saturday = Day(2026, 10, 10);
+        await tester.drag(
+          find.byType(ListView).last,
+          const Offset(-2 * columnWidth, 0),
+        );
+        await tester.pumpAndSettle();
+        final note = find.textContaining('Máš maximální počet rezervací (1)');
+
+        // Every frame of it, the one where the note comes or goes too.
+        Future<void> expectBoard(String why) async {
+          for (var frame = 0; frame < 30; frame++) {
+            expect(tester.takeException(), isNull, reason: '$why $frame');
+            expect(
+              tester.getTopLeft(headerOf(saturday)).dx,
+              closeTo(rowLeft, 0.01),
+              reason: '$why $frame',
+            );
+            expect(
+              bandLabelRun(tester, both).left,
+              closeTo(rowLeft + 6, 0.01),
+              reason: '$why $frame',
+            );
+            expect(
+              bandLabelRun(tester, 'BB Hráč').left,
+              closeTo(stripOn(tester, monday).left + 6, 0.01),
+              reason: '$why $frame',
+            );
+            await tester.pump(const Duration(milliseconds: 20));
+          }
+        }
+
+        await expectBoard('before');
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
+        await expectBoard('picked');
+        expect(note, findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.close));
+        await expectBoard('let go');
+        expect(note, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a tap on the band shows the plan; the rest of the header '
+          'still lists the day\'s matches; the idle reset closes the plan', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Domácí')],
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final band = find.descendant(
+          of: headerOf(Day(2026, 10, 10)),
+          matching: find.byType(BoardBand),
+        );
+
+        await tester.tap(band);
+        await tester.pumpAndSettle();
+        expect(inDialog('Služby na kantýně'), findsOneWidget);
+        expect(inDialog('Teď slouží: $both'), findsOneWidget);
+        await tester.tap(inDialog('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await tester.tap(
+          find.descendant(
+            of: headerOf(day),
+            matching: find.textContaining('Domácí'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(dialog, findsOneWidget);
+        expect(inDialog('Služby na kantýně'), findsNothing);
+        await tester.tap(inDialog('Zavřít'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(band);
+        await tester.pumpAndSettle();
+        expect(inDialog('Služby na kantýně'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('the band off: none, and the headers as they were; on, '
+          'they grow by it, and a duty nobody is on has none', (
+        tester,
+      ) async {
+        fullHd(tester);
+        double headerHeight() =>
+            tester.getSize(find.byType(BoardColumnHeader).first).height;
+        await tester.pumpWidget(
+          app(dutyPeriods: periods, dutyAssignments: assignments),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(BoardBand), findsNothing);
+        expect(headerHeight(), boardHeaderHeight(0));
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now') a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(headerHeight(), boardHeaderHeight(0) + boardBandHeight);
+        for (var d = 8; d <= 11; d++) {
+          expect(bandOn(tester, Day(2026, 10, d)), isNull);
+        }
+        expect(bandOn(tester, Day(2026, 10, 12))!.label, 'BB Hráč');
+
+        await finish(tester);
+      });
+
+      // „V panelu“: the drawer's cards, each found by its title.
+      const dutyTitle = 'SLUŽBA NA KANTÝNĚ';
+      Finder cardTitled(String title) => find
+          .ancestor(of: drawerText(title), matching: find.byType(Container))
+          .first;
+      Finder inCard(String t) =>
+          find.descendant(of: cardTitled(dutyTitle), matching: find.text(t));
+      final withoutNow = [
+        for (final a in assignments)
+          if (a.periodId != 'now') a,
+      ];
+
+      testWidgets('„V panelu“: a card on top of the drawer — who serves now, '
+          'then the next five; the switch off, none', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(drawerText('Brigáda'), findsOneWidget);
+        expect(drawerText(dutyTitle), findsNothing);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyShare: 60,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(drawerText(dutyTitle), findsOneWidget);
+        expect(
+          find.descendant(
+            of: cardTitled(dutyTitle),
+            matching: find.byIcon(Icons.local_cafe_outlined),
+          ),
+          findsOneWidget,
+        );
+        expect(inCard('Teď slouží'), findsOneWidget);
+        expect(inCard(both), findsOneWidget);
+        expect(inCard('po 5. 10. – ne 11. 10.'), findsOneWidget);
+        expect(inCard('Další'), findsOneWidget);
+        // The five weeks ahead, top to bottom, range left of the names; the
+        // sixth is not listed and the one over is gone.
+        double? lastTop;
+        for (var i = 0; i < 5; i++) {
+          final range = inCard(dutyRangeLabel(ahead[i]));
+          final names = inCard(players[i + 1].displayName);
+          expect(range, findsOneWidget);
+          expect(names, findsOneWidget);
+          expect(
+            tester.getRect(range).right,
+            lessThan(tester.getRect(names).left),
+          );
+          final top = tester.getRect(range).top;
+          if (lastTop != null) expect(top, greaterThan(lastTop));
+          lastTop = top;
+        }
+        expect(inCard(dutyRangeLabel(ahead[5])), findsNothing);
+        expect(inCard(players[6].displayName), findsNothing);
+        expect(inCard(players[25].displayName), findsNothing);
+        expect(inCard(nothingAhead), findsNothing);
+        // Above the notices.
+        expect(
+          tester.getRect(cardTitled(dutyTitle)).bottom,
+          lessThan(tester.getRect(cardTitled('NÁSTĚNKA')).top),
+        );
+        // Only the card: the line and the band are switches of their own.
+        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.byType(BoardBand), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('nobody on today\'s duty, or nobody ahead: the card says '
+          'so', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyShare: 60,
+            dutyPeriods: periods,
+            dutyAssignments: withoutNow,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inCard('Dnes nikdo neslouží.'), findsOneWidget);
+        expect(inCard('Teď slouží'), findsNothing);
+        expect(inCard(both), findsNothing);
+        expect(inCard('Další'), findsOneWidget);
+        expect(inCard('BB Hráč'), findsOneWidget);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyPeriods: [current, over],
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inCard(both), findsOneWidget);
+        expect(inCard('Další'), findsNothing);
+        expect(inCard(nothingAhead), findsOneWidget);
+
+        await finish(tester);
+      });
+
+      testWidgets('the card takes the admin\'s share of the drawer; the '
+          'notices and the matches split the rest as before', (tester) async {
+        fullHd(tester);
+        for (final dutyShare in [30, 60]) {
+          await tester.pumpWidget(
+            app(
+              notices: [notice('1', 'Brigáda')],
+              slots: [fed('next', day.addDays(1), 'Příští')],
+              drawerOpen: true,
+              dutyDrawer: true,
+              dutyShare: dutyShare,
+              dutyPeriods: periods,
+              dutyAssignments: assignments,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          final drawer = tester.getRect(find.byType(KioskDrawer));
+          final duty = tester.getRect(cardTitled(dutyTitle));
+          final notices = tester.getRect(cardTitled('NÁSTĚNKA'));
+          final matches = tester.getRect(cardTitled('ZÁPASY'));
+          expect(duty.top, closeTo(drawer.top + 12, 0.01));
+          expect(notices.top, closeTo(duty.bottom + 12, 0.01));
+          expect(matches.bottom, closeTo(drawer.bottom - 12, 0.01));
+          final rest = matches.bottom - notices.top;
+          expect(
+            duty.height / rest,
+            closeTo(dutyShare / (100 - dutyShare), 0.001),
+          );
+          // The notices keep their 40 % of what is left.
+          expect(
+            notices.height / (notices.height + matches.height),
+            closeTo(0.4, 0.001),
+          );
+          await finish(tester);
+        }
+      });
+
+      testWidgets('with nothing else to show the card alone makes the drawer '
+          'and fills it; nothing planned, no card and no drawer', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyDrawer: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        // It rests closed, as the admin set the drawer.
+        expect(openButton, findsOneWidget);
+        await tester.tap(openButton);
+        await tester.pumpAndSettle();
+        final drawer = tester.getRect(find.byType(KioskDrawer));
+        final card = tester.getRect(cardTitled(dutyTitle));
+        expect(card.top, closeTo(drawer.top + 12, 0.01));
+        expect(card.bottom, closeTo(drawer.bottom - 12, 0.01));
+        expect(drawerText('NÁSTĚNKA'), findsNothing);
+        expect(drawerText('ZÁPASY'), findsNothing);
+        await finish(tester);
+
+        // Only a duty that is over: nothing to say, no drawer.
+        await tester.pumpWidget(
+          app(
+            dutyDrawer: true,
+            dutyPeriods: [over],
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(openButton, findsNothing);
+        expect(closeButton, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('in a narrow drawer the names go under the range, and '
+          'nothing overflows', (tester) async {
+        fullHd(tester);
+        // One of ten day columns: under 190 px for the whole drawer.
+        await tester.pumpWidget(
+          app(
+            drawerOpen: true,
+            visibleDays: 10,
+            drawerColumns: 1,
+            dutyDrawer: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(drawerText(dutyTitle), findsOneWidget);
+        expect(inCard(both), findsOneWidget);
+        for (var i = 0; i < 2; i++) {
+          final range = tester.getRect(inCard(dutyRangeLabel(ahead[i])));
+          final names = tester.getRect(inCard(players[i + 1].displayName));
+          expect(names.top, greaterThanOrEqualTo(range.bottom));
+          expect(names.left, range.left);
+          expect(names.width, greaterThan(0));
+        }
+
+        await finish(tester);
+      });
+
+      testWidgets('a card too short for the plan scrolls; the idle reset '
+          'brings it back to the top', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('next', day.addDays(1), 'Příští')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyShare: 10,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final card = tester.getRect(cardTitled(dutyTitle));
+        final last = inCard(players[5].displayName);
+        expect(tester.getRect(last).top, greaterThan(card.bottom));
+
+        await tester.drag(
+          find.descendant(
+            of: cardTitled(dutyTitle),
+            matching: find.byType(Scrollable),
+          ),
+          const Offset(0, -600),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getRect(last).bottom, lessThanOrEqualTo(card.bottom));
+
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(tester.getRect(last).top, greaterThan(card.bottom));
+
+        await finish(tester);
+      });
+
+      testWidgets('a match being played takes the whole drawer, the card '
+          'too; the list of matches brings it back', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            dutyDrawer: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(drawerText(dutyTitle), findsNothing);
+
+        await tester.tap(find.byTooltip('Všechny zápasy'));
+        await tester.pumpAndSettle();
+        expect(liveView, findsNothing);
+        expect(drawerText(dutyTitle), findsOneWidget);
+        expect(drawerText('ZÁPASY'), findsOneWidget);
+
+        await finish(tester);
+      });
+    });
+  });
+
+  testWidgets('the plan without anyone serving today leaves the „Teď slouží“ '
+      'block out', (tester) async {
+    final next = DutyPeriod(
+      id: 'next',
+      startsOn: Day(2026, 10, 12),
+      endsOn: Day(2026, 10, 18),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          kioskDutyPlanProvider.overrideWithValue((
+            now: null,
+            next: [KioskDutyEntry(next, const ['Jan Novák'])],
+          )),
+        ],
+        child: const MaterialApp(home: Scaffold(body: KioskDutyDialog())),
+      ),
+    );
+    expect(find.text('Služby na kantýně'), findsOneWidget);
+    expect(find.textContaining('Teď slouží'), findsNothing);
+    expect(find.text('Další'), findsOneWidget);
+    expect(find.text('po 12. 10. – ne 18. 10.'), findsOneWidget);
+    expect(find.text('Jan Novák'), findsOneWidget);
   });
 }

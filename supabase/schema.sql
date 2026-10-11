@@ -362,7 +362,7 @@ begin
     (match_id, tenant_id, status, match_type, discipline,
      home_points, away_points, home_total, away_total, home_fulls, away_fulls,
      home_spares, away_spares, home_errors, away_errors,
-     home_set_points, away_set_points, fetched_at)
+     home_set_points, away_set_points, fetched_at, decided_at)
   values
     (v_row.id, p_tenant, p_result->>'status',
      coalesce(p_result->>'match_type', ''), coalesce(p_result->>'discipline', ''),
@@ -371,7 +371,11 @@ begin
      (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
      (v_home->>'spares')::integer, (v_away->>'spares')::integer,
      (v_home->>'errors')::integer, (v_away->>'errors')::integer,
-     (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now())
+     (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now(),
+     -- clock_timestamp, not now(): two applies in one transaction (the
+     -- tenancy suite) must be able to tell a stamp kept from one re-set.
+     case when p_result->>'status' in ('finished', 'forfeit')
+          then clock_timestamp() end)
   on conflict (match_id) do update set
     status = excluded.status, match_type = excluded.match_type,
     discipline = excluded.discipline,
@@ -382,7 +386,8 @@ begin
     home_errors = excluded.home_errors, away_errors = excluded.away_errors,
     home_set_points = excluded.home_set_points,
     away_set_points = excluded.away_set_points,
-    fetched_at = now();
+    fetched_at = now(),
+    decided_at = coalesce(r.decided_at, excluded.decided_at);
 
   delete from match_player_results where match_id = v_row.id;
   insert into match_player_results
@@ -3446,21 +3451,16 @@ declare
 begin
   return jsonb_build_object(
     'tenant_name', (select name from tenants where id = v_tenant),
-    'settings', (select to_jsonb(s) - 'tenant_id'
-                          - 'duty_reminder_enabled' - 'duty_reminder_days'
-                          - 'kiosk_notices_mode' - 'kiosk_show_matches'
-                          - 'kiosk_show_upcoming' - 'kiosk_live_mode'
-                          - 'kiosk_drawer_open' - 'kiosk_drawer_columns'
-                          - 'kiosk_notices_share' - 'kiosk_zapis_percent'
-                          - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
-                          - 'kiosk_panel_enabled' - 'kiosk_past_days'
-                          - 'kiosk_notices_rotation_seconds'
-                          - 'kiosk_live_rotation_seconds'
-                          - 'kiosk_idle_seconds'
-                          - 'kiosk_live_layout' - 'kiosk_follow_board'
-                          - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_visible_days' - 'kiosk_font_size'
-                          - 'kiosk_animations' - 'kiosk_low_res'
+    -- An allow-list, not a mask: the six settings the public board reads
+    -- (the tenancy suite pins the set), so a column added later — every
+    -- kiosk option is the admin's — never reaches anon by default.
+    'settings', (select jsonb_build_object(
+                          'lane_count', s.lane_count,
+                          'training_weekdays', s.training_weekdays,
+                          'booking_horizon_days', s.booking_horizon_days,
+                          'max_active_reservations', s.max_active_reservations,
+                          'kiosk_dark', s.kiosk_dark,
+                          'kiosk_fit_day', s.kiosk_fit_day)
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5433,6 +5433,7 @@ CREATE TABLE IF NOT EXISTS "public"."match_results" (
     "home_set_points" numeric,
     "away_set_points" numeric,
     "fetched_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "decided_at" timestamp with time zone,
     CONSTRAINT "match_results_status_check" CHECK (("status" = ANY (ARRAY['scheduled'::"text", 'preparation'::"text", 'in_progress'::"text", 'finished'::"text", 'forfeit'::"text"])))
 );
 
@@ -5690,11 +5691,33 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
     "kiosk_animations" boolean DEFAULT true NOT NULL,
     "kiosk_low_res" boolean DEFAULT false NOT NULL,
+    "kiosk_stream" boolean DEFAULT false NOT NULL,
+    "kiosk_stream_corner" "text" DEFAULT 'bl'::"text" NOT NULL,
+    "kiosk_stream_width" smallint DEFAULT 35 NOT NULL,
+    "kiosk_weather" boolean DEFAULT false NOT NULL,
+    "kiosk_weather_place" "text",
+    "kiosk_weather_lat" double precision,
+    "kiosk_weather_lon" double precision,
+    "kiosk_nameday" boolean DEFAULT false NOT NULL,
+    "kiosk_warning" "text",
+    "kiosk_band_font_size" smallint DEFAULT 10 NOT NULL,
+    "kiosk_picker_note" "text" DEFAULT 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby v kantýně nebo u správce kuželny.'::"text",
+    "kiosk_todays_matches" boolean DEFAULT true NOT NULL,
+    "kiosk_stream_enabled" boolean DEFAULT true NOT NULL,
+    "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,
+    "kiosk_duty_header" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_board" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_drawer" boolean DEFAULT false NOT NULL,
+    "kiosk_duty_share" smallint DEFAULT 30 NOT NULL,
+    "kiosk_duty_band_position" "text" DEFAULT 'middle'::"text" NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 52))),
+    CONSTRAINT "schedule_settings_kiosk_band_font_size_check" CHECK ((("kiosk_band_font_size" >= 8) AND ("kiosk_band_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_drawer_columns_check" CHECK ((("kiosk_drawer_columns" >= 1) AND ("kiosk_drawer_columns" <= 13))),
+    CONSTRAINT "schedule_settings_kiosk_duty_band_position_check" CHECK (("kiosk_duty_band_position" = ANY (ARRAY['top'::"text", 'middle'::"text", 'bottom'::"text"]))),
+    CONSTRAINT "schedule_settings_kiosk_duty_share_check" CHECK ((("kiosk_duty_share" >= 10) AND ("kiosk_duty_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_font_size_check" CHECK ((("kiosk_font_size" >= 9) AND ("kiosk_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
@@ -5703,8 +5726,14 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
+    CONSTRAINT "schedule_settings_kiosk_picker_note_check" CHECK ((("kiosk_picker_note" IS NULL) OR (("char_length"("btrim"("kiosk_picker_note")) >= 1) AND ("char_length"("btrim"("kiosk_picker_note")) <= 200)))),
     CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
+    CONSTRAINT "schedule_settings_kiosk_stream_corner_check" CHECK (("kiosk_stream_corner" = ANY (ARRAY['tl'::"text", 'tr'::"text", 'bl'::"text", 'br'::"text"]))),
+    CONSTRAINT "schedule_settings_kiosk_stream_max_check" CHECK ((("kiosk_stream_max" >= 1) AND ("kiosk_stream_max" <= 4))),
+    CONSTRAINT "schedule_settings_kiosk_stream_width_check" CHECK ((("kiosk_stream_width" >= 20) AND ("kiosk_stream_width" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 2) AND ("kiosk_visible_days" <= 14))),
+    CONSTRAINT "schedule_settings_kiosk_warning_check" CHECK ((("kiosk_warning" IS NULL) OR (("char_length"("btrim"("kiosk_warning")) >= 1) AND ("char_length"("btrim"("kiosk_warning")) <= 200)))),
+    CONSTRAINT "schedule_settings_kiosk_weather_place_check" CHECK (((("kiosk_weather_lat" IS NULL) = ("kiosk_weather_lon" IS NULL)) AND (("kiosk_weather_lat" IS NULL) OR (("kiosk_weather_lat" >= ('-90'::integer)::double precision) AND ("kiosk_weather_lat" <= (90)::double precision))) AND (("kiosk_weather_lon" IS NULL) OR (("kiosk_weather_lon" >= ('-180'::integer)::double precision) AND ("kiosk_weather_lon" <= (180)::double precision))) AND (("kiosk_weather_place" IS NULL) OR (("char_length"("kiosk_weather_place") >= 1) AND ("char_length"("kiosk_weather_place") <= 200))))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))

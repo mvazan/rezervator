@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
 
@@ -34,6 +36,43 @@ void main() {
       expect(s.bookingHorizonDays, 7);
       expect(s.maxActiveReservations, 2);
       expect(s.kioskDark, isTrue); // absent → default true
+    });
+
+    test('fromJson: the kiosk warning trimmed; blank or absent is none', () {
+      ScheduleSettings settings(Object? warning) => ScheduleSettings.fromJson({
+        'lane_count': 6,
+        'training_weekdays': [1, 3],
+        'booking_horizon_days': 7,
+        'max_active_reservations': 2,
+        'kiosk_warning': warning,
+      });
+      expect(
+        settings('  Dráha 3 je mimo provoz. ').kioskWarning,
+        'Dráha 3 je mimo provoz.',
+      );
+      expect(settings('   ').kioskWarning, isNull);
+      expect(settings(null).kioskWarning, isNull);
+    });
+
+    test('fromJson: today\'s matches in the kiosk header — on when absent', () {
+      ScheduleSettings settings(Map<String, dynamic> extra) =>
+          ScheduleSettings.fromJson({
+            'lane_count': 6,
+            'training_weekdays': [1, 3],
+            'booking_horizon_days': 7,
+            'max_active_reservations': 2,
+            ...extra,
+          });
+      expect(settings({}).kioskTodaysMatches, isTrue);
+      expect(
+        settings({'kiosk_todays_matches': false}).kioskTodaysMatches,
+        isFalse,
+      );
+      expect(
+        settings({'kiosk_todays_matches': true}).kioskTodaysMatches,
+        isTrue,
+      );
+      expect(ScheduleSettings.defaults.kioskTodaysMatches, isTrue);
     });
 
     test('fromJson reads kiosk_dark when present', () {
@@ -73,6 +112,143 @@ void main() {
       final old = ScheduleSettings.fromJson(base);
       expect(old.dutyReminderEnabled, isFalse);
       expect(old.dutyReminderDays, 1);
+    });
+
+    test('fromJson: the kiosk picker note (0070) trimmed; blank or absent '
+        'is none', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      ScheduleSettings settings(Object? note) =>
+          ScheduleSettings.fromJson({...base, 'kiosk_picker_note': note});
+      expect(
+        settings('  Zrušit jde jen v aplikaci. ').kioskPickerNote,
+        'Zrušit jde jen v aplikaci.',
+      );
+      expect(settings('   ').kioskPickerNote, isNull);
+      expect(settings(null).kioskPickerNote, isNull);
+      expect(ScheduleSettings.fromJson(base).kioskPickerNote, isNull);
+    });
+
+    test('the default picker note is the column\'s default, letter for '
+        'letter', () {
+      // Every alley starts with it (0070); Správa → Kiosk offers the Dart
+      // copy back — the two must not drift apart.
+      final sql = File(
+        'supabase/migrations/0070_kiosk_picker_note.sql',
+      ).readAsStringSync();
+      final column = RegExp(
+        r"kiosk_picker_note text\s+default '([^']+)'",
+      ).firstMatch(sql)!.group(1);
+      expect(column, ScheduleSettings.defaultPickerNote);
+      expect(ScheduleSettings.defaultPickerNote.length, lessThanOrEqualTo(200));
+    });
+
+    test('fromJson reads the stream windows at once (0072); one when absent',
+        () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      expect(
+        ScheduleSettings.fromJson({...base, 'kiosk_stream_max': 3})
+            .kioskStreamMax,
+        3,
+      );
+      expect(ScheduleSettings.fromJson(base).kioskStreamMax, 1);
+    });
+
+    test('fromJson reads the kiosk\'s duty places and the card\'s share '
+        '(0073); off and 30 % when absent', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      final on = ScheduleSettings.fromJson({
+        ...base,
+        'kiosk_duty_header': true,
+        'kiosk_duty_board': true,
+        'kiosk_duty_drawer': true,
+        'kiosk_duty_share': 55,
+      });
+      expect(on.kioskDutyHeader, isTrue);
+      expect(on.kioskDutyBoard, isTrue);
+      expect(on.kioskDutyDrawer, isTrue);
+      expect(on.kioskDutyShare, 55);
+      final old = ScheduleSettings.fromJson(base);
+      expect(old.kioskDutyHeader, isFalse);
+      expect(old.kioskDutyBoard, isFalse);
+      expect(old.kioskDutyDrawer, isFalse);
+      expect(old.kioskDutyShare, 30);
+      expect(ScheduleSettings.defaults.kioskDutyHeader, isFalse);
+      expect(ScheduleSettings.defaults.kioskDutyBoard, isFalse);
+      expect(ScheduleSettings.defaults.kioskDutyDrawer, isFalse);
+      expect(ScheduleSettings.defaults.kioskDutyShare, 30);
+    });
+
+    test('fromJson reads where the duty band runs (0073); between the date '
+        'and the matches when absent or unknown', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      for (final (name, position) in [
+        ('top', KioskDutyBandPosition.top),
+        ('middle', KioskDutyBandPosition.middle),
+        ('bottom', KioskDutyBandPosition.bottom),
+      ]) {
+        expect(
+          ScheduleSettings.fromJson({
+            ...base,
+            'kiosk_duty_band_position': name,
+          }).kioskDutyBandPosition,
+          position,
+        );
+        // The name is the column's value.
+        expect(position.name, name);
+      }
+      expect(
+        ScheduleSettings.fromJson(base).kioskDutyBandPosition,
+        KioskDutyBandPosition.middle,
+      );
+      expect(
+        ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_duty_band_position': 'left',
+        }).kioskDutyBandPosition,
+        KioskDutyBandPosition.middle,
+      );
+      expect(
+        ScheduleSettings.defaults.kioskDutyBandPosition,
+        KioskDutyBandPosition.middle,
+      );
+      expect(KioskDutyBandPosition.parse(null), KioskDutyBandPosition.middle);
+    });
+
+    test('fromJson reads the streams master switch (0072); on when absent',
+        () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      expect(
+        ScheduleSettings.fromJson({...base, 'kiosk_stream_enabled': false})
+            .kioskStreamEnabled,
+        isFalse,
+      );
+      expect(ScheduleSettings.fromJson(base).kioskStreamEnabled, isTrue);
+      expect(ScheduleSettings.defaults.kioskStreamEnabled, isTrue);
     });
   });
 

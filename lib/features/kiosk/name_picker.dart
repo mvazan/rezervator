@@ -22,6 +22,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/name_index.dart';
 import '../../domain/palette.dart';
+import 'kiosk_warning.dart';
 
 /// How many candidates the picker is willing to show as name tiles at once
 /// before falling back to next-letter prefix tiles.
@@ -41,6 +42,24 @@ const _nameTileMinWidth = 300.0;
 const _maxNameColumns = 4;
 
 const _tileGap = 12.0;
+
+/// Above the first letters: which one to tap. The picker files a player
+/// under the name the board shows ([PlayerName.boardName]) — the nick, or
+/// the full name, which starts with the first name, when there is no nick.
+const firstLetterHint =
+    'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
+    'přezdívku nemáš.';
+
+/// The widest the admin's note under the letters gets: a wide screen does
+/// not stretch it into one line nobody reads to the end (two lines of its
+/// 18 px bold hold the column's 200 characters at this width).
+const _noteMaxWidth = 1000.0;
+
+/// Lines the note may take before an ellipsis: its end says where to
+/// cancel, so a narrower screen gets more lines rather than a cut — the
+/// default text keeps whole down to a phone, 200 characters down to a
+/// portrait tablet.
+const _noteMaxLines = 6;
 
 Future<PlayerName?> showNamePicker(
   BuildContext context, {
@@ -163,6 +182,11 @@ class _NamePickerState extends ConsumerState<NamePicker> {
       prefix: _prefix,
       capacity: _capacity,
     );
+    // The admin's note (0070) — by default that a training cannot be
+    // cancelled here, and where it can.
+    final note = ref.watch(
+      settingsProvider.select((s) => s.value?.kioskPickerNote),
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
@@ -198,6 +222,23 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                                   context, exactMatches, constraints.maxWidth),
                               const SizedBox(height: 24),
                             ],
+                            // The first letters only: which letter is
+                            // „mine“ is not obvious — the index goes by the
+                            // name on the board (nameIndex), a nick when
+                            // there is one, not by the surname.
+                            if (_prefix.isEmpty) ...[
+                              Text(
+                                firstLetterHint,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                              const SizedBox(height: 24),
+                            ],
                             Wrap(
                               spacing: _tileGap,
                               runSpacing: _tileGap,
@@ -211,10 +252,26 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                                   ),
                               ],
                             ),
+                            // The admin's note under the letters: the hint
+                            // and the letters are what the page is for, the
+                            // note is for whoever came to cancel. The later
+                            // pages go without it.
+                            if (_prefix.isEmpty && note != null)
+                              ..._note(note),
                           ],
                         ),
-                      NamesNode(:final players) =>
-                        _nameGrid(context, players, constraints.maxWidth),
+                      // A small alley (up to `_capacity` players) opens on
+                      // its names — the first page all the same, so the
+                      // note stands under them; no hint, there are no
+                      // letters to explain.
+                      NamesNode(:final players) => Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _nameGrid(context, players, constraints.maxWidth),
+                            if (_prefix.isEmpty && note != null)
+                              ..._note(note),
+                          ],
+                        ),
                     },
                   ),
                 ),
@@ -225,6 +282,15 @@ class _NamePickerState extends ConsumerState<NamePicker> {
       ),
     );
   }
+
+  /// The admin's note (0070) under the first page's tiles.
+  List<Widget> _note(String note) => [
+        const SizedBox(height: 24),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _noteMaxWidth),
+          child: KioskWarning(text: note, maxLines: _noteMaxLines),
+        ),
+      ];
 
   Widget _breadcrumb(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 16),

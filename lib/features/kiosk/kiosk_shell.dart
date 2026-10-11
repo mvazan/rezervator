@@ -15,7 +15,8 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
-import '../../domain/kiosk_panel.dart' show kioskNotices;
+import '../../domain/kiosk_panel.dart'
+    show hasKioskVideo, kioskNotices, kioskStreamLabel;
 import '../../domain/models.dart';
 import '../../domain/results.dart' show hasScoreData;
 import '../../domain/schedule.dart'
@@ -23,8 +24,12 @@ import '../../domain/schedule.dart'
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
+import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
+import 'kiosk_duty.dart';
 import 'kiosk_headline.dart';
+import 'kiosk_warning.dart';
+import 'kiosk_stream_window.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
@@ -161,50 +166,77 @@ class _KioskShellState extends ConsumerState<KioskShell>
     child: Theme(data: _kioskTheme(), child: child),
   );
 
-  void _openNotice(Message notice) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => _touchable(
-        AlertDialog(
-          title: Text(notice.title ?? ''),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(notice.body),
-                  if (notice.expiresAt != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Platí do ${notice.expiresAt!.toLocal().day}. '
-                      '${notice.expiresAt!.toLocal().month}.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+  Future<void> _openNotice(Message notice) => showDialog<void>(
+    context: context,
+    builder: (context) => _touchable(
+      AlertDialog(
+        title: Text(notice.title ?? ''),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(notice.body),
+                if (notice.expiresAt != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Platí do ${notice.expiresAt!.toLocal().day}. '
+                    '${notice.expiresAt!.toLocal().month}.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Zavřít'),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Zavřít'),
+          ),
+        ],
       ),
-    );
+    ),
+  );
+
+  /// A tap on a match of the board or the header: one with a score opens
+  /// its Zápis; one without, but with a video, its stream — while the
+  /// streams are on ([_play]).
+  void _openMatchOrStream(PrioritySlot match) {
+    final result = ref.read(matchResultsProvider).value?[match.id];
+    final play = _play;
+    if (hasScoreData(result)) {
+      _openMatch(match);
+    } else if (play != null && hasKioskVideo(match)) {
+      play(match);
+    }
   }
 
-  /// A tap on a match of the board: only one with a score has a Zápis.
-  void _openMatchIfScored(PrioritySlot match) {
-    final result = ref.read(matchResultsProvider).value?[match.id];
-    if (hasScoreData(result)) _openMatch(match);
+  /// A visitor's ▶ (0072): [match]'s video in a stream window.
+  void _openStream(PrioritySlot match) =>
+      ref.read(kioskStreamsProvider.notifier).open(match.id);
+
+  /// The canteen duty's plan (0073), from wherever the kiosk names who
+  /// serves.
+  void _openDuty() =>
+      unawaited(showKioskDutyDialog(context, wrap: _touchable));
+
+  /// The ▶ handed to everything that has one — the drawer's matches, the
+  /// live badge, the Zápis, a day's matches, a tap on a match without a
+  /// score — or null while the admin has the streams off (0072): then none
+  /// of them shows one, and [kioskStreamProvider] keeps the windows shut.
+  /// Read, not watched: the shell's build watches the settings already, so
+  /// a flip of the switch rebuilds whatever this was handed to.
+  void Function(PrioritySlot match)? get _play {
+    final on = ref.read(settingsProvider).value?.kioskStreamEnabled ?? true;
+    return on ? _openStream : null;
   }
 
   void _openMatch(PrioritySlot match) {
+    final now = ref.read(nowProvider).value ?? DateTime.now();
+    final play = _play;
     unawaited(
       showKioskZapis(
         context,
@@ -214,7 +246,49 @@ class _KioskShellState extends ConsumerState<KioskShell>
             : Brightness.light,
         percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
         onTouch: _touch,
+        // The Zápis closes and the stream opens beside the board.
+        play: play != null && hasKioskVideo(match)
+            ? (
+                label: kioskStreamLabel(
+                  match,
+                  ref.read(matchResultsProvider).value?[match.id],
+                  now,
+                ),
+                onPlay: () => play(match),
+              )
+            : null,
       ),
+    );
+  }
+
+  /// The stream windows (0066, 0072) over [board] while a stream is open;
+  /// [board] alone otherwise. Their own layer: the players and their
+  /// frames move without re-recording the board.
+  Widget _withStream(Widget board) {
+    final streams = ref.watch(kioskStreamProvider);
+    // The same tree with or without the windows — [board] stays in its
+    // slot, so a stream opening or closing never re-inflates the board and
+    // the drawer (the notices' turn, the list's weeks, the live refresh).
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        board,
+        if (streams.isNotEmpty)
+          RepaintBoundary(
+            // No player takes touches while any route sits above the
+            // shell's own — the name picker, a notice, a day's matches, the
+            // Zápis, a booking confirm: on the web a dialog over an iframe
+            // is see-through to YouTube (spec §5). The route itself says
+            // so, nothing pushed later can be missed; isCurrentOf rebuilds
+            // this builder on a push and a pop, not the board.
+            child: Builder(
+              builder: (context) => KioskStreamLayer(
+                streams: streams,
+                interactive: ModalRoute.isCurrentOf(context) ?? true,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -224,6 +298,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final content = ref.watch(kioskPanelContentProvider);
     final settings = ref.watch(settingsProvider).value;
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final play = _play;
     final drawerWidth = kioskDrawerWidthFor(
       screenWidth,
       columns: settings?.kioskDrawerColumns ?? 2,
@@ -232,13 +307,15 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final board = KioskBoardView(
       key: _boardKey,
       selected: _selected,
-      onOpenMatch: _openMatchIfScored,
+      onOpenMatch: _openMatchOrStream,
+      onPlayVideo: play,
       // The columns are sized on the whole screen, the drawer is a whole
       // number of them (kioskDrawerWidthFor): open or closed, the board
       // shows whole days, and the columns never resize mid-slide.
       columnBasisWidth: screenWidth,
       onVisibleDays: (first, last) =>
           setState(() => _boardDays = (first: first, last: last)),
+      onOpenDuty: _openDuty,
     );
     if (content == null) return board;
     // A match being played keeps the drawer open: a visitor may close it,
@@ -263,6 +340,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 open: open,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatch,
+                onPlay: play,
                 resetToken: _resets,
                 showLive: !_liveHidden,
                 onShowLive: (live) => setState(() => _liveHidden = !live),
@@ -331,7 +409,8 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
                 onOpenNotice: _openNotice,
-                onOpenMatch: _openMatchIfScored,
+                onOpenMatch: _openMatchOrStream,
+                onOpenDuty: _openDuty,
               ),
               const KioskOfflineBanner(),
               // The idle bar: thin, filling from left to right until the reset.
@@ -357,7 +436,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                       : null,
                 ),
               ),
-              Expanded(child: _boardWithPanel()),
+              Expanded(child: _withStream(_boardWithPanel())),
             ],
           ),
         ),
@@ -375,6 +454,7 @@ class _StatusBar extends ConsumerWidget {
     required this.onClearSelection,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    required this.onOpenDuty,
   });
 
   final PlayerName? selected;
@@ -382,21 +462,31 @@ class _StatusBar extends ConsumerWidget {
   final VoidCallback onClearSelection;
   final void Function(Message notice) onOpenNotice;
 
-  /// A tap on one of today's matches: its Zápis, once it has a score.
+  /// A tap on one of today's matches: its Zápis once it has a score, its
+  /// stream before that when it has a video.
   final void Function(PrioritySlot match) onOpenMatch;
 
-  /// Today's matches, start-ordered; Úklid children are plumbing (their
-  /// match already announces).
-  List<PrioritySlot> _todaysMatches(WidgetRef ref, Day todayDay) =>
-      ref
-          .watch(prioritySlotsProvider)
-          .where((m) => m.date == todayDay && m.parentId == null)
-          .toList()
-        ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+  /// A tap on the canteen duty's line: the plan.
+  final VoidCallback onOpenDuty;
+
+  /// Today's matches the bar lists, start-ordered; Úklid children are
+  /// plumbing (their match already announces). None while the admin keeps
+  /// them out of the header (0071): the bar then reads as on a day without
+  /// a match.
+  List<PrioritySlot> _todaysMatches(WidgetRef ref, Day todayDay) {
+    if (!(ref.watch(settingsProvider).value?.kioskTodaysMatches ?? true)) {
+      return const [];
+    }
+    return ref
+        .watch(prioritySlotsProvider)
+        .where((m) => m.date == todayDay && m.parentId == null)
+        .toList()
+      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+  }
 
   String _infoLine(WidgetRef ref, Day todayDay) {
     // Today's matches are not a line of text: [build] lists them, each
-    // one tappable.
+    // one tappable. Hidden by the admin, they leave the line its say.
     if (_todaysMatches(ref, todayDay).isNotEmpty) return '';
 
     final settings =
@@ -440,18 +530,32 @@ class _StatusBar extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
-    final info = _infoLine(ref, todayDay);
-    final todays = _todaysMatches(ref, todayDay);
+    // The admin's warning (0068): while it hangs, it is all the bar says
+    // beside the clock — today's matches, the info line and the notices
+    // step aside, so nobody reads past it.
+    final warning = ref.watch(settingsProvider).value?.kioskWarning;
+    final info = warning != null ? '' : _infoLine(ref, todayDay);
+    final todays = warning != null
+        ? const <PrioritySlot>[]
+        : _todaysMatches(ref, todayDay);
     // Kept listened to: a tap on a match reads it to decide whether there
     // is a Zápis, and with the drawer closed nothing else may hold it.
     ref.watch(matchResultsProvider);
     final infoStyle = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
     final notices =
-        (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
+        warning == null &&
+            (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
         ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
         : const <Message>[];
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    // Who serves today (0073) — the plan is read only with the line on.
+    // The canteen duty's line (0073) steps aside for the warning too.
+    final duty =
+        warning == null &&
+            (ref.watch(settingsProvider).value?.kioskDutyHeader ?? false)
+        ? ref.watch(kioskDutyPlanProvider.select((plan) => plan.now))
+        : null;
 
     return Container(
       color: scheme.surfaceContainerHighest,
@@ -476,14 +580,26 @@ class _StatusBar extends ConsumerWidget {
                   dayFull(todayDay),
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
+                if (duty != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: KioskDutyLine(entry: duty, onTap: onOpenDuty),
+                  ),
               ],
             ),
+            // Today's weather and name day, when the admin wants them —
+            // and no warning hangs: it is then all the bar says.
+            if (warning == null) const KioskDayInfo(),
             const SizedBox(width: 16),
             Expanded(
               child: Row(
                 children: [
+                  // The admin's warning: alone in the bar's middle.
+                  if (warning != null)
+                    Expanded(child: KioskWarning(text: warning)),
                   // Today's matches, one tap target each: a match with a score
-                  // opens its Zápis, as everywhere else on the kiosk.
+                  // opens its Zápis, as everywhere else on the kiosk; one
+                  // with a video and no score yet, its stream.
                   if (todays.isNotEmpty)
                     Expanded(
                       flex: notices.isEmpty ? 1 : 2,

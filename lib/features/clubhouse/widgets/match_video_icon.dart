@@ -33,6 +33,7 @@ class MatchLeading extends StatefulWidget {
     required this.fallback,
     this.colorId,
     this.launch = launchWeb,
+    this.pulse = true,
   });
 
   final PrioritySlot slot;
@@ -53,6 +54,11 @@ class MatchLeading extends StatefulWidget {
   final int? colorId;
 
   final void Function(String url) launch;
+
+  /// False = the live badge stays still, no ring: the kiosk's „Opakující
+  /// se animace“ off (0065) — on a slow display every pulse repaints the
+  /// screen.
+  final bool pulse;
 
   @override
   State<MatchLeading> createState() => _MatchLeadingState();
@@ -94,7 +100,8 @@ class _MatchLeadingState extends State<MatchLeading>
   /// setting flips) just as easily as [_live] can, so both call sites run
   /// this instead of deciding once in [initState].
   void _syncPulse() {
-    final shouldRun = _live && !MediaQuery.disableAnimationsOf(context);
+    final shouldRun =
+        _live && widget.pulse && !MediaQuery.disableAnimationsOf(context);
     if (shouldRun) {
       final pulse = _pulse ??= AnimationController(
         vsync: this,
@@ -147,7 +154,8 @@ class _MatchLeadingState extends State<MatchLeading>
 
     final theme = Theme.of(context);
     final live = _live;
-    final pulsing = live && !MediaQuery.disableAnimationsOf(context);
+    final pulsing =
+        live && widget.pulse && !MediaQuery.disableAnimationsOf(context);
     final status = widget.result?.status;
     final recorded =
         status == MatchStatus.finished || status == MatchStatus.forfeit;
@@ -202,7 +210,8 @@ class _MatchLeadingState extends State<MatchLeading>
     // wraps its child in Semantics with that message) — no extra wrapper
     // needed for "Tooltip + semantics Živý přenos".
     return IconButton(
-      icon: badge,
+      // The ring repaints every frame: only the badge, not the row.
+      icon: pulsing ? RepaintBoundary(child: badge) : badge,
       tooltip: tooltip,
       padding: EdgeInsets.zero,
       constraints:

@@ -921,4 +921,201 @@ void main() {
       expect(gap.past, [past1]);
     });
   });
+
+  group('kioskDutyPlan', () {
+    const names = {
+      'jan': 'Jan Novák',
+      'petr': 'Petr Svoboda',
+      'adam': 'Adam Beneš',
+      'cyril': 'Čestmír Cimrman',
+      'chalupa': 'Chalupa Hynek',
+      'hruby': 'Hrubý Ivan',
+    };
+    final past = period('past', Day(2026, 9, 28), Day(2026, 10, 4));
+    final now = period('now', Day(2026, 10, 5), Day(2026, 10, 11));
+    final next1 = period('next1', Day(2026, 10, 12), Day(2026, 10, 18));
+    final next2 = period('next2', Day(2026, 10, 19), Day(2026, 10, 25));
+    final assignments = [
+      assign('past', 'adam'),
+      assign('now', 'petr'),
+      assign('now', 'jan'),
+      assign('next1', 'adam'),
+      assign('next2', 'cyril'),
+    ];
+
+    test('who serves now and the ones ahead, in date order', () {
+      final plan = kioskDutyPlan(
+        [next2, past, now, next1],
+        assignments,
+        names,
+        Day(2026, 10, 7),
+      );
+      expect(
+        plan.now,
+        KioskDutyEntry(now, const ['Jan Novák', 'Petr Svoboda']),
+      );
+      expect(plan.next, [
+        KioskDutyEntry(next1, const ['Adam Beneš']),
+        KioskDutyEntry(next2, const ['Čestmír Cimrman']),
+      ]);
+    });
+
+    test('the entry reads as the app writes a duty', () {
+      final entry = kioskDutyPlan(
+        [now],
+        assignments,
+        names,
+        Day(2026, 10, 7),
+      ).now!;
+      expect(entry.range, 'po 5. 10. – ne 11. 10.');
+      expect(entry.who, 'Jan Novák a Petr Svoboda');
+    });
+
+    test('a period ending today still runs; one starting tomorrow is next',
+        () {
+      final plan = kioskDutyPlan(
+        [now, next1],
+        assignments,
+        names,
+        Day(2026, 10, 11),
+      );
+      expect(plan.now?.period, now);
+      expect([for (final e in plan.next) e.period], [next1]);
+    });
+
+    test('nobody serving between two duties', () {
+      final plan = kioskDutyPlan(
+        [past, next1],
+        assignments,
+        names,
+        Day(2026, 10, 7),
+      );
+      expect(plan.now, isNull);
+      expect([for (final e in plan.next) e.period], [next1]);
+    });
+
+    test('an unassigned period is no entry, now or ahead', () {
+      final plan = kioskDutyPlan(
+        [now, next1, next2],
+        [assign('next2', 'cyril')],
+        names,
+        Day(2026, 10, 7),
+      );
+      expect(plan.now, isNull);
+      expect([for (final e in plan.next) e.period], [next2]);
+    });
+
+    test('an id the roster does not know is left out; with no known one the '
+        'period is no entry', () {
+      final plan = kioskDutyPlan(
+        [now, next1],
+        [
+          assign('now', 'jan'),
+          assign('now', 'gone'),
+          assign('next1', 'gone'),
+        ],
+        names,
+        Day(2026, 10, 7),
+      );
+      expect(plan.now?.names, ['Jan Novák']);
+      expect(plan.next, isEmpty);
+    });
+
+    test('names are Czech-sorted (C, Č, H, Ch)', () {
+      final plan = kioskDutyPlan(
+        [now],
+        [
+          assign('now', 'chalupa'),
+          assign('now', 'hruby'),
+          assign('now', 'cyril'),
+          assign('now', 'adam'),
+        ],
+        names,
+        Day(2026, 10, 7),
+      );
+      expect(plan.now?.names, [
+        'Adam Beneš',
+        'Čestmír Cimrman',
+        'Hrubý Ivan',
+        'Chalupa Hynek',
+      ]);
+    });
+
+    test('at most five ahead by default, or as many as asked; unassigned '
+        'ones do not count', () {
+      final ahead = [
+        for (var i = 0; i < 8; i++)
+          period(
+            'w$i',
+            Day(2026, 10, 12).addDays(7 * i),
+            Day(2026, 10, 18).addDays(7 * i),
+          ),
+      ];
+      final staffed = [
+        for (var i = 0; i < 8; i++)
+          if (i != 1) assign('w$i', 'jan'),
+      ];
+      List<String> ids(List<KioskDutyEntry> entries) => [
+        for (final e in entries) e.period.id,
+      ];
+      expect(
+        ids(kioskDutyPlan(ahead, staffed, names, Day(2026, 10, 7)).next),
+        ['w0', 'w2', 'w3', 'w4', 'w5'],
+      );
+      expect(
+        ids(
+          kioskDutyPlan(
+            ahead,
+            staffed,
+            names,
+            Day(2026, 10, 7),
+            ahead: 2,
+          ).next,
+        ),
+        ['w0', 'w2'],
+      );
+    });
+  });
+
+  group('kioskDutyOn', () {
+    const names = {'jan': 'Jan Novák', 'petr': 'Petr Svoboda'};
+    final week = period('week', Day(2026, 10, 5), Day(2026, 10, 11));
+    final single = period('single', Day(2026, 10, 14), Day(2026, 10, 14));
+    final empty = period('empty', Day(2026, 10, 15), Day(2026, 10, 16));
+    final periods = [week, single, empty];
+    final assignments = [
+      assign('week', 'petr'),
+      assign('week', 'jan'),
+      assign('single', 'petr'),
+    ];
+
+    // Where the band's piece starts or ends follows from the period's
+    // dates — the board's [BoardBandSegment] (the kiosk's widget tests).
+    test('the period covering a day, from its first day to its last', () {
+      final both = KioskDutyEntry(week, const ['Jan Novák', 'Petr Svoboda']);
+      for (final d in [5, 8, 11]) {
+        expect(
+          kioskDutyOn(periods, assignments, names, Day(2026, 10, d)),
+          both,
+          reason: '$d',
+        );
+      }
+    });
+
+    test('a one-day duty on its day', () {
+      final one = kioskDutyOn(periods, assignments, names, Day(2026, 10, 14));
+      expect(one, KioskDutyEntry(single, const ['Petr Svoboda']));
+    });
+
+    test('no duty on a day: none, nor on an unassigned period\'s day', () {
+      expect(
+        kioskDutyOn(periods, assignments, names, Day(2026, 10, 12)),
+        isNull,
+      );
+      expect(
+        kioskDutyOn(periods, assignments, names, Day(2026, 10, 15)),
+        isNull,
+      );
+    });
+  });
 }

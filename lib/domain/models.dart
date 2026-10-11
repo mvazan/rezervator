@@ -635,6 +635,25 @@ class AdminTenant {
 /// all, in the drawer, one title at a time in the status bar, or both.
 enum KioskNoticesMode { off, drawer, header, both }
 
+/// Where the canteen duty's band runs in the kiosk board's day headers
+/// (0073, `kiosk_duty_band_position`): above the day label ([top]),
+/// between the label and the day's matches ([middle]) or along the
+/// headers' bottom edge under the matches ([bottom]). The names are the
+/// column's values — do not rename one.
+enum KioskDutyBandPosition {
+  top,
+  middle,
+  bottom;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [middle], the column's default.
+  static KioskDutyBandPosition parse(String? value) => switch (value) {
+        'top' => KioskDutyBandPosition.top,
+        'bottom' => KioskDutyBandPosition.bottom,
+        _ => KioskDutyBandPosition.middle,
+      };
+}
+
 /// How a match is drawn — the kiosk's live match (0064,
 /// `kiosk_live_layout`) and the app's match detail (a device preference per
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
@@ -659,6 +678,35 @@ MatchLayout parseMatchLayout(
     orElse: () => fallback,
   );
   return found == MatchLayout.zapis && !allowZapis ? fallback : found;
+}
+
+/// Where the kiosk's stream window first appears (0066).
+enum KioskCorner {
+  tl,
+  tr,
+  bl,
+  br;
+
+  bool get top => this == tl || this == tr;
+  bool get left => this == tl || this == bl;
+
+  /// This corner, then the one above or below it, the one beside it, the
+  /// one across: where the kiosk's further stream windows appear (0072) —
+  /// the same side first, the drawer's side (the default corner is bottom
+  /// left) last.
+  List<KioskCorner> get fromHere => [
+    this,
+    _at(top: !top, left: left),
+    _at(top: top, left: !left),
+    _at(top: !top, left: !left),
+  ];
+
+  static KioskCorner _at({required bool top, required bool left}) =>
+      top ? (left ? tl : tr) : (left ? bl : br);
+
+  /// The stored name, or bottom left for anything else.
+  static KioskCorner parse(String? name) =>
+      values.where((c) => c.name == name).firstOrNull ?? bl;
 }
 
 class ScheduleSettings {
@@ -688,8 +736,27 @@ class ScheduleSettings {
     this.kioskIdleSeconds = 60,
     this.kioskVisibleDays = 7,
     this.kioskFontSize = 11,
+    this.kioskPickerNote,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
+    this.kioskStreamEnabled = true,
+    this.kioskStream = false,
+    this.kioskStreamCorner = KioskCorner.bl,
+    this.kioskStreamWidth = 35,
+    this.kioskWeather = false,
+    this.kioskWeatherPlace,
+    this.kioskWeatherLat,
+    this.kioskWeatherLon,
+    this.kioskNameday = false,
+    this.kioskWarning,
+    this.kioskBandFontSize = 10,
+    this.kioskTodaysMatches = true,
+    this.kioskStreamMax = 1,
+    this.kioskDutyHeader = false,
+    this.kioskDutyBoard = false,
+    this.kioskDutyDrawer = false,
+    this.kioskDutyShare = 30,
+    this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -733,13 +800,67 @@ class ScheduleSettings {
   /// other days sees the list turn to their matches (0064).
   final bool kioskFollowBoard;
 
-  /// The drawer button breathes — a glow every few seconds. Off for a slow
-  /// display, where the glow repaints the screen for nothing (0065).
+  /// The kiosk's animations on their own: the drawer button breathes — a
+  /// glow every few seconds (0065) — and the live-stream badge pulses (the
+  /// live view, the day's list). Off for a slow display, where they repaint
+  /// the screen for nothing.
   final bool kioskAnimations;
 
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
+
+  /// The kiosk's streams at all (0072): off, no match has a ▶ and no
+  /// stream window opens, whatever the settings below say.
+  final bool kioskStreamEnabled;
+
+  /// The match on air with a YouTube link opens by itself in a floating
+  /// window on the kiosk (0066; a visitor's ▶ opens any match's video
+  /// regardless); where a window first appears and how wide, in percent of
+  /// the screen (16:9 gives the height).
+  final bool kioskStream;
+  final KioskCorner kioskStreamCorner;
+  final int kioskStreamWidth;
+  /// Today's weather beside the kiosk's clock (0067), for the place the
+  /// admin picked — the label it shows and its coordinates (both or
+  /// neither). The kiosk asks Open-Meteo itself.
+  final bool kioskWeather;
+  final String? kioskWeatherPlace;
+  final double? kioskWeatherLat;
+  final double? kioskWeatherLon;
+
+  /// Whose name day it is, beside the kiosk's clock (0067).
+  final bool kioskNameday;
+
+  /// A warning the admin typed for the kiosk's status bar (0068) — shown
+  /// with a warning icon beside the clock; null = none.
+  final String? kioskWarning;
+  /// The px size of the bands' text (matches, blockages, rentals) on the
+  /// kiosk board (0069); the app keeps 10.
+  final int kioskBandFontSize;
+
+  /// The kiosk's status bar lists today's matches beside the clock (0071);
+  /// off = it says what it says on a day without a match.
+  final bool kioskTodaysMatches;
+
+  /// How many stream windows at once, 1–4 (0072): 1 turns through the
+  /// open streams in one window, more give each its own.
+  final int kioskStreamMax;
+  /// The canteen duty on the kiosk (0073), each place switched on by
+  /// itself: today's duty under the clock in the status bar, a tap shows
+  /// the plan ([kioskDutyHeader]); a band across a duty's days in the
+  /// board's day headers ([kioskDutyBoard]); a card with the duty and the
+  /// plan in the side drawer ([kioskDutyDrawer]).
+  final bool kioskDutyHeader;
+  final bool kioskDutyBoard;
+  final bool kioskDutyDrawer;
+
+  /// Percent of the drawer's height the duty card takes (0073); the
+  /// notices and the matches share the rest as before.
+  final int kioskDutyShare;
+
+  /// Where the band of [kioskDutyBoard] runs in the day headers (0073).
+  final KioskDutyBandPosition kioskDutyBandPosition;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -786,6 +907,12 @@ class ScheduleSettings {
   /// font follows the rows instead (`kioskRowFont`).
   final int kioskFontSize;
 
+  /// A note on the first page of the kiosk's name picker (0070) — under
+  /// its first letters, or under the names when a small alley lists them
+  /// at once —, by default [defaultPickerNote], that a training cannot be
+  /// cancelled at the kiosk; null = none.
+  final String? kioskPickerNote;
+
   /// How a match being played is drawn in the drawer (0064).
   final MatchLayout kioskLiveLayout;
 
@@ -808,6 +935,14 @@ class ScheduleSettings {
     bookingHorizonDays: 14,
     maxActiveReservations: 3,
   );
+
+  /// The [kioskPickerNote] every alley starts with — the column's default
+  /// in 0070, letter for letter (a test compares the two); Správa → Kiosk
+  /// offers it back.
+  static const defaultPickerNote =
+      'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci '
+      'Rezervátor, na webu rezervator.online, u služby v kantýně nebo u '
+      'správce kuželny.';
 
   factory ScheduleSettings.fromJson(Map<String, dynamic> json) =>
       ScheduleSettings(
@@ -844,8 +979,37 @@ class ScheduleSettings {
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
         kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 7,
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
+        kioskPickerNote: switch (json['kiosk_picker_note']) {
+          final String n when n.trim().isNotEmpty => n.trim(),
+          _ => null,
+        },
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
+        kioskStreamEnabled: json['kiosk_stream_enabled'] as bool? ?? true,
+        kioskStream: json['kiosk_stream'] as bool? ?? false,
+        kioskStreamCorner: KioskCorner.parse(
+          json['kiosk_stream_corner'] as String?,
+        ),
+        kioskStreamWidth: json['kiosk_stream_width'] as int? ?? 35,
+        kioskWeather: json['kiosk_weather'] as bool? ?? false,
+        kioskWeatherPlace: json['kiosk_weather_place'] as String?,
+        kioskWeatherLat: (json['kiosk_weather_lat'] as num?)?.toDouble(),
+        kioskWeatherLon: (json['kiosk_weather_lon'] as num?)?.toDouble(),
+        kioskNameday: json['kiosk_nameday'] as bool? ?? false,
+        kioskWarning: switch (json['kiosk_warning']) {
+          final String w when w.trim().isNotEmpty => w.trim(),
+          _ => null,
+        },
+        kioskBandFontSize: json['kiosk_band_font_size'] as int? ?? 10,
+        kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
+        kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
+        kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
+        kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,
+        kioskDutyDrawer: json['kiosk_duty_drawer'] as bool? ?? false,
+        kioskDutyShare: json['kiosk_duty_share'] as int? ?? 30,
+        kioskDutyBandPosition: KioskDutyBandPosition.parse(
+          json['kiosk_duty_band_position'] as String?,
+        ),
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,
@@ -1164,6 +1328,7 @@ class MatchResult {
     this.homeSetPoints,
     this.awaySetPoints,
     required this.fetchedAt,
+    this.decidedAt,
   });
 
   final String matchId;
@@ -1182,7 +1347,14 @@ class MatchResult {
   final int? awayErrors;
   final num? homeSetPoints;
   final num? awaySetPoints;
+
+  /// When the server last read the result off the site.
   final DateTime fetchedAt;
+
+  /// When the server first saw the result decided (finished, forfeit; 0066)
+  /// — unlike [fetchedAt] it does not move with a later re-read. Null for
+  /// an undecided match, and for a league match's result (0055).
+  final DateTime? decidedAt;
 
   factory MatchResult.fromJson(Map<String, dynamic> json) => MatchResult(
         matchId: json['match_id'] as String,
@@ -1202,6 +1374,10 @@ class MatchResult {
         homeSetPoints: json['home_set_points'] as num?,
         awaySetPoints: json['away_set_points'] as num?,
         fetchedAt: DateTime.parse(json['fetched_at'] as String),
+        decidedAt: switch (json['decided_at']) {
+          final String s => DateTime.parse(s),
+          _ => null,
+        },
       );
 }
 

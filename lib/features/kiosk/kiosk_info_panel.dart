@@ -1,7 +1,9 @@
-/// The kiosk's side drawer: the alley's active notices (they take turns when
-/// there are several; a tap reads one in full), the matches of the last and
-/// next weeks (a tap on a finished one opens its Zápis) — and, while a match
-/// is being played, that match across the whole drawer in the Souboje view
+/// The kiosk's side drawer: who serves on the canteen and who comes next
+/// (0073, on top), the alley's active notices (they take turns when there
+/// are several; a tap reads one in full), the matches of the last and next
+/// weeks (a tap on a finished one opens its Zápis, ▶ at one with a video
+/// its stream) — and, while a match is
+/// being played, that match across the whole drawer in the Souboje view
 /// (several live matches take turns too). Display only, like the board:
 /// nothing here books or writes. Closed it is gone entirely, leaving only a
 /// button floating at the screen's edge. The admin picks what it lists and
@@ -20,6 +22,7 @@ import '../../core/widgets/emoji_text.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/duels.dart';
+import '../../domain/duties.dart' show KioskDutyEntry;
 import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
@@ -28,8 +31,10 @@ import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/duels_compact.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
+import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
+import 'kiosk_duty.dart' show kioskDutyPlanProvider;
 
 /// The drawer's width for a screen [screenWidth] wide: [columns] of the
 /// board's [visibleDays] day columns (the board sizes them on the whole
@@ -107,11 +112,22 @@ final kioskPanelContentProvider = Provider<KioskPanelContent?>((ref) {
         weeksAhead: settings?.kioskWeeksAhead ?? 1,
         showUpcoming: settings?.kioskShowUpcoming ?? true,
       ).matches.isNotEmpty;
-  if (live.isEmpty && notices.isEmpty && !hasMatches) return null;
+  // The canteen duty's card (0073) — the plan is read only with it on. A
+  // plan with nobody now and nobody ahead has nothing to say.
+  final plan = (settings?.kioskDutyDrawer ?? false)
+      ? ref.watch(kioskDutyPlanProvider)
+      : null;
+  final duty = plan != null && (plan.now != null || plan.next.isNotEmpty)
+      ? plan
+      : null;
+  if (live.isEmpty && notices.isEmpty && !hasMatches && duty == null) {
+    return null;
+  }
   return KioskPanelContent(
     notices: notices,
     hasMatches: hasMatches,
     live: live,
+    duty: duty,
   );
 });
 
@@ -120,6 +136,7 @@ class KioskPanelContent {
     required this.notices,
     required this.hasMatches,
     required this.live,
+    this.duty,
   });
 
   final List<Message> notices;
@@ -127,6 +144,10 @@ class KioskPanelContent {
 
   /// Matches being played, with data; non-empty = the drawer shows only them.
   final List<PrioritySlot> live;
+
+  /// The canteen duty's plan for the card on top (0073, „V panelu“); null
+  /// with the card off or nothing planned.
+  final ({KioskDutyEntry? now, List<KioskDutyEntry> next})? duty;
 }
 
 class KioskDrawer extends ConsumerWidget {
@@ -136,6 +157,7 @@ class KioskDrawer extends ConsumerWidget {
     required this.open,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    this.onPlay,
     this.resetToken = 0,
     this.boardDays,
     this.showLive = true,
@@ -159,6 +181,10 @@ class KioskDrawer extends ConsumerWidget {
   final bool open;
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// ▶ at a match with a video: its stream (0072); null while the admin
+  /// has the streams off — no ▶ and no live badge.
+  final void Function(PrioritySlot match)? onPlay;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -190,6 +216,7 @@ class KioskDrawer extends ConsumerWidget {
         ? _MatchesCard(
             key: ValueKey(resetToken),
             onOpen: onOpenMatch,
+            onPlay: onPlay,
             boardDays: boardDays,
             // Back to the match being played, when one is.
             onShowLive: content.live.isEmpty || onShowLive == null
@@ -197,6 +224,24 @@ class KioskDrawer extends ConsumerWidget {
                 : () => onShowLive!(true),
           )
         : null;
+    final plan = content.duty;
+    final duty = plan == null
+        ? null
+        // A new key after every idle reset, as the matches: scrolled down,
+        // the plan starts over at the top.
+        : _DutyCard(key: ValueKey(resetToken), plan: plan);
+    final dutyShare = settings?.kioskDutyShare ?? 30;
+    // The notices and the matches, split between them as the admin set it.
+    final rest = [
+      if (notices != null && matches != null) ...[
+        Expanded(flex: share, child: notices),
+        const SizedBox(height: 12),
+        Expanded(flex: 100 - share, child: matches),
+      ] else if (matches != null)
+        Expanded(child: matches)
+      else if (notices != null)
+        Flexible(child: notices),
+    ];
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
@@ -216,6 +261,7 @@ class KioskDrawer extends ConsumerWidget {
                 matches: content.live,
                 turn: liveTurn,
                 onOpenMatch: onOpenMatch,
+                onPlay: onPlay,
                 onShowList: matches == null || onShowLive == null
                     ? null
                     : () => onShowLive!(false),
@@ -225,14 +271,22 @@ class KioskDrawer extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (notices != null && matches != null) ...[
-                      Expanded(flex: share, child: notices),
+                    // The canteen duty on top, its share of the height (the
+                    // rest keeps its own split below); alone it fills.
+                    if (duty != null && rest.isNotEmpty) ...[
+                      Expanded(flex: dutyShare, child: duty),
                       const SizedBox(height: 12),
-                      Expanded(flex: 100 - share, child: matches),
-                    ] else if (matches != null)
-                      Expanded(child: matches)
-                    else if (notices != null)
-                      Flexible(child: notices),
+                      Expanded(
+                        flex: 100 - dutyShare,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: rest,
+                        ),
+                      ),
+                    ] else if (duty != null)
+                      Expanded(child: duty)
+                    else
+                      ...rest,
                   ],
                 ),
               ),
@@ -257,7 +311,7 @@ class KioskDrawerButton extends StatefulWidget {
   final bool open;
   final VoidCallback onTap;
 
-  /// Off = a still button (the admin's „Dýchající tlačítko panelu“, 0065):
+  /// Off = a still button (the admin's „Opakující se animace“, 0065):
   /// every breath repaints the screen, which a slow display feels.
   final bool breathe;
 
@@ -322,7 +376,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
     final scheme = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
-      label: widget.open ? 'Skrýt panel' : 'Zobrazit nástěnku a zápasy',
+      label: widget.open ? 'Skrýt panel' : 'Zobrazit panel',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
@@ -421,22 +475,159 @@ class _Card extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: scheme.primary),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.4,
-                  color: scheme.primary,
+              // In a narrow drawer (one column of many days) a long title
+              // wraps rather than running out of the card.
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    color: scheme.primary,
+                  ),
                 ),
               ),
-              if (action != null) ...[const Spacer(), action!],
+              ?action,
             ],
           ),
           const SizedBox(height: 10),
           fill ? Expanded(child: child) : Flexible(child: child),
         ],
       ),
+    );
+  }
+}
+
+/// The canteen duty (0073, „V panelu“): who serves now, large on the duty's
+/// tint (the status bar's line and the board's band wear it too), or that
+/// nobody does today — then the next ones in date order, each its range on
+/// the left and its names on the right (under it in a narrow drawer). It
+/// fills its slot of the drawer and scrolls when the slot is too short for
+/// the plan.
+class _DutyCard extends StatelessWidget {
+  const _DutyCard({super.key, required this.plan});
+
+  final ({KioskDutyEntry? now, List<KioskDutyEntry> next}) plan;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final now = plan.now;
+    final muted = TextStyle(fontSize: 15, color: scheme.onSurfaceVariant);
+    return _Card(
+      icon: Icons.local_cafe_outlined,
+      title: 'SLUŽBA NA KANTÝNĚ',
+      fill: true,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (now == null)
+              Text('Dnes nikdo neslouží.', style: muted)
+            else
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Teď slouží',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      now.who,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      now.range,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 14),
+            if (plan.next.isEmpty)
+              Text('Další služby zatím nejsou naplánované.', style: muted)
+            else ...[
+              Text(
+                'Další',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              for (final (i, entry) in plan.next.indexed) ...[
+                if (i > 0) const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: _DutyNextRow(entry: entry),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One of the duty card's „Další“ rows: the range on the left, the names
+/// on the right — a long list wraps under itself, the range keeps its
+/// line. A drawer too narrow for both side by side (one column of many
+/// days) puts the names under the range.
+class _DutyNextRow extends StatelessWidget {
+  const _DutyNextRow({required this.entry});
+
+  /// Under this width the names would get little or no room beside the
+  /// range (some 140 px of it).
+  static const stackBelow = 280.0;
+
+  final KioskDutyEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final range = Text(entry.range, style: const TextStyle(fontSize: 15));
+    const namesStyle = TextStyle(fontSize: 15, fontWeight: FontWeight.w600);
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < stackBelow
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [range, Text(entry.who, style: namesStyle)],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                range,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    entry.who,
+                    textAlign: TextAlign.end,
+                    style: namesStyle,
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -656,11 +847,15 @@ class _MatchesCard extends ConsumerStatefulWidget {
   const _MatchesCard({
     super.key,
     required this.onOpen,
+    this.onPlay,
     this.boardDays,
     this.onShowLive,
   });
 
   final void Function(PrioritySlot match) onOpen;
+
+  /// ▶ at a match with a video; null = no ▶ (the streams off).
+  final void Function(PrioritySlot match)? onPlay;
 
   /// Back to the match being played; null when none is.
   final VoidCallback? onShowLive;
@@ -800,6 +995,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
         ref.watch(matchResultsProvider).value ?? const <String, MatchResult>{};
     final window = _window(_extraBack, _extraAhead, watch: true);
     final matches = window.matches;
+    final onPlay = widget.onPlay;
 
     // Like Výsledky: opens with the first coming match at the bottom edge
     // and as many played (and playing) ones as fit above it. Afterwards the
@@ -830,7 +1026,17 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     Widget row(PrioritySlot s) => SizedBox(
       key: _rowKeys.putIfAbsent(s.id, GlobalKey.new),
       height: _resultRowHeight,
-      child: _MatchRow(slot: s, result: results[s.id], onOpen: widget.onOpen),
+      child: _MatchRow(
+        slot: s,
+        result: results[s.id],
+        onOpen: widget.onOpen,
+        play: onPlay != null && hasKioskVideo(s)
+            ? (
+                label: kioskStreamLabel(s, results[s.id], now),
+                onPlay: () => onPlay(s),
+              )
+            : null,
+      ),
     );
     Widget more(String label, VoidCallback onTap) => SizedBox(
       height: _moreRowHeight,
@@ -889,11 +1095,19 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
 }
 
 class _MatchRow extends StatelessWidget {
-  const _MatchRow({required this.slot, required this.onOpen, this.result});
+  const _MatchRow({
+    required this.slot,
+    required this.onOpen,
+    this.result,
+    this.play,
+  });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final void Function(PrioritySlot match) onOpen;
+
+  /// A match with a video: ▶ at the row's end, [label] its tooltip.
+  final ({String label, VoidCallback onPlay})? play;
 
   @override
   Widget build(BuildContext context) {
@@ -938,11 +1152,25 @@ class _MatchRow extends StatelessWidget {
       ],
     );
     // Only a match with a score has a Zápis to open.
-    if (!hasScore) return row;
-    return InkWell(
-      onTap: () => onOpen(slot),
-      borderRadius: BorderRadius.circular(8),
-      child: row,
+    final body = !hasScore
+        ? row
+        : InkWell(
+            onTap: () => onOpen(slot),
+            borderRadius: BorderRadius.circular(8),
+            child: row,
+          );
+    final play = this.play;
+    if (play == null) return body;
+    return Row(
+      children: [
+        Expanded(child: body),
+        IconButton(
+          tooltip: play.label,
+          onPressed: play.onPlay,
+          color: scheme.primary,
+          icon: const Icon(Icons.play_circle_outline),
+        ),
+      ],
     );
   }
 }
@@ -955,6 +1183,7 @@ class _LiveView extends ConsumerStatefulWidget {
     required this.matches,
     required this.turn,
     required this.onOpenMatch,
+    this.onPlay,
     this.onShowList,
   });
 
@@ -963,6 +1192,10 @@ class _LiveView extends ConsumerStatefulWidget {
 
   /// A tap on the score: the match's Zápis.
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// ▶ at the match on screen, when it has a video: its stream; null =
+  /// no badge (the streams off).
+  final void Function(PrioritySlot match)? onPlay;
 
   final List<PrioritySlot> matches;
   final Duration turn;
@@ -1068,6 +1301,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
         : -1;
     if (lockedAt >= 0) _index = lockedAt;
     final slot = matches[_index.clamp(0, matches.length - 1)];
+    final onPlay = widget.onPlay;
     final current = ValueKey(slot.id);
     final locked = lockedAt >= 0;
     return Listener(
@@ -1088,7 +1322,12 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                 // Back to all matches on the left, the dots (how many take
                 // turns; the lock) in the middle, how old the score is on
                 // the right. (The scoreboard's own chip says it is live.)
+                // Three slots, the room left over shared evenly between
+                // them: the age and the badge end flush at the right edge
+                // however wide the drawer — the absent back button or dots
+                // keep their slot as nothing.
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     if (widget.onShowList != null)
                       IconButton(
@@ -1096,8 +1335,9 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                         visualDensity: VisualDensity.compact,
                         icon: const Icon(Icons.arrow_back),
                         onPressed: widget.onShowList,
-                      ),
-                    const Spacer(),
+                      )
+                    else
+                      const SizedBox.shrink(),
                     // The dots say how many matches take turns; a tap
                     // pins the one on screen until it ends (or another
                     // tap, or a swipe).
@@ -1150,9 +1390,48 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                             ),
                           ),
                         ),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                    // The only slot that gives way, and only the age in it:
+                    // it takes the width it needs and is cut short only
+                    // when the drawer has nothing left — the badge beside
+                    // it is the stream's only way in. (A flex child next to
+                    // Spacers would get a fixed share of the room instead:
+                    // cut short with room to spare, or ending short of the
+                    // edge.)
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(child: _LiveAge(slot: slot)),
+                          // The live badge everywhere else has: the pulsing
+                          // red camera — still with the admin's animations
+                          // off.
+                          if (onPlay != null && hasKioskVideo(slot)) ...[
+                            const SizedBox(width: 4),
+                            MatchLeading(
+                              slot: slot,
+                              result: ref.watch(
+                                matchResultsProvider.select(
+                                  (r) => r.value?[slot.id],
+                                ),
+                              ),
+                              now:
+                                  ref.watch(nowProvider).value ?? DateTime.now(),
+                              linksEnabled: true,
+                              fallback: const SizedBox.shrink(),
+                              launch: (_) => onPlay(slot),
+                              pulse: ref.watch(
+                                settingsProvider.select(
+                                  (s) => s.value?.kioskAnimations ?? true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    const Spacer(),
-                    _LiveAge(slot: slot),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1218,9 +1497,13 @@ class _LiveAge extends ConsumerWidget {
       children: [
         Icon(Icons.refresh, size: 14, color: scheme.onSurfaceVariant),
         const SizedBox(width: 4),
-        Text(
-          freshnessLabel(fetched, now),
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        Flexible(
+          child: Text(
+            freshnessLabel(fetched, now),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
         ),
       ],
     );

@@ -52,8 +52,6 @@ const appChangelog = <Release>[
   Release(null, '11. 10. 2026', [
     'Web: když máte Rezervátor otevřený ve více záložkách, přihlášení '
         'v jedné se zase přenese i do ostatních.',
-  ]),
-  Release(null, '10. 10. 2026', [
     'Kiosk: zápis zápasu ukazuje i registrační čísla hráčů.',
     'Ikony v textu (⛔ blokace, 🏆 zápas, 🔒 pronájem, 👍/👎/💬 u zpráv a '
         'další) se kreslí z obrázků jako 🏠 — na webu vypadají všude stejně.',
@@ -63,15 +61,47 @@ const appChangelog = <Release>[
     'Aplikace pro Android: kiosk účet se přihlásí přes „Přihlásit kiosk“ '
         'dole na přihlašovací obrazovce (na webu má kiosk svou adresu).',
     'Správa → Kiosk: nová sekce Optimalizace výkonu pro slabší displej — '
-        'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
-        'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
+        'vypnutí opakujících se animací (dýchající tlačítko panelu, pulzující '
+        'ikona živého přenosu) a nižší rozlišení vykreslování na webu. Minulé '
+        'dny na tabuli se kreslí levněji, vypadají stejně.',
+    'Kiosk: zápas, který má na webu ČKA video na YouTube, si kdokoli pustí '
+        'tlačítkem ▶ — živě i ze záznamu, i v zápasech dne na tabuli — '
+        'v plovoucím okně vedle tabule. '
+        'Okno jde posouvat, zvětšit na celou obrazovku, sbalit nebo křížkem '
+        'zavřít; po konci videa se zavře samo. Správa → Kiosk → Stream '
+        'zápasu: hraný zápas se může otevřít sám, oken může být víc '
+        'najednou; správce může stream i celý vypnout.',
+    'Kiosk: vedle hodin může být dnešní počasí (teplota, předpověď, '
+        'deštník při šanci na srážky) a kdo má svátek — Správa → Kiosk → '
+        'Stavový řádek; místo pro počasí je kuželna nebo vyhledaná obec.',
+    'Kiosk: výběr jména radí, které písmeno vybrat — první písmeno '
+        'přezdívky, nebo křestního jména, když přezdívka není.',
+    'Kalendář a kiosk: zápas v rozvrhu píše pohár, domácí, pomlčku a hosty '
+        'pod sebe — dlouhý název týmu se zalomí do více řádků, nerozdělí se '
+        'v půlce. Velikost písma pásů na tabuli kiosku nastaví správce.',
+    'Kiosk: správce může v záhlaví vedle hodin vyvěsit upozornění s ikonou '
+        'výstrahy (Správa → Kiosk → Obrazovka kiosku); dokud visí, zbytek '
+        'záhlaví ustoupí.',
+    'Kiosk: správce může dnešní zápasy v záhlaví skrýt (Správa → Kiosk → '
+        'Stavový řádek).',
+    'Kiosk: ve výběru jména upozornění, že se tam z tréninku odhlásit nedá '
+        '(text nastaví správce ve Správě → Kiosk).',
+    'Kiosk: nadpis oznamu v záhlaví se při střídání plynule prolne na svém '
+        'místě, neposkočí.',
+    'Kiosk: kdo slouží na kantýně — v záhlaví (ťuk ukáže plán), jako pás '
+        'v kalendáři (nad datem, pod ním nebo dole) nebo karta v panelu; '
+        'zapíná správce ve Správě → Kiosk → Služby na kantýně.',
   ], store: [
-    'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
-    'Emoji v textu se kreslí z obrázků — všude stejně.',
-    'Kiosk: volné místo značí ＋ jako v kalendáři appky.',
-    'Kiosk v aplikaci: displej nezhasne, systémové lišty se schovají; kiosk '
-        'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
-    'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
+    'Kiosk: video zápasu živě i ze záznamu; počasí, svátek a upozornění v '
+        'záhlaví; dnešní zápasy v záhlaví jdou skrýt.',
+    'Kiosk: kdo slouží na kantýně.',
+    'Kiosk: registrační čísla v zápisu, ＋ jako v appce, rada a upozornění '
+        've výběru jména.',
+    'Kiosk v aplikaci: displej nezhasne, lišty se schovají; přihlášení '
+        'tlačítkem „Přihlásit kiosk“.',
+    'Správa → Kiosk: Optimalizace výkonu pro slabší displej.',
+    'Zápas v rozvrhu: domácí, pomlčka a hosté pod sebou.',
+    'Emoji v textu z obrázků — všude stejně.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '

@@ -7,10 +7,13 @@ import '../../core/kiosk_url.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/weather.dart' show WeatherPlace;
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
 import 'widgets/copyable_address.dart';
+import 'widgets/kiosk_text_dialog.dart';
 import 'widgets/number_setting_field.dart';
+import 'widgets/weather_place_dialog.dart';
 
 /// Admin: kiosk-specific settings (the board theme) and the kiosk accounts
 /// themselves. The accounts live here, not among Hráči: a kiosk is the
@@ -104,6 +107,12 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskNoticesMode.both => 'V záhlaví i v panelu',
   };
 
+  static String _bandLabel(KioskDutyBandPosition p) => switch (p) {
+    KioskDutyBandPosition.top => 'Nad datem',
+    KioskDutyBandPosition.middle => 'Mezi datem a zápasy',
+    KioskDutyBandPosition.bottom => 'Dole pod zápasy',
+  };
+
   /// The note under the two ranges: they are only where the list opens;
   /// [button] is the kiosk's own button for that direction.
   static String _rangeNote(String button) =>
@@ -183,12 +192,67 @@ class KioskSettingsScreen extends ConsumerWidget {
   Future<void> _panel(
     BuildContext context,
     ScheduleSettings settings,
-    Map<String, Object> changes,
+    Map<String, Object?> changes,
   ) => tryAction(
     context,
     () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
     errorText: friendlyDbError,
   );
+
+  /// The warning's text, typed in a dialog (0068); saved trimmed.
+  Future<void> _editWarning(
+    BuildContext context,
+    ScheduleSettings settings,
+  ) async {
+    final text = await showDialog<String>(
+      context: context,
+      builder: (_) => _WarningDialog(initial: settings.kioskWarning ?? ''),
+    );
+    if (text == null || !context.mounted) return;
+    await _panel(context, settings, {'kiosk_warning': text});
+  }
+
+  /// [place] as the three columns that keep it.
+  static Map<String, Object> _placeColumns(WeatherPlace place) => {
+    'kiosk_weather_place': place.label,
+    'kiosk_weather_lat': place.lat,
+    'kiosk_weather_lon': place.lon,
+  };
+
+  /// The alley's own venue as a weather place — the admin reads the
+  /// federation settings (the kiosk cannot), null when unknown.
+  static WeatherPlace? _alleyPlace(WidgetRef ref) {
+    final slug = ref.watch(federationSyncProvider).value?.venueSlug ?? '';
+    if (slug.isEmpty) return null;
+    return venueWeatherPlace(
+      (ref.watch(venuesProvider).value ?? const <Venue>[])
+          .where((v) => v.slug == slug)
+          .firstOrNull,
+    );
+  }
+
+  /// „Počasí“: on with the place it needs — the alley's venue when none was
+  /// picked yet and the venue is known; off keeps the place for next time.
+  Future<void> _weather(
+    BuildContext context,
+    ScheduleSettings settings,
+    bool on,
+    WeatherPlace? alley,
+  ) => _panel(context, settings, {
+    'kiosk_weather': on,
+    if (on && settings.kioskWeatherLat == null && alley != null)
+      ..._placeColumns(alley),
+  });
+
+  Future<void> _pickPlace(
+    BuildContext context,
+    ScheduleSettings settings,
+    WeatherPlace? alley,
+  ) async {
+    final place = await showWeatherPlaceDialog(context, alley: alley);
+    if (place == null || !context.mounted) return;
+    await _panel(context, settings, _placeColumns(place));
+  }
 
   /// Where the app is running (the web build knows; an alley hosting its
   /// own copy under a sub-path included) — or, on Android, where the public
@@ -196,12 +260,31 @@ class KioskSettingsScreen extends ConsumerWidget {
   String _kioskUrl() =>
       kioskUrlFrom(kIsWeb ? Uri.base : Uri.parse(UpdateScreen.webUrl));
 
+  /// The note on the name picker's first page (0070: under its first
+  /// letters, or its names on a small alley), typed in a dialog — a new
+  /// one starts from the default text; saved trimmed.
+  Future<void> _editPickerNote(
+    BuildContext context,
+    ScheduleSettings settings,
+  ) async {
+    final text = await showKioskTextDialog(
+      context,
+      title: 'Upozornění při rezervaci',
+      label: 'Text upozornění',
+      initial: settings.kioskPickerNote ?? ScheduleSettings.defaultPickerNote,
+      defaultText: ScheduleSettings.defaultPickerNote,
+    );
+    if (text == null || !context.mounted) return;
+    await _panel(context, settings, {'kiosk_picker_note': text});
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final kiosks = [
       for (final p in ref.watch(profilesProvider).value ?? const <Profile>[])
         if (p.role == Role.kiosk) p,
     ];
+    final alley = _alleyPlace(ref);
     return AdminScaffold(
       title: 'Kiosk',
       body: AsyncBody(
@@ -218,6 +301,93 @@ class KioskSettingsScreen extends ConsumerWidget {
               'Tablet na zdi kuželny: jak vypadá tabule a co se stane, když '
                   'se ho nikdo nedotýká.',
               [
+                // The warning first: it is what an admin comes here for
+                // in a hurry („Dráha 3 je mimo provoz“).
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.warning_amber_rounded,
+                    color: settings?.kioskWarning == null
+                        ? null
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                  title: const Text('Upozornění'),
+                  subtitle: Text(
+                    settings?.kioskWarning ??
+                        'Žádné. Varování s ikonou výstrahy v záhlaví kiosku; '
+                            'dokud visí, ostatní údaje v záhlaví ustoupí. '
+                            'Platí, dokud ho neodstraníš.',
+                    // The whole text is one tap away, under „Upravit…“.
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: settings == null
+                            ? null
+                            : () => _editWarning(context, settings),
+                        child: Text(
+                          settings?.kioskWarning == null
+                              ? 'Přidat…'
+                              : 'Upravit…',
+                        ),
+                      ),
+                      if (settings?.kioskWarning != null)
+                        IconButton(
+                          tooltip: 'Odstranit upozornění',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _panel(context, settings!, {
+                            'kiosk_warning': null,
+                          }),
+                        ),
+                    ],
+                  ),
+                ),
+                // Then the booking's: on the name picker's first page,
+                // under its letters or names (0070).
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.warning_amber_rounded,
+                    color: settings?.kioskPickerNote == null
+                        ? null
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                  title: const Text('Upozornění při rezervaci'),
+                  subtitle: Text(
+                    settings?.kioskPickerNote ??
+                        'Žádné. Upozornění pod písmeny při výběru jména na '
+                            'kiosku.',
+                    // The whole text is one tap away, under „Upravit…“.
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: settings == null
+                            ? null
+                            : () => _editPickerNote(context, settings),
+                        child: Text(
+                          settings?.kioskPickerNote == null
+                              ? 'Přidat…'
+                              : 'Upravit…',
+                        ),
+                      ),
+                      if (settings?.kioskPickerNote != null)
+                        IconButton(
+                          tooltip: 'Odstranit upozornění při rezervaci',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _panel(context, settings!, {
+                            'kiosk_picker_note': null,
+                          }),
+                        ),
+                    ],
+                  ),
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tmavý režim'),
@@ -300,6 +470,20 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _number(
                   context,
                   settings,
+                  'Písmo zápasů a pronájmů',
+                  settings?.kioskBandFontSize ?? 10,
+                  'kiosk_band_font_size',
+                  unit: 'px',
+                  min: 8,
+                  max: 24,
+                  helper:
+                      'Pásy zápasů, blokací a pronájmů na tabuli; appka má '
+                      '10. Kde se pás vejde, má zápas pohár, domácí, '
+                      'pomlčku a hosty pod sebou a dlouhý název se zalomí.',
+                ),
+                _number(
+                  context,
+                  settings,
                   'Dní na obrazovce',
                   settings?.kioskVisibleDays ?? 7,
                   'kiosk_visible_days',
@@ -333,6 +517,66 @@ class KioskSettingsScreen extends ConsumerWidget {
                     min: 1,
                     max: 60,
                   ),
+              ],
+            ),
+            _section(
+              context,
+              'Stavový řádek',
+              'Co kiosk ukáže vedle hodin: dnešní zápasy, počasí a kdo má '
+                  'svátek.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'Dnešní zápasy v záhlaví',
+                  settings?.kioskTodaysMatches ?? true,
+                  'kiosk_todays_matches',
+                  subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Počasí'),
+                  subtitle: const Text(
+                    'Teplota a dnešní předpověď pro vybrané místo, '
+                    'obnovuje se každou půlhodinu. Data: ČHMÚ (model '
+                    'ALADIN) přes Open-Meteo.com (CC BY 4.0); zdroj kiosk '
+                    'ukáže po ťuknutí na počasí.',
+                  ),
+                  value: settings?.kioskWeather ?? false,
+                  onChanged: settings == null
+                      ? null
+                      : (on) => _weather(context, settings, on, alley),
+                ),
+                if (settings?.kioskWeather ?? false)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.place_outlined),
+                    title: const Text('Místo pro počasí'),
+                    subtitle: Text(
+                      settings?.kioskWeatherPlace ??
+                          'Není vybrané — kiosk počasí neukáže.',
+                    ),
+                    trailing: TextButton(
+                      onPressed: settings == null
+                          ? null
+                          : () => _pickPlace(context, settings, alley),
+                      child: Text(
+                        settings?.kioskWeatherPlace == null
+                            ? 'Vybrat…'
+                            : 'Změnit…',
+                      ),
+                    ),
+                  ),
+                _switch(
+                  context,
+                  settings,
+                  'Svátek',
+                  settings?.kioskNameday ?? false,
+                  'kiosk_nameday',
+                  subtitle:
+                      'Kdo má dnes svátek, podle českého kalendáře; ve '
+                      'státní svátek bez jména jeho název.',
+                ),
               ],
             ),
             _section(
@@ -389,8 +633,90 @@ class KioskSettingsScreen extends ConsumerWidget {
             ),
             _section(
               context,
+              'Služby na kantýně',
+              'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu '
+                  've Správě → Služby. Každé místo se zapíná zvlášť.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'V záhlaví',
+                  settings?.kioskDutyHeader ?? false,
+                  'kiosk_duty_header',
+                  subtitle:
+                      'Pod hodinami „Služba: …“ s dnešní službou; ťuk ukáže '
+                      'plán.',
+                ),
+                _switch(
+                  context,
+                  settings,
+                  'V kalendáři',
+                  settings?.kioskDutyBoard ?? false,
+                  'kiosk_duty_board',
+                  subtitle:
+                      'Pás se jmény přes dny služby v hlavičkách dnů tabule.',
+                ),
+                // Where in the day headers the band runs — only with one.
+                if (settings?.kioskDutyBoard ?? false)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskDutyBandPosition>(
+                      initialValue:
+                          settings?.kioskDutyBandPosition ??
+                          KioskDutyBandPosition.middle,
+                      decoration: const InputDecoration(
+                        labelText: 'Kde je pás',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final p in KioskDutyBandPosition.values)
+                          DropdownMenuItem(
+                            value: p,
+                            child: Text(_bandLabel(p)),
+                          ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (p) => p == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_duty_band_position': p.name,
+                                  }),
+                    ),
+                  ),
+                // The card lives in the drawer: with the drawer off there is
+                // nowhere to put it (like the live match's section).
+                if (settings?.kioskPanelEnabled ?? true)
+                  _switch(
+                    context,
+                    settings,
+                    'V panelu',
+                    settings?.kioskDutyDrawer ?? false,
+                    'kiosk_duty_drawer',
+                    subtitle: 'Karta se službou a plánem v postranním panelu.',
+                  ),
+                if ((settings?.kioskPanelEnabled ?? true) &&
+                    (settings?.kioskDutyDrawer ?? false))
+                  _number(
+                    context,
+                    settings,
+                    'Podíl karty v panelu',
+                    settings?.kioskDutyShare ?? 30,
+                    'kiosk_duty_share',
+                    unit: '%',
+                    min: 10,
+                    max: 90,
+                    helper:
+                        'Kolik výšky panelu karta zabere; zbytek si dělí '
+                        'nástěnka a zápasy.',
+                  ),
+              ],
+            ),
+            _section(
+              context,
               'Postranní panel',
-              'Panel vpravo vedle tabule s nástěnkou a zápasy. Návštěvník '
+              'Panel vpravo vedle tabule s nástěnkou a zápasy (a službou na '
+                  'kantýně, je-li zapnutá). Návštěvník '
                   'ho rozbalí a sbalí tlačítkem na okraji obrazovky; po době '
                   'nečinnosti se vrátí do výchozího stavu.',
               [
@@ -440,7 +766,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                       max: 90,
                       helper:
                           'Kolik výšky panelu dostanou oznamy; zbytek mají '
-                          'zápasy.',
+                          'zápasy. Karta služby si bere svůj podíl napřed.',
                     ),
                   _switch(
                     context,
@@ -590,6 +916,110 @@ class KioskSettingsScreen extends ConsumerWidget {
               ),
             _section(
               context,
+              'Stream zápasu',
+              'Zápas, který má na webu ČKA video (YouTube), si kdokoli pustí '
+                  'na kiosku tlačítkem ▶ u zápasu — živě i ze záznamu — v '
+                  'plovoucím okně vedle tabule, potichu; zvuk si pustí v '
+                  'přehrávači. Okno jde posouvat, zvětšit na celou obrazovku, '
+                  'sbalit nebo křížkem zavřít; po konci videa se zavře samo. '
+                  'Doba nečinnosti okna nechá, kde je návštěvník nechal.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'Stream na kiosku',
+                  settings?.kioskStreamEnabled ?? true,
+                  'kiosk_stream_enabled',
+                  subtitle:
+                      'Vypnuto = u zápasů žádné ▶ a žádné okno se streamem.',
+                ),
+                if (settings?.kioskStreamEnabled ?? true) ...[
+                  _switch(
+                    context,
+                    settings,
+                    'Živý přenos se otevře sám',
+                    settings?.kioskStream ?? false,
+                    'kiosk_stream',
+                    subtitle:
+                        'Hraný zápas s videem se otevře bez dotyku: od hodiny '
+                        'před začátkem do půl hodiny po zapsání výsledku. '
+                        'Zavřený se sám znovu neotevře. Vypnuto = jen '
+                        'tlačítkem ▶.',
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskCorner>(
+                      initialValue:
+                          settings?.kioskStreamCorner ?? KioskCorner.bl,
+                      decoration: const InputDecoration(
+                        labelText: 'Kde se okno objeví',
+                        helperText:
+                            'Panel je vpravo; vlevo dole mu okno nepřekáží. '
+                            'Další okna do dalších rohů — nejdřív na stejné '
+                            'straně.',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: KioskCorner.tl,
+                          child: Text('Vlevo nahoře'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.tr,
+                          child: Text('Vpravo nahoře'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.bl,
+                          child: Text('Vlevo dole'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.br,
+                          child: Text('Vpravo dole'),
+                        ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (c) => c == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_stream_corner': c.name,
+                                  }),
+                    ),
+                  ),
+                  _number(
+                    context,
+                    settings,
+                    'Šířka okna',
+                    settings?.kioskStreamWidth ?? 35,
+                    'kiosk_stream_width',
+                    unit: '%',
+                    min: 20,
+                    max: 60,
+                    helper:
+                        'Procenta šířky obrazovky; výška podle videa 16:9. '
+                        'Návštěvník si okno přesune nebo zvětší sám.',
+                  ),
+                  _number(
+                    context,
+                    settings,
+                    'Oken najednou',
+                    settings?.kioskStreamMax ?? 1,
+                    'kiosk_stream_max',
+                    unit: '',
+                    min: 1,
+                    max: 4,
+                    helper:
+                        'Při 1 se mezi puštěnými streamy listuje šipkami v '
+                        'okně. Víc = každý stream ve svém okně; když jsou '
+                        'plná, další ▶ zavře nejstarší puštěný (živý přenos '
+                        'jen uvolní místo a pak se vrátí). Každé okno je '
+                        'další přehrávač — na slabším displeji raději 1.',
+                  ),
+                ],
+              ],
+            ),
+            _section(
+              context,
               'Optimalizace výkonu',
               'Pro slabší displej, na kterém se kiosk zadrhává (třeba Android '
                   's kioskem v prohlížeči). Každá volba ubere kreslení za '
@@ -598,13 +1028,14 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _switch(
                   context,
                   settings,
-                  'Dýchající tlačítko panelu',
+                  'Opakující se animace',
                   settings?.kioskAnimations ?? true,
                   'kiosk_animations',
                   subtitle:
-                      'Tlačítko panelu se každé čtyři sekundy rozzáří; při tom '
-                      'se překresluje celá obrazovka, i když se kiosku nikdo '
-                      'nedotýká. Vypnuto = tlačítko je v klidu.',
+                      'Tlačítko panelu se každé čtyři sekundy rozzáří a ikona '
+                      'živého přenosu pulzuje; při tom se překresluje celá '
+                      'obrazovka, i když se kiosku nikdo nedotýká. Vypnuto = '
+                      'obojí je v klidu.',
                 ),
                 _switch(
                   context,
@@ -670,6 +1101,61 @@ class KioskSettingsScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The kiosk warning's text: one or a few lines, at most 200 characters
+/// (the column's check, 0068). Pops the trimmed text, null when cancelled.
+class _WarningDialog extends StatefulWidget {
+  const _WarningDialog({required this.initial});
+
+  final String initial;
+
+  @override
+  State<_WarningDialog> createState() => _WarningDialogState();
+}
+
+class _WarningDialogState extends State<_WarningDialog> {
+  late final _text = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _text.text.trim();
+    return AlertDialog(
+      title: const Text('Upozornění na kiosku'),
+      content: SizedBox(
+        width: 480,
+        child: TextField(
+          controller: _text,
+          autofocus: true,
+          maxLength: 200,
+          minLines: 1,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Text upozornění',
+            hintText: 'Třeba: Dráha 3 je mimo provoz.',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: text.isEmpty ? null : () => Navigator.pop(context, text),
+          child: const Text('Uložit'),
+        ),
+      ],
     );
   }
 }
