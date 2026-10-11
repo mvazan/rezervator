@@ -330,9 +330,29 @@ class CalendarEventBand extends StatelessWidget {
   /// kiosk board (0069).
   final double fontSize;
 
-  /// One line of the band's text, as laid out (Manrope's line height is
-  /// about 1.4 of its size).
-  static const _lineFactor = 1.4;
+  /// One line of the band's text as the engine lays it out — measured, not
+  /// estimated: the Text below gets [style] over the inherited one (the
+  /// theme's bodyMedium sets a line height of 1.43 of the size), the text
+  /// scale, and the engine rounds the line to whole pixels. An estimate of
+  /// 1.4 × the size held only at 10 px and the normal text size; anywhere
+  /// else it fell short by up to a pixel a line, and a stack that used
+  /// every line it was given ran past the band, the time row cut off.
+  static double _lineHeight(BuildContext context, TextStyle style) {
+    final inherited = DefaultTextStyle.of(context);
+    final painter = TextPainter(
+      text: TextSpan(text: '0', style: inherited.style.merge(style)),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      textHeightBehavior:
+          DefaultTextHeightBehavior.maybeOf(context) ??
+          inherited.textHeightBehavior,
+      locale: Localizations.maybeLocaleOf(context),
+      maxLines: 1,
+    )..layout();
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -341,8 +361,7 @@ class CalendarEventBand extends StatelessWidget {
       fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
       color: foreground,
     );
-    final lineHeight =
-        MediaQuery.textScalerOf(context).scale(fontSize) * _lineFactor;
+    final lineHeight = _lineHeight(context, style);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
@@ -379,12 +398,22 @@ class CalendarEventBand extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final row in rows)
-                EmojiText(
-                  row.text,
-                  textAlign: TextAlign.center,
-                  maxLines: row.wraps ? nameLines : 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: style,
+                // Each row held to the lines it was given, so the stack is
+                // never taller than the band whatever a row draws: the
+                // cup's image sets its line a pixel taller than the text's
+                // at some sizes (12 px: 18 against 17) — that pixel goes,
+                // empty under the image, which stays whole.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: (row.wraps ? nameLines : 1) * lineHeight,
+                  ),
+                  child: EmojiText(
+                    row.text,
+                    textAlign: TextAlign.center,
+                    maxLines: row.wraps ? nameLines : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  ),
                 ),
             ],
           );
