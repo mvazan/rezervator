@@ -4942,6 +4942,9 @@ void main() {
       }
 
       const both = 'AA Hráč a PP Hráč';
+      // On the board's band who serves says what it is and when.
+      const bothBand = '$both mají službu (5.–11. 10.)';
+      const bbBand = 'BB Hráč má službu (12.–18. 10.)';
 
       // A band's strip over one day's header.
       Rect stripOn(WidgetTester tester, Day date) => tester.getRect(
@@ -4984,10 +4987,10 @@ void main() {
         expect(piece(Day(2026, 10, 13)), (false, false));
         // Today is the first column: the duty began on Monday, off the
         // board, and still says who — one label, at the row's left edge.
-        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+        expect(bandLabelRun(tester, bothBand).left, closeTo(rowLeft + 6, 0.01));
         // The next week's starts on Monday, its name at its start.
         expect(
-          bandLabelRun(tester, 'BB Hráč').left,
+          bandLabelRun(tester, bbBand).left,
           closeTo(stripOn(tester, monday).left + 6, 0.01),
         );
         // Only the band: the status bar's line is the other switch.
@@ -5016,7 +5019,8 @@ void main() {
           'start by the row\'s edge', (tester) async {
         fullHd(tester);
         // Friday 2. 10. to today, four on it: a line longer than a column.
-        const four = 'AA Hráč, BB Hráč, CC Hráč a DD Hráč';
+        const four =
+            'AA Hráč, BB Hráč, CC Hráč a DD Hráč mají službu (2.–8. 10.)';
         await tester.pumpWidget(
           app(
             dutyBoard: true,
@@ -5202,7 +5206,7 @@ void main() {
         await tester.pumpAndSettle();
         final monday = Day(2026, 10, 12);
         expect(bandOn(tester, day), isNull);
-        expect(bandOn(tester, monday)!.label, 'BB Hráč');
+        expect(bandOn(tester, monday)!.label, bbBand);
         double labelTop(Day date) => tester
             .getRect(
               find.descendant(
@@ -5259,15 +5263,15 @@ void main() {
         // The names uncut, and the least they are cut to.
         final whole = bandLabelParagraph(
           tester,
-          both,
+          bothBand,
         ).getMaxIntrinsicWidth(double.infinity);
-        final least = bandLabelLeast(tester, both);
+        final least = bandLabelLeast(tester, bothBand);
 
         // Where and how wide the geometry puts the current duty's names: the
         // duty began on Monday 5. 10., seven columns before its end on
         // Sunday.
         void expectLabels(String why) {
-          final run = bandLabelRun(tester, both);
+          final run = bandLabelRun(tester, bothBand);
           final end = stripOn(tester, sunday).right;
           final at = stickyBandLabel(
             viewportLeft: rowLeft,
@@ -5281,7 +5285,7 @@ void main() {
           // The next duty's at its start, while its Monday is in view.
           if (headerOf(monday).evaluate().isNotEmpty) {
             expect(
-              bandLabelRun(tester, 'BB Hráč').left,
+              bandLabelRun(tester, bbBand).left,
               closeTo(stripOn(tester, monday).left + 6, 0.01),
               reason: why,
             );
@@ -5289,7 +5293,7 @@ void main() {
         }
 
         expectLabels('at rest');
-        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+        expect(bandLabelRun(tester, bothBand).left, closeTo(rowLeft + 6, 0.01));
 
         // The finger stays down: no settling, frame by frame.
         final sundayHeader = tester.widget(headerOf(sunday));
@@ -5311,7 +5315,7 @@ void main() {
           await gesture.moveBy(Offset(dx, 0));
           await tester.pump();
           expectLabels('$dx');
-          final run = bandLabelRun(tester, both);
+          final run = bandLabelRun(tester, bothBand);
           final stuck = run.left >= rowLeft + 6 - 0.01;
           final cutShort = run.width < whole - 0.01;
           if (!stuck) pushed = true;
@@ -5324,7 +5328,7 @@ void main() {
               reason: '$dx',
             );
             expect(
-              bandLabelParagraph(tester, both).didExceedMaxLines,
+              bandLabelParagraph(tester, bothBand).didExceedMaxLines,
               isTrue,
               reason: '$dx',
             );
@@ -5352,7 +5356,7 @@ void main() {
           expectLabels('back $dx');
         }
         expect(
-          bandLabelRun(tester, both).left,
+          bandLabelRun(tester, bothBand).left,
           closeTo(stripOn(tester, Day(2026, 10, 5)).left + 6, 0.01),
         );
         await back.up();
@@ -5361,7 +5365,7 @@ void main() {
         await tester.pump(const Duration(seconds: 61));
         await tester.pumpAndSettle();
         expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
-        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+        expect(bandLabelRun(tester, bothBand).left, closeTo(rowLeft + 6, 0.01));
 
         await finish(tester);
       });
@@ -5412,12 +5416,12 @@ void main() {
               reason: '$why $frame',
             );
             expect(
-              bandLabelRun(tester, both).left,
+              bandLabelRun(tester, bothBand).left,
               closeTo(rowLeft + 6, 0.01),
               reason: '$why $frame',
             );
             expect(
-              bandLabelRun(tester, 'BB Hráč').left,
+              bandLabelRun(tester, bbBand).left,
               closeTo(stripOn(tester, monday).left + 6, 0.01),
               reason: '$why $frame',
             );
@@ -5525,7 +5529,7 @@ void main() {
         for (var d = 8; d <= 11; d++) {
           expect(bandOn(tester, Day(2026, 10, d)), isNull);
         }
-        expect(bandOn(tester, Day(2026, 10, 12))!.label, 'BB Hráč');
+        expect(bandOn(tester, Day(2026, 10, 12))!.label, bbBand);
 
         await finish(tester);
       });

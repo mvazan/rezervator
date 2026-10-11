@@ -210,7 +210,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// ([entry] null = no duty there): its day in the period and the
   /// period's length, read from the period's dates — whether the piece
   /// starts or ends the band, rounded, follows from those alone. Who
-  /// serves is the band's one label: it rides the period's start, sticks
+  /// serves and when („… mají službu (12.–18. 10.)“) is the band's one
+  /// label: it rides the period's start, sticks
   /// to the row's left edge while the period runs off it — a period begun
   /// off to the left still says who — and moves with the header strip's
   /// own scroll ([_hHeader]), frame by frame, without rebuilding the
@@ -221,7 +222,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     return BoardBandSegment(
       day: date.differenceInDays(period.startsOn),
       days: period.endsOn.differenceInDays(period.startsOn) + 1,
-      label: entry.who,
+      label: entry.bandLabel,
       onTap: widget.onOpenDuty,
       scroll: _hHeader,
       column: column,

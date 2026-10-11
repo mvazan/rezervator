@@ -28,6 +28,19 @@ String dutyRangeLabel(DutyPeriod period) => period.startsOn == period.endsOn
     ? dutyDayLabel(period.startsOn)
     : '${dutyDayLabel(period.startsOn)} – ${dutyDayLabel(period.endsOn)}';
 
+/// „12.–18. 10.“ — a duty's dates without the weekdays, the month once
+/// when both days share it („28. 9.–4. 10.“ when not), a one-day duty its
+/// day alone („12. 10.“): the kiosk band's short form.
+String dutyShortRange(DutyPeriod period) {
+  final from = period.startsOn;
+  final to = period.endsOn;
+  if (from == to) return '${to.day}. ${to.month}.';
+  final start = from.month == to.month && from.year == to.year
+      ? '${from.day}.'
+      : '${from.day}. ${from.month}.';
+  return '$start–${to.day}. ${to.month}.';
+}
+
 /// [names] as a Czech list: „A“, „A a B“, „A, B a C“; '' for none. Keeps
 /// the order it is given — sort with [compareCzech] first.
 String joinNames(List<String> names) => switch (names.length) {
@@ -577,6 +590,12 @@ class KioskDutyEntry {
 
   /// „Jan Novák a Petr Svoboda“.
   String get who => joinNames(names);
+
+  /// The board's band: names alone would not say what they are —
+  /// „Jan Novák a Petr Svoboda mají službu (5.–11. 10.)“, „má“ for one.
+  String get bandLabel =>
+      '$who ${names.length == 1 ? 'má' : 'mají'} službu '
+      '(${dutyShortRange(period)})';
 
   @override
   bool operator ==(Object other) =>
