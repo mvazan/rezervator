@@ -253,30 +253,24 @@ void main() {
       expect(tester.getRect(strip).left, tester.getRect(header).left);
     });
 
-    testWidgets('a band too narrow for its label cuts it at its start', (
-      tester,
-    ) async {
+    testWidgets('a band too narrow for its label: at its start, cut with an '
+        'ellipsis at its end', (tester) async {
+      const long = '$who, Jan Novák, Petr Svoboda';
       await pump(
         tester,
-        segment: const BoardBandSegment(
-          day: 0,
-          days: 1,
-          label: '$who, Jan Novák, Petr Svoboda',
-        ),
+        segment: const BoardBandSegment(day: 0, days: 1, label: long),
       );
-      final label = find.descendant(
-        of: band,
-        matching: find.textContaining(who),
-      );
+      final label = find.descendant(of: band, matching: find.text(long));
       expect(label, findsOneWidget);
       expect(tester.getRect(label).left, tester.getRect(strip).left + 6);
       expect(tester.getRect(label).width, tester.getRect(strip).width - 12);
       expect(tester.widget<Text>(label).overflow, TextOverflow.ellipsis);
+      expect(bandLabelParagraph(tester, long).didExceedMaxLines, isTrue);
     });
 
-    // Seven 100 px columns in a 450 px row 10 px in from the screen's
+    // Nine 100 px columns in a 450 px row 10 px in from the screen's
     // edge: one band from a day before the list to column 3, the next over
-    // columns 4–6 — the kiosk's board in small.
+    // columns 4–8 — the kiosk's board in small.
     //
     // A [noted] row has a line above it: the row, its list too, built anew
     // around the same [scroll].
@@ -297,7 +291,7 @@ void main() {
           scrollDirection: Axis.horizontal,
           controller: scroll,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: 7,
+          itemCount: 9,
           itemBuilder: (context, i) => SizedBox(
             width: 100,
             child: BoardColumnHeader(
@@ -317,7 +311,7 @@ void main() {
                     )
                   : BoardBandSegment(
                       day: i - 4,
-                      days: 3,
+                      days: 5,
                       label: short,
                       scroll: scroll,
                       column: i,
@@ -391,8 +385,8 @@ void main() {
         'new list stands', (tester) async {
       final scroll = await pumpRow(tester);
       for (final noted in [true, false]) {
-        // The old list near the band's end, the label pushed off the row.
-        scroll.jumpTo(250);
+        // The old list at the band's end, the label pushed off the row.
+        scroll.jumpTo(370);
         await tester.pump();
         expect(bandLabelRun(tester, who).left, lessThan(10));
         await pumpRow(tester, scroll: scroll, noted: noted);
@@ -411,25 +405,54 @@ void main() {
       }
     });
 
-    testWidgets('near its end the band\'s end pushes the label off the row; '
-        'it never passes the end — measured at the reader\'s text size', (
-      tester,
-    ) async {
+    testWidgets('what is left of the band narrower than the label: at the '
+        'row\'s left edge, cut with an ellipsis at the band\'s end; below two '
+        'glyphs and the ellipsis the end pushes it off the row, never past '
+        'the end — measured at the reader\'s text size', (tester) async {
       for (final scale in [1.0, 1.5]) {
+        final why = '$scale';
         final scroll = await pumpRow(tester, textScale: scale);
+        // The page keeps where the last scale's list stood: from the start.
+        scroll.jumpTo(0);
+        await tester.pump();
+        final paragraph = bandLabelParagraph(tester, who);
+        expect(paragraph.didExceedMaxLines, isFalse, reason: why);
+        final whole = paragraph.getMaxIntrinsicWidth(double.infinity);
+
         scroll.jumpTo(250);
         await tester.pump();
-        final run = bandLabelRun(tester, who);
+        var run = bandLabelRun(tester, who);
+        expect(run.left, closeTo(16, 0.01), reason: why);
         expect(
           run.right,
           closeTo(stripIn(tester, 3).right - 6, 0.01),
-          reason: '$scale',
+          reason: why,
         );
-        expect(run.left, lessThan(10), reason: '$scale');
+        expect(run.width, lessThan(whole), reason: why);
+        expect(
+          bandLabelParagraph(tester, who).didExceedMaxLines,
+          isTrue,
+          reason: why,
+        );
+
+        scroll.jumpTo(370);
+        await tester.pump();
+        run = bandLabelRun(tester, who);
+        expect(
+          run.right,
+          closeTo(stripIn(tester, 3).right - 6, 0.01),
+          reason: why,
+        );
+        expect(
+          run.width,
+          closeTo(bandLabelLeast(tester, who), 0.01),
+          reason: why,
+        );
+        expect(run.left, lessThan(10), reason: why);
         expect(
           bandLabelRun(tester, short).left,
           closeTo(stripIn(tester, 4).left + 6, 0.01),
-          reason: '$scale',
+          reason: why,
         );
       }
     });

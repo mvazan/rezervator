@@ -3497,6 +3497,40 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('a duty\'s last day the board\'s first column, like a '
+          'weekly one on its Sunday: at rest who serves starts at the row\'s '
+          'left edge, cut with „…“ at the duty\'s end — not cut off at its '
+          'start by the row\'s edge', (tester) async {
+        fullHd(tester);
+        // Friday 2. 10. to today, four on it: a line longer than a column.
+        const four = 'AA Hráč, BB Hráč, CC Hráč a DD Hráč';
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: [duty('ending', Day(2026, 10, 2), 7)],
+            dutyAssignments: [
+              for (var i = 0; i < 4; i++) assign('ending', players[i]),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bandOn(tester, day)!.label, four);
+        expect(bandOn(tester, day)!.ends, isTrue);
+
+        final run = bandLabelRun(tester, four);
+        expect(run.left, closeTo(rowLeft + 6, 0.01));
+        expect(run.right, closeTo(stripOn(tester, day).right - 6, 0.01));
+        final text = find.descendant(
+          of: bandPieces(four),
+          matching: find.text(four),
+        );
+        expect(text, findsOneWidget);
+        expect(tester.widget<Text>(text).overflow, TextOverflow.ellipsis);
+        expect(bandLabelParagraph(tester, four).didExceedMaxLines, isTrue);
+
+        await finish(tester);
+      });
+
       testWidgets('the band runs on unbroken from day to day, through the '
           'gap between the headers, wherever in them it runs; the next duty '
           'starts apart', (tester) async {
@@ -3690,9 +3724,10 @@ void main() {
       });
 
       testWidgets('while the board moves, mid-drag too, each duty keeps one '
-          'label: stuck to the row\'s left edge, pushed off it by the '
-          'duty\'s end, at the next one\'s start — and the board is not '
-          'rebuilt for it; the idle reset brings it back', (tester) async {
+          'label: stuck to the row\'s left edge, cut with „…“ where less of '
+          'the duty is left, pushed off the row only at its very end, at the '
+          'next one\'s start — and the board is not rebuilt for it; the idle '
+          'reset brings it back', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -3708,18 +3743,28 @@ void main() {
         final board = find.byType(ListView).last;
         expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
 
-        // Where the geometry puts the current duty's names: the duty began
-        // on Monday 5. 10., seven columns before its end on Sunday.
+        // The names uncut, and the least they are cut to.
+        final whole = bandLabelParagraph(
+          tester,
+          both,
+        ).getMaxIntrinsicWidth(double.infinity);
+        final least = bandLabelLeast(tester, both);
+
+        // Where and how wide the geometry puts the current duty's names: the
+        // duty began on Monday 5. 10., seven columns before its end on
+        // Sunday.
         void expectLabels(String why) {
           final run = bandLabelRun(tester, both);
           final end = stripOn(tester, sunday).right;
-          final at = stickyBandLabelLeft(
+          final at = stickyBandLabel(
             viewportLeft: rowLeft,
             bandStart: end + 12 - 7 * columnWidth,
             bandEnd: end,
-            labelWidth: run.width,
+            labelWidth: whole,
+            minWidth: least,
           );
-          expect(run.left, closeTo(at, 0.01), reason: why);
+          expect(run.left, closeTo(at.left, 0.01), reason: why);
+          expect(run.width, closeTo(at.width, 0.01), reason: why);
           // The next duty's at its start, while its Monday is in view.
           if (headerOf(monday).evaluate().isNotEmpty) {
             expect(
@@ -3736,18 +3781,38 @@ void main() {
         // The finger stays down: no settling, frame by frame.
         final sundayHeader = tester.widget(headerOf(sunday));
         final gesture = await tester.startGesture(tester.getCenter(board));
+        var cut = false;
         var pushed = false;
-        // On to Sunday's end and a little back: it settles on Sunday.
-        for (final dx in <double>[-30, -77, -150, -200, -250, -150, -100, 60]) {
+        // On to Sunday's end and back: it settles on Sunday.
+        for (final dx in <double>[
+          -30,
+          -77,
+          -150,
+          -200,
+          -250,
+          -150,
+          -100,
+          -90,
+          150,
+        ]) {
           await gesture.moveBy(Offset(dx, 0));
           await tester.pump();
           expectLabels('$dx');
           final run = bandLabelRun(tester, both);
-          if (run.left < rowLeft + 6 - 0.01) {
-            pushed = true;
+          final stuck = run.left >= rowLeft + 6 - 0.01;
+          final cutShort = run.width < whole - 0.01;
+          if (!stuck) pushed = true;
+          if (stuck && cutShort) cut = true;
+          if (cutShort) {
+            // Never past the duty's end, „…“ where it is cut.
             expect(
               run.right,
               closeTo(stripOn(tester, sunday).right - 6, 0.01),
+              reason: '$dx',
+            );
+            expect(
+              bandLabelParagraph(tester, both).didExceedMaxLines,
+              isTrue,
               reason: '$dx',
             );
           }
@@ -3758,6 +3823,7 @@ void main() {
             reason: '$dx',
           );
         }
+        expect(cut, isTrue, reason: 'the drag nears the duty\'s end');
         expect(pushed, isTrue, reason: 'the drag reaches the duty\'s end');
         await gesture.up();
         await tester.pumpAndSettle();

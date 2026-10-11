@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
@@ -44,4 +45,31 @@ Rect bandLabelRun(WidgetTester tester, String label) {
     );
   }
   return run;
+}
+
+/// The band's [label] as the first piece that draws it lays it out: cut
+/// with an ellipsis ([RenderParagraph.didExceedMaxLines]) or whole, and
+/// how wide it is uncut ([RenderParagraph.getMaxIntrinsicWidth]).
+RenderParagraph bandLabelParagraph(WidgetTester tester, String label) =>
+    tester.renderObject<RenderParagraph>(
+      find.descendant(of: bandPieces(label), matching: find.text(label)).first,
+    );
+
+/// The least the band cuts its [label] to before its end pushes it off
+/// the row: two glyphs and the ellipsis, in the label's style and at the
+/// reader's text size.
+double bandLabelLeast(WidgetTester tester, String label) {
+  final paragraph = bandLabelParagraph(tester, label);
+  final painter = TextPainter(
+    text: TextSpan(
+      text: '${label.characters.take(2)}…',
+      style: paragraph.text.style,
+    ),
+    textDirection: paragraph.textDirection,
+    textScaler: paragraph.textScaler,
+    maxLines: 1,
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
 }

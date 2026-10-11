@@ -338,37 +338,48 @@ class CalendarEventBand extends StatelessWidget {
   }
 }
 
-/// Where a band's one label starts while the board scrolls, like a
-/// multi-day event's title in Google Calendar — [viewportLeft] (the
-/// visible row's left edge), [bandStart] and [bandEnd] in one space, the
-/// header list's scroll space. With the band's start in view the label
-/// rides [padding] in from it; the band run off to the left, it sticks
-/// [padding] in from the row's edge; near the band's end the end pushes it
-/// along ([padding] short of the end, never past it); a band narrower than
-/// [labelWidth] keeps it at its start (the label is cut there). Continuous
-/// in [viewportLeft]: scrolling moves the label, never makes it jump.
-double stickyBandLabelLeft({
+/// Where a band's one label stands and how wide it is drawn while the
+/// board scrolls, like a multi-day event's title in Google Calendar —
+/// [viewportLeft] (the visible row's left edge), [bandStart] and [bandEnd]
+/// in one space, the header list's scroll space. The label starts
+/// [padding] in from the band's visible start: the band's start while
+/// that is in view, the row's left edge once the band runs off it. It is
+/// [labelWidth] wide, or as wide as the room left before the band's end
+/// ([padding] short of it) where that is less — cut there with an
+/// ellipsis, so a name is never cut in its middle by the row's edge. Only
+/// when that room falls below [minWidth] (about two glyphs and the
+/// ellipsis) does the end push the label, that wide, off to the left with
+/// the band — never past the end; a band too narrow even for that keeps
+/// it at its start, cut to the band. Continuous in [viewportLeft]:
+/// scrolling moves or narrows the label, never makes it jump.
+({double left, double width}) stickyBandLabel({
   required double viewportLeft,
   required double bandStart,
   required double bandEnd,
   required double labelWidth,
   double padding = 6,
+  double minWidth = 24,
 }) {
+  final visible = viewportLeft > bandStart ? viewportLeft : bandStart;
+  final left = visible + padding;
+  final room = bandEnd - padding - left;
+  if (room >= labelWidth) return (left: left, width: labelWidth);
+  final least = labelWidth < minWidth ? labelWidth : minWidth;
+  if (room >= least) return (left: left, width: room);
   final first = bandStart + padding;
-  final stuck = viewportLeft + padding;
-  final pushed = bandEnd - padding - labelWidth;
-  final left = stuck < first ? first : stuck;
-  final kept = left > pushed ? pushed : left;
-  return kept < first ? first : kept;
+  final pushed = bandEnd - padding - least;
+  final kept = pushed < first ? first : pushed;
+  final width = bandEnd - padding - kept;
+  return (left: kept, width: width < 0 ? 0.0 : width);
 }
 
 /// One day's piece of a band drawn across the board's day headers, like an
 /// all-day event — the kiosk's canteen duty (0073). The band runs [days]
 /// days and this piece is its [day]: rounded where the band starts and
 /// ends. Every piece carries the band's one [label] and draws the part of
-/// it that crosses the piece, where [stickyBandLabelLeft] puts it in the
-/// header list ([scroll]) — so it reads as one text however the board
-/// scrolls; null leaves the band blank.
+/// it that crosses the piece, where and as wide as [stickyBandLabel] puts
+/// it in the header list ([scroll]) — so it reads as one text however the
+/// board scrolls; null leaves the band blank.
 class BoardBandSegment {
   const BoardBandSegment({
     required this.day,
@@ -422,7 +433,7 @@ class BoardBand extends StatelessWidget {
   static const endInset = 4.0;
 
   /// The label's room from the strip's ends, and from the row's left edge
-  /// it sticks to ([stickyBandLabelLeft]).
+  /// it sticks to ([stickyBandLabel]).
   static const labelPadding = 6.0;
 
   final BoardBandSegment segment;
@@ -498,10 +509,11 @@ class BoardBand extends StatelessWidget {
   }
 }
 
-/// A piece's part of the band's label: the whole label where
-/// [stickyBandLabelLeft] puts it, clipped to the piece's strip — nothing
-/// where it does not cross the piece. Only this rebuilds while the header
-/// list scrolls; the strip and the header stay as they are.
+/// A piece's part of the band's label: the whole label where and as wide
+/// as [stickyBandLabel] puts it (cut with an ellipsis where it is
+/// narrower), clipped to the piece's strip — nothing where it does not
+/// cross the piece. Only this rebuilds while the header list scrolls; the
+/// strip and the header stay as they are.
 class _BandLabel extends StatelessWidget {
   const _BandLabel({
     required this.segment,
@@ -518,16 +530,25 @@ class _BandLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = DefaultTextStyle.of(context).style.merge(this.style);
+    final direction = Directionality.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
     // Measured as the [Text] below lays it out, the reader's text size
-    // included: the end must push the label's real right edge.
-    final painter = TextPainter(
-      text: TextSpan(text: label, style: style),
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
-      maxLines: 1,
-    )..layout();
-    final labelWidth = painter.width;
-    painter.dispose();
+    // included: the label is cut, and pushed, by its real right edge.
+    double measure(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: direction,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width;
+    }
+
+    final labelWidth = measure(label);
+    // The least worth cutting the label to: two glyphs and the ellipsis.
+    final minWidth = measure('${label.characters.take(2)}…');
     return LayoutBuilder(
       builder: (context, constraints) {
         // In the header list's scroll space: the column's width and where
@@ -542,10 +563,6 @@ class _BandLabel extends StatelessWidget {
         final firstColumn = s.column - s.day;
         final bandStart = firstColumn * columnWidth + end;
         final bandEnd = (firstColumn + s.days) * columnWidth - end;
-        // A band narrower than the label cuts it at its start.
-        final room = bandEnd - bandStart - 2 * pad;
-        final cut = labelWidth > room;
-        final width = cut ? (room > 0 ? room : 0.0) : labelWidth;
 
         final scroll = s.scroll;
 
@@ -557,15 +574,16 @@ class _BandLabel extends StatelessWidget {
           final viewportLeft = positions == null || positions.isEmpty
               ? 0.0
               : positions.last.pixels;
-          final left = stickyBandLabelLeft(
+          final at = stickyBandLabel(
             viewportLeft: viewportLeft,
             bandStart: bandStart,
             bandEnd: bandEnd,
-            labelWidth: width,
+            labelWidth: labelWidth,
             padding: pad,
+            minWidth: minWidth,
           );
-          final x = left - stripLeft;
-          if (x >= stripWidth || x + width <= 0) {
+          final x = at.left - stripLeft;
+          if (at.width <= 0 || x >= stripWidth || x + at.width <= 0) {
             return const SizedBox.shrink();
           }
           return Stack(
@@ -575,7 +593,9 @@ class _BandLabel extends StatelessWidget {
                 left: x,
                 top: 0,
                 bottom: 0,
-                width: cut ? width : null,
+                // Where the band left in view is narrower, the label is
+                // cut to it with an ellipsis.
+                width: at.width,
                 child: Align(
                   alignment: Alignment.centerLeft,
                   // Read once: by the piece where the label starts.
