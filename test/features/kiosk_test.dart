@@ -3336,7 +3336,7 @@ void main() {
         await tester.tap(line);
         await tester.pumpAndSettle();
 
-        expect(inDialog('Služby v kantýně'), findsOneWidget);
+        expect(inDialog('Služby na kantýně'), findsOneWidget);
         expect(inDialog('Teď slouží: AA Hráč a PP Hráč'), findsOneWidget);
         expect(inDialog('po 5. 10. – ne 11. 10.'), findsOneWidget);
         expect(inDialog('Další'), findsOneWidget);
@@ -3405,7 +3405,7 @@ void main() {
 
         // Read for 50 s, touched: another full minute from then on.
         await tester.pump(const Duration(seconds: 50));
-        await tester.tap(inDialog('Služby v kantýně'));
+        await tester.tap(inDialog('Služby na kantýně'));
         await tester.pump(const Duration(seconds: 20));
         // (A reset in those 20 s would still be fading the dialog out.)
         await tester.pumpAndSettle();
@@ -3570,7 +3570,7 @@ void main() {
 
         await tester.tap(band);
         await tester.pumpAndSettle();
-        expect(inDialog('Služby v kantýně'), findsOneWidget);
+        expect(inDialog('Služby na kantýně'), findsOneWidget);
         expect(inDialog('Teď slouží: $both'), findsOneWidget);
         await tester.tap(inDialog('Zavřít'));
         await tester.pumpAndSettle();
@@ -3584,13 +3584,13 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(dialog, findsOneWidget);
-        expect(inDialog('Služby v kantýně'), findsNothing);
+        expect(inDialog('Služby na kantýně'), findsNothing);
         await tester.tap(inDialog('Zavřít'));
         await tester.pumpAndSettle();
 
         await tester.tap(band);
         await tester.pumpAndSettle();
-        expect(inDialog('Služby v kantýně'), findsOneWidget);
+        expect(inDialog('Služby na kantýně'), findsOneWidget);
         await tester.pump(const Duration(seconds: 61));
         await tester.pumpAndSettle();
         expect(dialog, findsNothing);
@@ -3634,7 +3634,7 @@ void main() {
       });
 
       // „V panelu“: the drawer's cards, each found by its title.
-      const dutyTitle = 'SLUŽBA V KANTÝNĚ';
+      const dutyTitle = 'SLUŽBA NA KANTÝNĚ';
       Finder cardTitled(String title) => find
           .ancestor(of: drawerText(title), matching: find.byType(Container))
           .first;
@@ -3945,7 +3945,7 @@ void main() {
         child: const MaterialApp(home: Scaffold(body: KioskDutyDialog())),
       ),
     );
-    expect(find.text('Služby v kantýně'), findsOneWidget);
+    expect(find.text('Služby na kantýně'), findsOneWidget);
     expect(find.textContaining('Teď slouží'), findsNothing);
     expect(find.text('Další'), findsOneWidget);
     expect(find.text('po 12. 10. – ne 18. 10.'), findsOneWidget);

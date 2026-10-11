@@ -353,7 +353,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
 
-      expect(find.text('Služby v kantýně'), findsOneWidget);
+      expect(find.text('Služby na kantýně'), findsOneWidget);
       expect(
         find.textContaining('Správě → Služby. Každé místo se zapíná zvlášť.'),
         findsOneWidget,
@@ -589,7 +589,7 @@ void main() {
     final order = [
       top('Obrazovka kiosku'),
       top('Nástěnka'),
-      top('Služby v kantýně'),
+      top('Služby na kantýně'),
       top('Postranní panel'),
       top('Hraný zápas'),
       top('Adresa pro tablet'),
@@ -640,11 +640,16 @@ void main() {
       'Výchozně rozbalený',
       'Zápasy v panelu',
       'Hraný zápas přes celý panel',
+      // The duty's card has no drawer to go to; header and board stay.
+      'V panelu',
     ]) {
       expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
     }
     expect(find.text('Šířka panelu'), findsNothing);
+    expect(find.text('Podíl karty v panelu'), findsNothing);
     expect(find.text('Hraný zápas'), findsNothing);
+    expect(find.widgetWithText(SwitchListTile, 'V záhlaví'), findsOneWidget);
+    expect(find.widgetWithText(SwitchListTile, 'V kalendáři'), findsOneWidget);
     // The notices can still go to the status bar without the panel.
     expect(find.text('Kde se oznamy zobrazí'), findsOneWidget);
 

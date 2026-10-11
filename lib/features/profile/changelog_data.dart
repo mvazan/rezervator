@@ -61,9 +61,9 @@ const appChangelog = <Release>[
     'Správa → Kiosk: nová sekce Optimalizace výkonu pro slabší displej — '
         'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
-    'Kiosk: kdo slouží v kantýně — v záhlaví (ťuk ukáže plán), jako pás '
+    'Kiosk: kdo slouží na kantýně — v záhlaví (ťuk ukáže plán), jako pás '
         'v kalendáři nebo karta v panelu; zapíná správce ve Správě → Kiosk → '
-        'Služby v kantýně.',
+        'Služby na kantýně.',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
@@ -71,7 +71,7 @@ const appChangelog = <Release>[
     'Kiosk v aplikaci: displej nezhasne, systémové lišty se schovají; kiosk '
         'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
     'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
-    'Kiosk: kdo slouží v kantýně — v záhlaví, v kalendáři nebo v panelu.',
+    'Kiosk: kdo slouží na kantýně — v záhlaví, v kalendáři nebo v panelu.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '

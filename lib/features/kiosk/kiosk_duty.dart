@@ -1,11 +1,13 @@
 /// The canteen duty on the kiosk (0073): who serves now and who comes next,
 /// read from the plan of Správa → Služby. The admin switches each place on
-/// separately (Správa → Kiosk → Služby v kantýně): the status bar's line
+/// separately (Správa → Kiosk → Služby na kantýně): the status bar's line
 /// under the date ([KioskDutyLine]), a band across the board's day headers
 /// and a card in the side drawer. A tap on the line or the band opens the
 /// plan ([showKioskDutyDialog]); the card lists it itself. Display only —
 /// duties are edited in the app.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,8 +44,9 @@ final kioskDutyPlanProvider =
 
 /// The status bar's duty line („V záhlaví“): „Služba: Jan Novák a Petr
 /// Svoboda“ with a cup, tinted `secondaryContainer`, one line of at most
-/// [maxWidth] — a long list of names is cut, the clock column stays
-/// narrow. A tap opens the plan ([onTap]).
+/// [maxWidth] and a fifth of the screen — a long list of names is cut, the
+/// clock column stays narrow and leaves the bar's middle its room. A tap
+/// opens the plan ([onTap]).
 class KioskDutyLine extends StatelessWidget {
   const KioskDutyLine({super.key, required this.entry, required this.onTap});
 
@@ -57,7 +60,9 @@ class KioskDutyLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: maxWidth),
+      constraints: BoxConstraints(
+        maxWidth: math.min(maxWidth, MediaQuery.sizeOf(context).width / 5),
+      ),
       child: Material(
         color: scheme.secondaryContainer,
         borderRadius: BorderRadius.circular(8),
@@ -96,7 +101,7 @@ class KioskDutyLine extends StatelessWidget {
   }
 }
 
-/// Opens „Služby v kantýně“ over the kiosk. [wrap] is the shell's: it gives
+/// Opens „Služby na kantýně“ over the kiosk. [wrap] is the shell's: it gives
 /// the dialog the kiosk's theme and counts a touch on it for the idle timer
 /// — whose reset closes it, with every other dialog.
 Future<void> showKioskDutyDialog(
@@ -121,7 +126,7 @@ class KioskDutyDialog extends ConsumerWidget {
     final plan = ref.watch(kioskDutyPlanProvider);
     final now = plan.now;
     return AlertDialog(
-      title: const Text('Služby v kantýně'),
+      title: const Text('Služby na kantýně'),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(

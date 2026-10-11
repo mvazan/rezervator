@@ -367,7 +367,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
     final scheme = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
-      label: widget.open ? 'Skrýt panel' : 'Zobrazit nástěnku a zápasy',
+      label: widget.open ? 'Skrýt panel' : 'Zobrazit panel',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
@@ -508,7 +508,7 @@ class _DutyCard extends StatelessWidget {
     final muted = TextStyle(fontSize: 15, color: scheme.onSurfaceVariant);
     return _Card(
       icon: Icons.local_cafe_outlined,
-      title: 'SLUŽBA V KANTÝNĚ',
+      title: 'SLUŽBA NA KANTÝNĚ',
       fill: true,
       child: SingleChildScrollView(
         child: Column(
