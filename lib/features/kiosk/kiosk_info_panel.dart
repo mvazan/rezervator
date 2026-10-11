@@ -1322,7 +1322,12 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                 // Back to all matches on the left, the dots (how many take
                 // turns; the lock) in the middle, how old the score is on
                 // the right. (The scoreboard's own chip says it is live.)
+                // Three slots, the room left over shared evenly between
+                // them: the age and the badge end flush at the right edge
+                // however wide the drawer — the absent back button or dots
+                // keep their slot as nothing.
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     if (widget.onShowList != null)
                       IconButton(
@@ -1330,8 +1335,9 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                         visualDensity: VisualDensity.compact,
                         icon: const Icon(Icons.arrow_back),
                         onPressed: widget.onShowList,
-                      ),
-                    const Spacer(),
+                      )
+                    else
+                      const SizedBox.shrink(),
                     // The dots say how many matches take turns; a tap
                     // pins the one on screen until it ends (or another
                     // tap, or a swipe).
@@ -1384,31 +1390,48 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                             ),
                           ),
                         ),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                    // The only slot that gives way, and only the age in it:
+                    // it takes the width it needs and is cut short only
+                    // when the drawer has nothing left — the badge beside
+                    // it is the stream's only way in. (A flex child next to
+                    // Spacers would get a fixed share of the room instead:
+                    // cut short with room to spare, or ending short of the
+                    // edge.)
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(child: _LiveAge(slot: slot)),
+                          // The live badge everywhere else has: the pulsing
+                          // red camera — still with the admin's animations
+                          // off.
+                          if (onPlay != null && hasKioskVideo(slot)) ...[
+                            const SizedBox(width: 4),
+                            MatchLeading(
+                              slot: slot,
+                              result: ref.watch(
+                                matchResultsProvider.select(
+                                  (r) => r.value?[slot.id],
+                                ),
+                              ),
+                              now:
+                                  ref.watch(nowProvider).value ?? DateTime.now(),
+                              linksEnabled: true,
+                              fallback: const SizedBox.shrink(),
+                              launch: (_) => onPlay(slot),
+                              pulse: ref.watch(
+                                settingsProvider.select(
+                                  (s) => s.value?.kioskAnimations ?? true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    const Spacer(),
-                    // Gives way first in a narrow drawer: the badge beside
-                    // it is the stream's only way in.
-                    Flexible(child: _LiveAge(slot: slot)),
-                    // The live badge everywhere else has: the pulsing red
-                    // camera — still with the admin's animations off.
-                    if (onPlay != null && hasKioskVideo(slot)) ...[
-                      const SizedBox(width: 4),
-                      MatchLeading(
-                        slot: slot,
-                        result: ref.watch(
-                          matchResultsProvider.select((r) => r.value?[slot.id]),
-                        ),
-                        now: ref.watch(nowProvider).value ?? DateTime.now(),
-                        linksEnabled: true,
-                        fallback: const SizedBox.shrink(),
-                        launch: (_) => onPlay(slot),
-                        pulse: ref.watch(
-                          settingsProvider.select(
-                            (s) => s.value?.kioskAnimations ?? true,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),

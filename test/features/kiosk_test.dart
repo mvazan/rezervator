@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -2250,6 +2251,126 @@ void main() {
         await tester.pumpAndSettle();
         expect(badge, findsOneWidget);
         expect(pulsing(tester), isFalse);
+        await finish(tester);
+      });
+
+      testWidgets('the live view\'s header: how old the score is sits at the '
+          'right edge — against the live badge, or alone — and gives way '
+          'only when nothing is left', (tester) async {
+        fullHd(tester);
+        final inDrawer = find.byType(KioskDrawer);
+        // „⟳ před … dny“: its icon and text, in a row of their own.
+        final age = find
+            .ancestor(
+              of: find.descendant(
+                of: inDrawer,
+                matching: find.byIcon(Icons.refresh),
+              ),
+              matching: find.byType(Row),
+            )
+            .first;
+        final ageText = find.descendant(
+          of: age,
+          matching: find.textContaining('před'),
+        );
+        final badge = find.descendant(
+          of: inDrawer,
+          matching: find.byType(MatchLeading),
+        );
+        // The header row ends where the drawer does, less its padding.
+        double rowEnd() => tester.getTopRight(inDrawer).dx - 12;
+        bool cut() => tester
+            .renderObject<RenderParagraph>(
+              find.descendant(of: ageText, matching: find.byType(RichText)),
+            )
+            .didExceedMaxLines;
+
+        // With the live badge: the age right beside it, the badge at the end.
+        await tester.pumpWidget(
+          app(
+            slots: onAir,
+            results: playing,
+            lineups: {'m': lineup},
+            animations: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(tester.getTopRight(badge).dx, closeTo(rowEnd(), 0.5));
+        expect(
+          tester.getTopRight(age).dx,
+          closeTo(tester.getTopLeft(badge).dx - 4, 0.5),
+        );
+        expect(cut(), isFalse);
+        await finish(tester);
+
+        // No video: the age at the end itself.
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Domácí', hour: 11)],
+            results: playing,
+            lineups: {'m': lineup},
+            animations: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(badge, findsNothing);
+        expect(tester.getTopRight(age).dx, closeTo(rowEnd(), 0.5));
+        expect(cut(), isFalse);
+        await finish(tester);
+
+        // A one-column drawer, two matches taking turns: back, the dots,
+        // the age and the badge do not all fit. The age gives way — but
+        // only by what is missing: no gap left on either side of it, and
+        // the badge whole at the end.
+        await tester.pumpWidget(
+          app(
+            slots: [
+              ...onAir,
+              fed('n', day, 'Druzí', hour: 11, video: video2),
+            ],
+            results: {...playing, 'n': res('n', 'in_progress', 1, 2)},
+            lineups: {
+              'm': lineup,
+              'n': [
+                for (final side in ['home', 'away'])
+                  MatchPlayerResult(
+                    id: 'n-$side',
+                    matchId: 'n',
+                    side: side,
+                    position: 1,
+                    playerName: side,
+                    total: 400,
+                  ),
+              ],
+            },
+            drawerColumns: 1,
+            animations: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final dots = find.descendant(
+          of: inDrawer,
+          matching: find.byIcon(Icons.lock_open),
+        );
+        expect(dots, findsOneWidget);
+        expect(cut(), isTrue);
+        expect(tester.getTopRight(badge).dx, closeTo(rowEnd(), 0.5));
+        expect(
+          tester.getTopRight(age).dx,
+          closeTo(tester.getTopLeft(badge).dx - 4, 0.5),
+        );
+        // The dots' tap target (the lock and the dots, padded) ends where
+        // the age begins.
+        final dotsTarget = find
+            .ancestor(of: dots, matching: find.byType(GestureDetector))
+            .first;
+        expect(
+          tester.getTopLeft(age).dx,
+          closeTo(tester.getTopRight(dotsTarget).dx, 0.5),
+        );
         await finish(tester);
       });
 
