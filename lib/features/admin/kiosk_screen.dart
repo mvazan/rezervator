@@ -389,6 +389,55 @@ class KioskSettingsScreen extends ConsumerWidget {
             ),
             _section(
               context,
+              'Služby v kantýně',
+              'Kdo právě slouží v kantýně a kdo přijde na řadu — podle plánu '
+                  've Správě → Služby. Každé místo se zapíná zvlášť.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'V záhlaví',
+                  settings?.kioskDutyHeader ?? false,
+                  'kiosk_duty_header',
+                  subtitle:
+                      'Pod hodinami „Služba: …“ s dnešní službou; ťuk ukáže '
+                      'plán.',
+                ),
+                _switch(
+                  context,
+                  settings,
+                  'V kalendáři',
+                  settings?.kioskDutyBoard ?? false,
+                  'kiosk_duty_board',
+                  subtitle:
+                      'Pás se jmény přes dny služby v hlavičkách dnů tabule.',
+                ),
+                _switch(
+                  context,
+                  settings,
+                  'V panelu',
+                  settings?.kioskDutyDrawer ?? false,
+                  'kiosk_duty_drawer',
+                  subtitle: 'Karta se službou a plánem v postranním panelu.',
+                ),
+                if (settings?.kioskDutyDrawer ?? false)
+                  _number(
+                    context,
+                    settings,
+                    'Podíl karty v panelu',
+                    settings?.kioskDutyShare ?? 30,
+                    'kiosk_duty_share',
+                    unit: '%',
+                    min: 10,
+                    max: 90,
+                    helper:
+                        'Kolik výšky panelu karta zabere; zbytek si dělí '
+                        'nástěnka a zápasy.',
+                  ),
+              ],
+            ),
+            _section(
+              context,
               'Postranní panel',
               'Panel vpravo vedle tabule s nástěnkou a zápasy. Návštěvník '
                   'ho rozbalí a sbalí tlačítkem na okraji obrazovky; po době '
