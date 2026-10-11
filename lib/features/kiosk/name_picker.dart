@@ -256,22 +256,22 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             // and the letters are what the page is for, the
                             // note is for whoever came to cancel. The later
                             // pages go without it.
-                            if (_prefix.isEmpty && note != null) ...[
-                              const SizedBox(height: 24),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: _noteMaxWidth,
-                                ),
-                                child: KioskWarning(
-                                  text: note,
-                                  maxLines: _noteMaxLines,
-                                ),
-                              ),
-                            ],
+                            if (_prefix.isEmpty && note != null)
+                              ..._note(note),
                           ],
                         ),
-                      NamesNode(:final players) =>
-                        _nameGrid(context, players, constraints.maxWidth),
+                      // A small alley (up to `_capacity` players) opens on
+                      // its names — the first page all the same, so the
+                      // note stands under them; no hint, there are no
+                      // letters to explain.
+                      NamesNode(:final players) => Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _nameGrid(context, players, constraints.maxWidth),
+                            if (_prefix.isEmpty && note != null)
+                              ..._note(note),
+                          ],
+                        ),
                     },
                   ),
                 ),
@@ -282,6 +282,15 @@ class _NamePickerState extends ConsumerState<NamePicker> {
       ),
     );
   }
+
+  /// The admin's note (0070) under the first page's tiles.
+  List<Widget> _note(String note) => [
+        const SizedBox(height: 24),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _noteMaxWidth),
+          child: KioskWarning(text: note, maxLines: _noteMaxLines),
+        ),
+      ];
 
   Widget _breadcrumb(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 16),

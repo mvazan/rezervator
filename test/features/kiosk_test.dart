@@ -372,6 +372,69 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('b3: a small alley\'s picker lists the names at once — the '
+      'note stands under them, the hint stays the letters\'; not once a '
+      'letter led to the names', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final note = find.byType(KioskWarning);
+    final hint = find.text(firstLetterHint);
+    // Up to `_capacity` (24) players: no letters, the names straight away.
+    for (final roster in [
+      [anna, petr],
+      players.take(24).toList(),
+    ]) {
+      await tester.pumpWidget(
+        kioskApp(
+          roster: roster,
+          kioskPickerNote: ScheduleSettings.defaultPickerNote,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(anna.displayName), findsOneWidget);
+      expect(hint, findsNothing);
+      expect(note, findsOneWidget);
+      expect(find.text(ScheduleSettings.defaultPickerNote), findsOneWidget);
+      // Under the names — the last one too — on the screen, centred and
+      // not stretched across it.
+      expect(
+        tester.getTopLeft(note).dy,
+        greaterThan(tester.getBottomLeft(find.text(roster.last.displayName)).dy),
+      );
+      expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(1080));
+      expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
+      expect(tester.getCenter(note).dx, closeTo(960, 1));
+      expect(tester.takeException(), isNull);
+      await finish(tester);
+    }
+
+    // Names reached through a letter are a later page: no note there.
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: ScheduleSettings.defaultPickerNote),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(find.text(anna.displayName), findsOneWidget);
+    expect(note, findsNothing);
+    await finish(tester);
+
+    // No note set: the names alone.
+    await tester.pumpWidget(kioskApp(roster: [anna, petr]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(find.text(anna.displayName), findsOneWidget);
+    expect(note, findsNothing);
+    await finish(tester);
+  });
+
   testWidgets('b3: on a phone the note under the letters scrolls into view '
       'and keeps to the screen', (tester) async {
     tester.view.physicalSize = const Size(375, 812);
