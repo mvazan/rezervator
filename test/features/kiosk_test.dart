@@ -3460,8 +3460,9 @@ void main() {
       final monday = Day(2026, 10, 12);
 
       testWidgets('„V kalendáři“: a band over each duty\'s days, rounded '
-          'where it starts and ends, who once per duty — at its start, or '
-          'at the row\'s left edge for one begun off it', (tester) async {
+          'where it starts and ends (a one-day duty at both), who once per '
+          'duty — at its start, or at the row\'s left edge for one begun off '
+          'it', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -3493,6 +3494,20 @@ void main() {
         );
         // Only the band: the status bar's line is the other switch.
         expect(find.byType(KioskDutyLine), findsNothing);
+        await finish(tester);
+
+        // A one-day duty: one piece, its first day and its last.
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: [duty('one', Day(2026, 10, 9), 1)],
+            dutyAssignments: [assign('one', petr)],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(piece(Day(2026, 10, 9)), (true, true));
+        expect(bandOn(tester, day), isNull);
+        expect(bandOn(tester, Day(2026, 10, 10)), isNull);
 
         await finish(tester);
       });

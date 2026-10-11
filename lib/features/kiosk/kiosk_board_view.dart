@@ -202,11 +202,14 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   }
 
   /// The duty's piece over the header of [date], the board's [column]
-  /// ([entry] null = no duty there). Who serves is the band's one label:
-  /// it rides the period's start, sticks to the row's left edge while the
-  /// period runs off it — a period begun off to the left still says who —
-  /// and moves with the header strip's own scroll ([_hHeader]), frame by
-  /// frame, without rebuilding the board.
+  /// ([entry] null = no duty there): its day in the period and the
+  /// period's length, read from the period's dates — whether the piece
+  /// starts or ends the band, rounded, follows from those alone. Who
+  /// serves is the band's one label: it rides the period's start, sticks
+  /// to the row's left edge while the period runs off it — a period begun
+  /// off to the left still says who — and moves with the header strip's
+  /// own scroll ([_hHeader]), frame by frame, without rebuilding the
+  /// board.
   BoardBandSegment? _dutySegment(Day date, KioskDutyEntry? entry, int column) {
     if (entry == null) return null;
     final period = entry.period;
@@ -381,7 +384,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // the plan is read only while the admin has it on, and every header
     // keeps the band's room then, a day without a duty too — above the
     // date, between it and the matches or under them, as the admin chose.
-    ({KioskDutyEntry entry, bool starts, bool ends})? Function(Day)? dutyOn;
+    KioskDutyEntry? Function(Day)? dutyOn;
     if (settings.kioskDutyBoard) {
       final periods = ref.watch(dutyPeriodsProvider).value ?? const [];
       final assignments =
@@ -485,7 +488,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                               : settings.kioskDutyBandPosition,
                           band: _dutySegment(
                             days[index].date,
-                            dutyOn?.call(days[index].date)?.entry,
+                            dutyOn?.call(days[index].date),
                             index,
                           ),
                         ),

@@ -633,22 +633,15 @@ KioskDutyEntry? _kioskEntry(
 }
 
 /// The duty on [day] for the kiosk board's band: the period covering it
-/// with who serves, and whether [day] is the period's first ([starts]) or
-/// last ([ends]) day — where the band's segment is rounded. Null when no
-/// period covers [day], or nobody known serves it.
-({KioskDutyEntry entry, bool starts, bool ends})? kioskDutyOn(
+/// with who serves. Null when no period covers [day], or nobody known
+/// serves it. Where the band's piece starts or ends — rounded — the board
+/// reads from the period's dates.
+KioskDutyEntry? kioskDutyOn(
   Iterable<DutyPeriod> periods,
   Iterable<DutyAssignment> assignments,
   Map<String, String> names,
   Day day,
 ) {
   final period = periodOn(periods, day);
-  if (period == null) return null;
-  final entry = _kioskEntry(period, assignments, names);
-  if (entry == null) return null;
-  return (
-    entry: entry,
-    starts: day == period.startsOn,
-    ends: day == period.endsOn,
-  );
+  return period == null ? null : _kioskEntry(period, assignments, names);
 }
