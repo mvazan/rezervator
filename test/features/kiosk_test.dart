@@ -1367,6 +1367,8 @@ void main() {
       KioskDutyBandPosition dutyBandPosition = KioskDutyBandPosition.middle,
       List<DutyPeriod> dutyPeriods = const [],
       List<DutyAssignment> dutyAssignments = const [],
+      List<Reservation> reservations = const [],
+      int? maxActiveReservations,
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith(
@@ -1375,7 +1377,8 @@ void main() {
               laneCount: settings.laneCount,
               trainingWeekdays: settings.trainingWeekdays,
               bookingHorizonDays: settings.bookingHorizonDays,
-              maxActiveReservations: settings.maxActiveReservations,
+              maxActiveReservations:
+                  maxActiveReservations ?? settings.maxActiveReservations,
               kioskDrawerOpen: drawerOpen,
               kioskNoticesMode: switch ((showNotices, headerNotices)) {
                 (true, true) => KioskNoticesMode.both,
@@ -1417,7 +1420,12 @@ void main() {
         prioritySlotsProvider.overrideWithValue(slots),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
         weekReservationsProvider.overrideWith(
-          (ref, monday) => Stream.value(const []),
+          (ref, monday) => Stream.value([
+            for (final r in reservations)
+              if (!r.date.isBefore(monday) &&
+                  r.date.differenceInDays(monday) < 7)
+                r,
+          ]),
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
@@ -3775,6 +3783,86 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
         expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+
+        await finish(tester);
+      });
+
+      testWidgets('a player at the limit picks their name, then lets go of '
+          'it: the note comes and goes above the board, which stays where '
+          'it was, each duty\'s label drawn throughout', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+            // Anna's one live reservation is all she may hold.
+            maxActiveReservations: 1,
+            reservations: [
+              Reservation(
+                id: 'r1',
+                playerId: anna.id,
+                date: day.addDays(1),
+                blockId: 'b1',
+                lane: 2,
+                createdVia: 'app',
+                createdAt: DateTime.utc(2026, 1, 1),
+              ),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Two columns on: Saturday first, the current duty's names stuck
+        // to the row's left edge, the next one's at its Monday.
+        const columnWidth = (1920 - rowLeft) / 7;
+        final saturday = Day(2026, 10, 10);
+        await tester.drag(
+          find.byType(ListView).last,
+          const Offset(-2 * columnWidth, 0),
+        );
+        await tester.pumpAndSettle();
+        final note = find.textContaining('Máš maximální počet rezervací (1)');
+
+        // Every frame of it, the one where the note comes or goes too.
+        Future<void> expectBoard(String why) async {
+          for (var frame = 0; frame < 30; frame++) {
+            expect(tester.takeException(), isNull, reason: '$why $frame');
+            expect(
+              tester.getTopLeft(headerOf(saturday)).dx,
+              closeTo(rowLeft, 0.01),
+              reason: '$why $frame',
+            );
+            expect(
+              bandLabelRun(tester, both).left,
+              closeTo(rowLeft + 6, 0.01),
+              reason: '$why $frame',
+            );
+            expect(
+              bandLabelRun(tester, 'BB Hráč').left,
+              closeTo(stripOn(tester, monday).left + 6, 0.01),
+              reason: '$why $frame',
+            );
+            await tester.pump(const Duration(milliseconds: 20));
+          }
+        }
+
+        await expectBoard('before');
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
+        await expectBoard('picked');
+        expect(note, findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.close));
+        await expectBoard('let go');
+        expect(note, findsNothing);
 
         await finish(tester);
       });

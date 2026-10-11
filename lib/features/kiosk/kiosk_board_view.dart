@@ -607,19 +607,20 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       },
     );
 
-    if (selected == null || !atReservationLimit(selectedCount, settings)) {
-      return board;
-    }
+    // The board in the same place whether the note shows or not: built
+    // anew, its lists would start over at the oldest day, and for a frame
+    // the header's controller would hold the old list and the new one.
     return Column(
       children: [
-        MaterialBanner(
-          content: Text(
-            reservationLimitNote(settings.maxActiveReservations),
-            style: Theme.of(context).textTheme.titleMedium,
+        if (selected != null && atReservationLimit(selectedCount, settings))
+          MaterialBanner(
+            content: Text(
+              reservationLimitNote(settings.maxActiveReservations),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            leading: const Icon(Icons.info_outline),
+            actions: const [SizedBox.shrink()],
           ),
-          leading: const Icon(Icons.info_outline),
-          actions: const [SizedBox.shrink()],
-        ),
         Expanded(child: board),
       ],
     );
