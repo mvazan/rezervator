@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
-import 'package:rezervator/core/ui.dart' show today;
+import 'package:rezervator/core/ui.dart' show dayFull, today;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/duties.dart'
+    show KioskDutyEntry, dutyRangeLabel;
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
@@ -18,6 +20,7 @@ import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_display.dart';
+import 'package:rezervator/features/kiosk/kiosk_duty.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
@@ -1355,6 +1358,12 @@ void main() {
       bool animations = true,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
+      bool dutyHeader = false,
+      bool dutyBoard = false,
+      bool dutyDrawer = false,
+      int dutyShare = 30,
+      List<DutyPeriod> dutyPeriods = const [],
+      List<DutyAssignment> dutyAssignments = const [],
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith(
@@ -1391,6 +1400,10 @@ void main() {
               kioskFontSize: fontSize,
               kioskFitDay: fitDay,
               kioskAnimations: animations,
+              kioskDutyHeader: dutyHeader,
+              kioskDutyBoard: dutyBoard,
+              kioskDutyDrawer: dutyDrawer,
+              kioskDutyShare: dutyShare,
             ),
           ),
         ),
@@ -1413,6 +1426,10 @@ void main() {
         ),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(lineups[id] ?? const []),
+        ),
+        dutyPeriodsProvider.overrideWith((ref) => Stream.value(dutyPeriods)),
+        dutyAssignmentsProvider.overrideWith(
+          (ref) => Stream.value(dutyAssignments),
         ),
       ],
       child: const MaterialApp(home: KioskShell()),
@@ -3190,5 +3207,241 @@ void main() {
 
       await finish(tester);
     });
+
+    group('canteen duty (0073)', () {
+      DutyPeriod duty(String id, Day from, int days) =>
+          DutyPeriod(id: id, startsOn: from, endsOn: from.addDays(days - 1));
+      DutyAssignment assign(String periodId, PlayerName player) =>
+          DutyAssignment(periodId: periodId, userId: player.id);
+
+      // Monday 5. 10. to Sunday 11. 10. holds today (Thursday 8. 10.); six
+      // weeks follow, one player each (BB, CC, …), and one was over.
+      final current = duty('now', Day(2026, 10, 5), 7);
+      final ahead = [
+        for (var i = 0; i < 6; i++)
+          duty('w$i', Day(2026, 10, 12).addDays(7 * i), 7),
+      ];
+      final over = duty('over', Day(2026, 9, 28), 7);
+      final periods = [...ahead.reversed, current, over];
+      final assignments = [
+        assign('now', petr),
+        assign('now', anna),
+        for (var i = 0; i < 6; i++) assign('w$i', players[i + 1]),
+        assign('over', players[25]),
+      ];
+      final line = find.text('Služba: AA Hráč a PP Hráč');
+      final dialog = find.byType(AlertDialog);
+      Finder inDialog(String t) =>
+          find.descendant(of: dialog, matching: find.text(t));
+      const nothingAhead = 'Další služby zatím nejsou naplánované.';
+
+      testWidgets('„V záhlaví“: who serves today, under the date', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(line, findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDutyLine),
+            matching: find.byIcon(Icons.local_cafe_outlined),
+          ),
+          findsOneWidget,
+        );
+        final date = find.text(dayFull(day)).first;
+        expect(
+          tester.getRect(line).top,
+          greaterThanOrEqualTo(tester.getRect(date).bottom),
+        );
+        expect(
+          tester.getRect(find.byType(KioskDutyLine)).left,
+          tester.getRect(date).left,
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('the mode off, or nobody serving today: no line', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(dutyPeriods: periods, dutyAssignments: assignments),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.textContaining('Služba:'), findsNothing);
+        await finish(tester);
+
+        // Today's period without anyone on it says nothing either.
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now') a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.textContaining('Služba:'), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a long line stays one line, cut, at most 420 px wide', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: [current],
+            dutyAssignments: [for (final p in players) assign('now', p)],
+          ),
+        );
+        await tester.pumpAndSettle();
+        final text = find.textContaining('Služba: AA Hráč, BB Hráč');
+        expect(text, findsOneWidget);
+        expect(tester.widget<Text>(text).maxLines, 1);
+        expect(tester.widget<Text>(text).overflow, TextOverflow.ellipsis);
+        expect(
+          tester.getSize(find.byType(KioskDutyLine)).width,
+          lessThanOrEqualTo(420),
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('a tap shows the plan: who serves now, then the next five '
+          'in date order', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(line);
+        await tester.pumpAndSettle();
+
+        expect(inDialog('Služby v kantýně'), findsOneWidget);
+        expect(inDialog('Teď slouží: AA Hráč a PP Hráč'), findsOneWidget);
+        expect(inDialog('po 5. 10. – ne 11. 10.'), findsOneWidget);
+        expect(inDialog('Další'), findsOneWidget);
+        // The five weeks ahead, top to bottom, range left of the names; the
+        // sixth is not listed and the one over is gone.
+        double? lastTop;
+        for (var i = 0; i < 5; i++) {
+          final range = inDialog(dutyRangeLabel(ahead[i]));
+          final names = inDialog(players[i + 1].displayName);
+          expect(range, findsOneWidget);
+          expect(names, findsOneWidget);
+          expect(
+            tester.getRect(range).right,
+            lessThan(tester.getRect(names).left),
+          );
+          final top = tester.getRect(range).top;
+          if (lastTop != null) expect(top, greaterThan(lastTop));
+          lastTop = top;
+        }
+        expect(inDialog('po 12. 10. – ne 18. 10.'), findsOneWidget);
+        expect(inDialog(dutyRangeLabel(ahead[5])), findsNothing);
+        expect(inDialog(players[6].displayName), findsNothing);
+        expect(inDialog(players[25].displayName), findsNothing);
+        expect(inDialog(nothingAhead), findsNothing);
+
+        await tester.tap(inDialog('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('nothing planned ahead says so', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: [current, over],
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(line);
+        await tester.pumpAndSettle();
+
+        expect(inDialog('Teď slouží: AA Hráč a PP Hráč'), findsOneWidget);
+        expect(inDialog(nothingAhead), findsOneWidget);
+
+        await finish(tester);
+      });
+
+      testWidgets('touching the plan counts for the idle timer; the idle '
+          'reset closes it', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(line);
+        await tester.pumpAndSettle();
+        expect(dialog, findsOneWidget);
+
+        // Read for 50 s, touched: another full minute from then on.
+        await tester.pump(const Duration(seconds: 50));
+        await tester.tap(inDialog('Služby v kantýně'));
+        await tester.pump(const Duration(seconds: 20));
+        // (A reset in those 20 s would still be fading the dialog out.)
+        await tester.pumpAndSettle();
+        expect(dialog, findsOneWidget);
+
+        await tester.pump(const Duration(seconds: 41));
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+
+        await finish(tester);
+      });
+    });
+  });
+
+  testWidgets('the plan without anyone serving today leaves the „Teď slouží“ '
+      'block out', (tester) async {
+    final next = DutyPeriod(
+      id: 'next',
+      startsOn: Day(2026, 10, 12),
+      endsOn: Day(2026, 10, 18),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          kioskDutyPlanProvider.overrideWithValue((
+            now: null,
+            next: [KioskDutyEntry(next, const ['Jan Novák'])],
+          )),
+        ],
+        child: const MaterialApp(home: Scaffold(body: KioskDutyDialog())),
+      ),
+    );
+    expect(find.text('Služby v kantýně'), findsOneWidget);
+    expect(find.textContaining('Teď slouží'), findsNothing);
+    expect(find.text('Další'), findsOneWidget);
+    expect(find.text('po 12. 10. – ne 18. 10.'), findsOneWidget);
+    expect(find.text('Jan Novák'), findsOneWidget);
   });
 }
