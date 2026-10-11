@@ -535,7 +535,10 @@ class _StatusBar extends ConsumerWidget {
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     // Who serves today (0073) — the plan is read only with the line on.
-    final duty = (ref.watch(settingsProvider).value?.kioskDutyHeader ?? false)
+    // The canteen duty's line (0073) steps aside for the warning too.
+    final duty =
+        warning == null &&
+            (ref.watch(settingsProvider).value?.kioskDutyHeader ?? false)
         ? ref.watch(kioskDutyPlanProvider.select((plan) => plan.now))
         : null;
 

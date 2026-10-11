@@ -4406,6 +4406,23 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('while a warning hangs, the duty\'s line steps aside too',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+            warning: 'Dráha 3 je mimo provoz.',
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+        expect(find.byType(KioskDutyLine), findsNothing);
+        await finish(tester);
+      });
+
       testWidgets('the mode off, or nobody serving today: no line', (
         tester,
       ) async {
