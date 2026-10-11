@@ -277,12 +277,55 @@ void main() {
     // Seven 100 px columns in a 450 px row 10 px in from the screen's
     // edge: one band from a day before the list to column 3, the next over
     // columns 4–6 — the kiosk's board in small.
+    //
+    // A [noted] row has a line above it: the row, its list too, built anew
+    // around the same [scroll].
     Future<ScrollController> pumpRow(
       WidgetTester tester, {
       double textScale = 1,
+      ScrollController? scroll,
+      bool noted = false,
     }) async {
-      final scroll = ScrollController();
-      addTearDown(scroll.dispose);
+      if (scroll == null) {
+        scroll = ScrollController();
+        addTearDown(scroll.dispose);
+      }
+      final row = SizedBox(
+        width: 450,
+        height: boardHeaderHeight(0) + boardBandHeight,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          controller: scroll,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: 7,
+          itemBuilder: (context, i) => SizedBox(
+            width: 100,
+            child: BoardColumnHeader(
+              date: date.addDays(i),
+              isToday: false,
+              priority: const [],
+              height: boardHeaderHeight(0) + boardBandHeight,
+              gap: 2,
+              bandPosition: KioskDutyBandPosition.middle,
+              band: i <= 3
+                  ? BoardBandSegment(
+                      day: i + 1,
+                      days: 5,
+                      label: who,
+                      scroll: scroll,
+                      column: i,
+                    )
+                  : BoardBandSegment(
+                      day: i - 4,
+                      days: 3,
+                      label: short,
+                      scroll: scroll,
+                      column: i,
+                    ),
+            ),
+          ),
+        ),
+      );
       await tester.pumpWidget(
         MaterialApp(
           builder: (context, child) => MediaQuery(
@@ -296,42 +339,12 @@ void main() {
               padding: const EdgeInsets.only(left: 10),
               child: Align(
                 alignment: Alignment.topLeft,
-                child: SizedBox(
-                  width: 450,
-                  height: boardHeaderHeight(0) + boardBandHeight,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    controller: scroll,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: 7,
-                    itemBuilder: (context, i) => SizedBox(
-                      width: 100,
-                      child: BoardColumnHeader(
-                        date: date.addDays(i),
-                        isToday: false,
-                        priority: const [],
-                        height: boardHeaderHeight(0) + boardBandHeight,
-                        gap: 2,
-                        bandPosition: KioskDutyBandPosition.middle,
-                        band: i <= 3
-                            ? BoardBandSegment(
-                                day: i + 1,
-                                days: 5,
-                                label: who,
-                                scroll: scroll,
-                                column: i,
-                              )
-                            : BoardBandSegment(
-                                day: i - 4,
-                                days: 3,
-                                label: short,
-                                scroll: scroll,
-                                column: i,
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
+                child: noted
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [const Text('Pozor'), row],
+                      )
+                    : row,
               ),
             ),
           ),
@@ -369,6 +382,31 @@ void main() {
           bandLabelRun(tester, short).left,
           closeTo(stripIn(tester, 4).left + 6, 0.01),
           reason: '$x',
+        );
+      }
+    });
+
+    testWidgets('the row built anew around the same list — the old list '
+        'still on the controller in that frame: the label drawn, where the '
+        'new list stands', (tester) async {
+      final scroll = await pumpRow(tester);
+      for (final noted in [true, false]) {
+        // The old list near the band's end, the label pushed off the row.
+        scroll.jumpTo(250);
+        await tester.pump();
+        expect(bandLabelRun(tester, who).left, lessThan(10));
+        await pumpRow(tester, scroll: scroll, noted: noted);
+        expect(tester.takeException(), isNull, reason: '$noted');
+        expect(scroll.positions, hasLength(1), reason: '$noted');
+        expect(
+          bandLabelRun(tester, who).left,
+          closeTo(16, 0.01),
+          reason: '$noted',
+        );
+        expect(
+          bandLabelRun(tester, short).left,
+          closeTo(stripIn(tester, 4).left + 6, 0.01),
+          reason: '$noted',
         );
       }
     });

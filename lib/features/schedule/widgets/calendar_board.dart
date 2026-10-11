@@ -550,9 +550,13 @@ class _BandLabel extends StatelessWidget {
         final scroll = s.scroll;
 
         Widget place(BuildContext context, Widget? _) {
-          final viewportLeft = scroll != null && scroll.hasClients
-              ? scroll.offset
-              : 0.0;
+          // Not [ScrollController.offset]: a list built anew around the
+          // controller attaches before the old one lets go, and for that
+          // frame there are two. The newest is the one being built.
+          final positions = scroll?.positions;
+          final viewportLeft = positions == null || positions.isEmpty
+              ? 0.0
+              : positions.last.pixels;
           final left = stickyBandLabelLeft(
             viewportLeft: viewportLeft,
             bandStart: bandStart,
