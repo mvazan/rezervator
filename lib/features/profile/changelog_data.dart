@@ -67,7 +67,8 @@ const appChangelog = <Release>[
         'v plovoucím okně vedle tabule. '
         'Okno jde posouvat, zvětšit na celou obrazovku, sbalit nebo křížkem '
         'zavřít; po konci videa se zavře samo. Správa → Kiosk → Stream '
-        'zápasu: hraný zápas se může otevřít sám, oken může být víc najednou.',
+        'zápasu: hraný zápas se může otevřít sám, oken může být víc '
+        'najednou; správce může stream i celý vypnout.',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
@@ -76,7 +77,7 @@ const appChangelog = <Release>[
         'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
     'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
     'Kiosk: živě i ze záznamu — video zápasu z YouTube v plovoucím okně '
-        'vedle tabule.',
+        'vedle tabule (správce ho může vypnout).',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
