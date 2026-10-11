@@ -34,7 +34,9 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  supabase_flutter: ^2.16.0
+  # 2.17.2+ brings gotrue 2.27.2+: the wasm web build crashed in
+  # Session.fromJson when another tab broadcast its session.
+  supabase_flutter: ^2.18.2
   flutter_riverpod: ^3.3.2
   go_router: ^17.3.0
   url_launcher: ^6.3.2
