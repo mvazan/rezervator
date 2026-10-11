@@ -104,6 +104,12 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskNoticesMode.both => 'V záhlaví i v panelu',
   };
 
+  static String _bandLabel(KioskDutyBandPosition p) => switch (p) {
+    KioskDutyBandPosition.top => 'Nad datem',
+    KioskDutyBandPosition.middle => 'Mezi datem a zápasy',
+    KioskDutyBandPosition.bottom => 'Dole pod zápasy',
+  };
+
   /// The note under the two ranges: they are only where the list opens;
   /// [button] is the kiosk's own button for that direction.
   static String _rangeNote(String button) =>
@@ -412,6 +418,34 @@ class KioskSettingsScreen extends ConsumerWidget {
                   subtitle:
                       'Pás se jmény přes dny služby v hlavičkách dnů tabule.',
                 ),
+                // Where in the day headers the band runs — only with one.
+                if (settings?.kioskDutyBoard ?? false)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskDutyBandPosition>(
+                      initialValue:
+                          settings?.kioskDutyBandPosition ??
+                          KioskDutyBandPosition.middle,
+                      decoration: const InputDecoration(
+                        labelText: 'Kde je pás',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final p in KioskDutyBandPosition.values)
+                          DropdownMenuItem(
+                            value: p,
+                            child: Text(_bandLabel(p)),
+                          ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (p) => p == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_duty_band_position': p.name,
+                                  }),
+                    ),
+                  ),
                 // The card lives in the drawer: with the drawer off there is
                 // nowhere to put it (like the live match's section).
                 if (settings?.kioskPanelEnabled ?? true)
