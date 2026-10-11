@@ -49,6 +49,10 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '11. 10. 2026', [
+    'Kiosk: pás služby v kalendáři říká, co jména znamenají — „… má '
+        'službu (12.–18. 10.)“.',
+  ]),
   Release('2.0.8', '11. 10. 2026', [
     'Web: když máte Rezervátor otevřený ve více záložkách, přihlášení '
         'v jedné se zase přenese i do ostatních.',
