@@ -1089,27 +1089,22 @@ void main() {
       assign('single', 'petr'),
     ];
 
-    test('the period covering a day, and whether the day starts or ends it',
-        () {
-      final first = kioskDutyOn(periods, assignments, names, Day(2026, 10, 5));
-      expect(
-        first?.entry,
-        KioskDutyEntry(week, const ['Jan Novák', 'Petr Svoboda']),
-      );
-      expect((first?.starts, first?.ends), (true, false));
-
-      final middle = kioskDutyOn(periods, assignments, names, Day(2026, 10, 8));
-      expect(middle?.entry.period, week);
-      expect((middle?.starts, middle?.ends), (false, false));
-
-      final last = kioskDutyOn(periods, assignments, names, Day(2026, 10, 11));
-      expect((last?.starts, last?.ends), (false, true));
+    // Where the band's piece starts or ends follows from the period's
+    // dates — the board's [BoardBandSegment] (the kiosk's widget tests).
+    test('the period covering a day, from its first day to its last', () {
+      final both = KioskDutyEntry(week, const ['Jan Novák', 'Petr Svoboda']);
+      for (final d in [5, 8, 11]) {
+        expect(
+          kioskDutyOn(periods, assignments, names, Day(2026, 10, d)),
+          both,
+          reason: '$d',
+        );
+      }
     });
 
-    test('a one-day duty starts and ends on its day', () {
+    test('a one-day duty on its day', () {
       final one = kioskDutyOn(periods, assignments, names, Day(2026, 10, 14));
-      expect(one?.entry.names, ['Petr Svoboda']);
-      expect((one?.starts, one?.ends), (true, true));
+      expect(one, KioskDutyEntry(single, const ['Petr Svoboda']));
     });
 
     test('no duty on a day: none, nor on an unassigned period\'s day', () {

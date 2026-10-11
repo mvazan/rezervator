@@ -32,6 +32,7 @@ import 'package:rezervator/features/kiosk/kiosk_warning.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
+import '../support/band_label_finders.dart';
 import '../support/emoji_finders.dart';
 
 /// Stands in for the display: records the shell's holds and releases, in
@@ -1590,6 +1591,8 @@ void main() {
       KioskDutyBandPosition dutyBandPosition = KioskDutyBandPosition.middle,
       List<DutyPeriod> dutyPeriods = const [],
       List<DutyAssignment> dutyAssignments = const [],
+      List<Reservation> reservations = const [],
+      int? maxActiveReservations,
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith((ref) {
@@ -1597,7 +1600,8 @@ void main() {
             laneCount: settings.laneCount,
             trainingWeekdays: trainingWeekdays ?? settings.trainingWeekdays,
             bookingHorizonDays: settings.bookingHorizonDays,
-            maxActiveReservations: settings.maxActiveReservations,
+            maxActiveReservations:
+                maxActiveReservations ?? settings.maxActiveReservations,
             kioskDrawerOpen: drawerOpen,
             kioskNoticesMode: switch ((showNotices, headerNotices)) {
               (true, true) => KioskNoticesMode.both,
@@ -1657,7 +1661,12 @@ void main() {
         prioritySlotsProvider.overrideWithValue(slots),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
         weekReservationsProvider.overrideWith(
-          (ref, monday) => Stream.value(const []),
+          (ref, monday) => Stream.value([
+            for (final r in reservations)
+              if (!r.date.isBefore(monday) &&
+                  r.date.differenceInDays(monday) < 7)
+                r,
+          ]),
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
@@ -4750,9 +4759,24 @@ void main() {
 
       const both = 'AA Hráč a PP Hráč';
 
+      // A band's strip over one day's header.
+      Rect stripOn(WidgetTester tester, Day date) => tester.getRect(
+        find.descendant(
+          of: find.descendant(
+            of: headerOf(date),
+            matching: find.byType(BoardBand),
+          ),
+          matching: find.byType(Material),
+        ),
+      );
+      // Where the board's header row starts on the screen.
+      const rowLeft = calendarRulerWidth;
+      final monday = Day(2026, 10, 12);
+
       testWidgets('„V kalendáři“: a band over each duty\'s days, rounded '
-          'where it starts and ends, who on its first day and on the first '
-          'column', (tester) async {
+          'where it starts and ends (a one-day duty at both), who once per '
+          'duty — at its start, or at the row\'s left edge for one begun off '
+          'it', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -4763,22 +4787,75 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        (bool, bool, String?) piece(Day date) {
+        (bool, bool) piece(Day date) {
           final s = bandOn(tester, date)!;
-          return (s.starts, s.ends, s.label);
+          return (s.starts, s.ends);
         }
 
+        expect(piece(day), (false, false));
+        expect(piece(Day(2026, 10, 9)), (false, false));
+        expect(piece(Day(2026, 10, 10)), (false, false));
+        expect(piece(Day(2026, 10, 11)), (false, true));
+        expect(piece(monday), (true, false));
+        expect(piece(Day(2026, 10, 13)), (false, false));
         // Today is the first column: the duty began on Monday, off the
-        // board, and still says who.
-        expect(piece(day), (false, false, both));
-        expect(piece(Day(2026, 10, 9)), (false, false, null));
-        expect(piece(Day(2026, 10, 10)), (false, false, null));
-        expect(piece(Day(2026, 10, 11)), (false, true, null));
-        // The next week's starts on Monday, with its name there only.
-        expect(piece(Day(2026, 10, 12)), (true, false, 'BB Hráč'));
-        expect(piece(Day(2026, 10, 13)), (false, false, null));
+        // board, and still says who — one label, at the row's left edge.
+        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+        // The next week's starts on Monday, its name at its start.
+        expect(
+          bandLabelRun(tester, 'BB Hráč').left,
+          closeTo(stripOn(tester, monday).left + 6, 0.01),
+        );
         // Only the band: the status bar's line is the other switch.
         expect(find.byType(KioskDutyLine), findsNothing);
+        await finish(tester);
+
+        // A one-day duty: one piece, its first day and its last.
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: [duty('one', Day(2026, 10, 9), 1)],
+            dutyAssignments: [assign('one', petr)],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(piece(Day(2026, 10, 9)), (true, true));
+        expect(bandOn(tester, day), isNull);
+        expect(bandOn(tester, Day(2026, 10, 10)), isNull);
+
+        await finish(tester);
+      });
+
+      testWidgets('a duty\'s last day the board\'s first column, like a '
+          'weekly one on its Sunday: at rest who serves starts at the row\'s '
+          'left edge, cut with „…“ at the duty\'s end — not cut off at its '
+          'start by the row\'s edge', (tester) async {
+        fullHd(tester);
+        // Friday 2. 10. to today, four on it: a line longer than a column.
+        const four = 'AA Hráč, BB Hráč, CC Hráč a DD Hráč';
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: [duty('ending', Day(2026, 10, 2), 7)],
+            dutyAssignments: [
+              for (var i = 0; i < 4; i++) assign('ending', players[i]),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bandOn(tester, day)!.label, four);
+        expect(bandOn(tester, day)!.ends, isTrue);
+
+        final run = bandLabelRun(tester, four);
+        expect(run.left, closeTo(rowLeft + 6, 0.01));
+        expect(run.right, closeTo(stripOn(tester, day).right - 6, 0.01));
+        final text = find.descendant(
+          of: bandPieces(four),
+          matching: find.text(four),
+        );
+        expect(text, findsOneWidget);
+        expect(tester.widget<Text>(text).overflow, TextOverflow.ellipsis);
+        expect(bandLabelParagraph(tester, four).didExceedMaxLines, isTrue);
 
         await finish(tester);
       });
@@ -4975,8 +5052,11 @@ void main() {
         await finish(tester);
       });
 
-      testWidgets('scrolled, the names follow the first column in view; the '
-          'idle reset brings them back to today', (tester) async {
+      testWidgets('while the board moves, mid-drag too, each duty keeps one '
+          'label: stuck to the row\'s left edge, cut with „…“ where less of '
+          'the duty is left, pushed off the row only at its very end, at the '
+          'next one\'s start — and the board is not rebuilt for it; the idle '
+          'reset brings it back', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -4987,30 +5067,197 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        double left(Day date) => tester.getTopLeft(headerOf(date)).dx;
-        const firstLeft = calendarRulerWidth;
-        expect(left(day), firstLeft);
-        expect(bandOn(tester, day)!.label, both);
+        const columnWidth = (1920 - rowLeft) / 7;
+        final sunday = Day(2026, 10, 11);
+        final board = find.byType(ListView).last;
+        expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
 
-        // Back to Monday, the duty's first day: today is no first column.
-        await tester.drag(find.byType(ListView).last, const Offset(900, 0));
+        // The names uncut, and the least they are cut to.
+        final whole = bandLabelParagraph(
+          tester,
+          both,
+        ).getMaxIntrinsicWidth(double.infinity);
+        final least = bandLabelLeast(tester, both);
+
+        // Where and how wide the geometry puts the current duty's names: the
+        // duty began on Monday 5. 10., seven columns before its end on
+        // Sunday.
+        void expectLabels(String why) {
+          final run = bandLabelRun(tester, both);
+          final end = stripOn(tester, sunday).right;
+          final at = stickyBandLabel(
+            viewportLeft: rowLeft,
+            bandStart: end + 12 - 7 * columnWidth,
+            bandEnd: end,
+            labelWidth: whole,
+            minWidth: least,
+          );
+          expect(run.left, closeTo(at.left, 0.01), reason: why);
+          expect(run.width, closeTo(at.width, 0.01), reason: why);
+          // The next duty's at its start, while its Monday is in view.
+          if (headerOf(monday).evaluate().isNotEmpty) {
+            expect(
+              bandLabelRun(tester, 'BB Hráč').left,
+              closeTo(stripOn(tester, monday).left + 6, 0.01),
+              reason: why,
+            );
+          }
+        }
+
+        expectLabels('at rest');
+        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
+
+        // The finger stays down: no settling, frame by frame.
+        final sundayHeader = tester.widget(headerOf(sunday));
+        final gesture = await tester.startGesture(tester.getCenter(board));
+        var cut = false;
+        var pushed = false;
+        // On to Sunday's end and back: it settles on Sunday.
+        for (final dx in <double>[
+          -30,
+          -77,
+          -150,
+          -200,
+          -250,
+          -150,
+          -100,
+          -90,
+          150,
+        ]) {
+          await gesture.moveBy(Offset(dx, 0));
+          await tester.pump();
+          expectLabels('$dx');
+          final run = bandLabelRun(tester, both);
+          final stuck = run.left >= rowLeft + 6 - 0.01;
+          final cutShort = run.width < whole - 0.01;
+          if (!stuck) pushed = true;
+          if (stuck && cutShort) cut = true;
+          if (cutShort) {
+            // Never past the duty's end, „…“ where it is cut.
+            expect(
+              run.right,
+              closeTo(stripOn(tester, sunday).right - 6, 0.01),
+              reason: '$dx',
+            );
+            expect(
+              bandLabelParagraph(tester, both).didExceedMaxLines,
+              isTrue,
+              reason: '$dx',
+            );
+          }
+          // Only the labels moved: the headers were not built again.
+          expect(
+            identical(tester.widget(headerOf(sunday)), sundayHeader),
+            isTrue,
+            reason: '$dx',
+          );
+        }
+        expect(cut, isTrue, reason: 'the drag nears the duty\'s end');
+        expect(pushed, isTrue, reason: 'the drag reaches the duty\'s end');
+        await gesture.up();
         await tester.pumpAndSettle();
-        expect(left(Day(2026, 10, 5)), firstLeft);
-        expect(bandOn(tester, Day(2026, 10, 5))!.label, both);
-        expect(bandOn(tester, Day(2026, 10, 6))!.label, isNull);
-        expect(bandOn(tester, day)!.label, isNull);
+        expect(tester.getTopLeft(headerOf(sunday)).dx, closeTo(rowLeft, 0.01));
+        expectLabels('settled');
+
+        // Back to the board's first day, the duty's first: the names ride
+        // its start again.
+        final back = await tester.startGesture(tester.getCenter(board));
+        for (final dx in <double>[30, 400, 400, 400, 400, 400]) {
+          await back.moveBy(Offset(dx, 0));
+          await tester.pump();
+          expectLabels('back $dx');
+        }
+        expect(
+          bandLabelRun(tester, both).left,
+          closeTo(stripOn(tester, Day(2026, 10, 5)).left + 6, 0.01),
+        );
+        await back.up();
+        await tester.pumpAndSettle();
 
         await tester.pump(const Duration(seconds: 61));
         await tester.pumpAndSettle();
-        expect(left(day), firstLeft);
-        expect(bandOn(tester, day)!.label, both);
+        expect(tester.getTopLeft(headerOf(day)).dx, rowLeft);
+        expect(bandLabelRun(tester, both).left, closeTo(rowLeft + 6, 0.01));
 
-        // On to Friday.
-        await tester.drag(find.byType(ListView).last, const Offset(-300, 0));
+        await finish(tester);
+      });
+
+      testWidgets('a player at the limit picks their name, then lets go of '
+          'it: the note comes and goes above the board, which stays where '
+          'it was, each duty\'s label drawn throughout', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+            // Anna's one live reservation is all she may hold.
+            maxActiveReservations: 1,
+            reservations: [
+              Reservation(
+                id: 'r1',
+                playerId: anna.id,
+                date: day.addDays(1),
+                blockId: 'b1',
+                lane: 2,
+                createdVia: 'app',
+                createdAt: DateTime.utc(2026, 1, 1),
+              ),
+            ],
+          ),
+        );
         await tester.pumpAndSettle();
-        expect(left(Day(2026, 10, 9)), firstLeft);
-        expect(bandOn(tester, Day(2026, 10, 9))!.label, both);
-        expect(bandOn(tester, Day(2026, 10, 10))!.label, isNull);
+        // Two columns on: Saturday first, the current duty's names stuck
+        // to the row's left edge, the next one's at its Monday.
+        const columnWidth = (1920 - rowLeft) / 7;
+        final saturday = Day(2026, 10, 10);
+        await tester.drag(
+          find.byType(ListView).last,
+          const Offset(-2 * columnWidth, 0),
+        );
+        await tester.pumpAndSettle();
+        final note = find.textContaining('Máš maximální počet rezervací (1)');
+
+        // Every frame of it, the one where the note comes or goes too.
+        Future<void> expectBoard(String why) async {
+          for (var frame = 0; frame < 30; frame++) {
+            expect(tester.takeException(), isNull, reason: '$why $frame');
+            expect(
+              tester.getTopLeft(headerOf(saturday)).dx,
+              closeTo(rowLeft, 0.01),
+              reason: '$why $frame',
+            );
+            expect(
+              bandLabelRun(tester, both).left,
+              closeTo(rowLeft + 6, 0.01),
+              reason: '$why $frame',
+            );
+            expect(
+              bandLabelRun(tester, 'BB Hráč').left,
+              closeTo(stripOn(tester, monday).left + 6, 0.01),
+              reason: '$why $frame',
+            );
+            await tester.pump(const Duration(milliseconds: 20));
+          }
+        }
+
+        await expectBoard('before');
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
+        await expectBoard('picked');
+        expect(note, findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.close));
+        await expectBoard('let go');
+        expect(note, findsNothing);
 
         await finish(tester);
       });
