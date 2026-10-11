@@ -199,13 +199,15 @@ class _KioskShellState extends ConsumerState<KioskShell>
   );
 
   /// A tap on a match of the board or the header: one with a score opens
-  /// its Zápis; one without, but with a video, its stream.
+  /// its Zápis; one without, but with a video, its stream — while the
+  /// streams are on ([_play]).
   void _openMatchOrStream(PrioritySlot match) {
     final result = ref.read(matchResultsProvider).value?[match.id];
+    final play = _play;
     if (hasScoreData(result)) {
       _openMatch(match);
-    } else if (hasKioskVideo(match)) {
-      _openStream(match);
+    } else if (play != null && hasKioskVideo(match)) {
+      play(match);
     }
   }
 
@@ -213,8 +215,20 @@ class _KioskShellState extends ConsumerState<KioskShell>
   void _openStream(PrioritySlot match) =>
       ref.read(kioskStreamsProvider.notifier).open(match.id);
 
+  /// The ▶ handed to everything that has one — the drawer's matches, the
+  /// live badge, the Zápis, a day's matches, a tap on a match without a
+  /// score — or null while the admin has the streams off (0072): then none
+  /// of them shows one, and [kioskStreamProvider] keeps the windows shut.
+  /// Read, not watched: the shell's build watches the settings already, so
+  /// a flip of the switch rebuilds whatever this was handed to.
+  void Function(PrioritySlot match)? get _play {
+    final on = ref.read(settingsProvider).value?.kioskStreamEnabled ?? true;
+    return on ? _openStream : null;
+  }
+
   void _openMatch(PrioritySlot match) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
+    final play = _play;
     unawaited(
       showKioskZapis(
         context,
@@ -225,14 +239,14 @@ class _KioskShellState extends ConsumerState<KioskShell>
         percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
         onTouch: _touch,
         // The Zápis closes and the stream opens beside the board.
-        play: hasKioskVideo(match)
+        play: play != null && hasKioskVideo(match)
             ? (
                 label: kioskStreamLabel(
                   match,
                   ref.read(matchResultsProvider).value?[match.id],
                   now,
                 ),
-                onPlay: () => _openStream(match),
+                onPlay: () => play(match),
               )
             : null,
       ),
@@ -276,6 +290,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final content = ref.watch(kioskPanelContentProvider);
     final settings = ref.watch(settingsProvider).value;
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final play = _play;
     final drawerWidth = kioskDrawerWidthFor(
       screenWidth,
       columns: settings?.kioskDrawerColumns ?? 2,
@@ -285,7 +300,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
       key: _boardKey,
       selected: _selected,
       onOpenMatch: _openMatchOrStream,
-      onPlayVideo: _openStream,
+      onPlayVideo: play,
       // The columns are sized on the whole screen, the drawer is a whole
       // number of them (kioskDrawerWidthFor): open or closed, the board
       // shows whole days, and the columns never resize mid-slide.
@@ -316,7 +331,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 open: open,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatch,
-                onPlay: _openStream,
+                onPlay: play,
                 resetToken: _resets,
                 showLive: !_liveHidden,
                 onShowLive: (live) => setState(() => _liveHidden = !live),
