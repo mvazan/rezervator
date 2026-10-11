@@ -62,8 +62,8 @@ const appChangelog = <Release>[
         'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
     'Kiosk: kdo slouží na kantýně — v záhlaví (ťuk ukáže plán), jako pás '
-        'v kalendáři nebo karta v panelu; zapíná správce ve Správě → Kiosk → '
-        'Služby na kantýně.',
+        'v kalendáři (nad datem, pod ním nebo dole) nebo karta v panelu; '
+        'zapíná správce ve Správě → Kiosk → Služby na kantýně.',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
