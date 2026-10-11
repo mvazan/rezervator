@@ -338,6 +338,30 @@ class CalendarEventBand extends StatelessWidget {
   }
 }
 
+/// Where a band's one label starts while the board scrolls, like a
+/// multi-day event's title in Google Calendar — [viewportLeft] (the
+/// visible row's left edge), [bandStart] and [bandEnd] in one space, the
+/// header list's scroll space. With the band's start in view the label
+/// rides [padding] in from it; the band run off to the left, it sticks
+/// [padding] in from the row's edge; near the band's end the end pushes it
+/// along ([padding] short of the end, never past it); a band narrower than
+/// [labelWidth] keeps it at its start (the label is cut there). Continuous
+/// in [viewportLeft]: scrolling moves the label, never makes it jump.
+double stickyBandLabelLeft({
+  required double viewportLeft,
+  required double bandStart,
+  required double bandEnd,
+  required double labelWidth,
+  double padding = 6,
+}) {
+  final first = bandStart + padding;
+  final stuck = viewportLeft + padding;
+  final pushed = bandEnd - padding - labelWidth;
+  final left = stuck < first ? first : stuck;
+  final kept = left > pushed ? pushed : left;
+  return kept < first ? first : kept;
+}
+
 /// One day's piece of a band drawn across the board's day headers, like an
 /// all-day event — the kiosk's canteen duty (0073). The caller decides
 /// where the band [starts] and [ends] (rounded there) and on which days
