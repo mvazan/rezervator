@@ -4,6 +4,8 @@ import 'package:rezervator/core/widgets/emoji_text.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
+import '../../../support/band_label_finders.dart';
+
 /// The band across the board's day headers (the kiosk's canteen duty,
 /// 0073): one segment per day, a strip above the day label, under it or
 /// along the header's bottom edge, rounded only where the band starts or
@@ -91,7 +93,7 @@ void main() {
       'ellipsised line', (tester) async {
     await pump(
       tester,
-      segment: const BoardBandSegment(starts: true, ends: true, label: who),
+      segment: const BoardBandSegment(day: 0, days: 1, label: who),
     );
     expect(band, findsOneWidget);
     expect(
@@ -112,7 +114,7 @@ void main() {
       'column where it runs on', (tester) async {
     await pump(
       tester,
-      segment: const BoardBandSegment(starts: true, ends: true, label: who),
+      segment: const BoardBandSegment(day: 0, days: 1, label: who),
     );
     expect(
       radius(tester),
@@ -132,7 +134,7 @@ void main() {
 
     await pump(
       tester,
-      segment: const BoardBandSegment(starts: true, ends: false, label: who),
+      segment: const BoardBandSegment(day: 0, days: 2, label: who),
     );
     expect(
       radius(tester),
@@ -142,7 +144,7 @@ void main() {
 
     await pump(
       tester,
-      segment: const BoardBandSegment(starts: false, ends: true),
+      segment: const BoardBandSegment(day: 1, days: 2),
     );
     expect(
       radius(tester),
@@ -152,7 +154,7 @@ void main() {
 
     await pump(
       tester,
-      segment: const BoardBandSegment(starts: false, ends: false),
+      segment: const BoardBandSegment(day: 1, days: 3),
     );
     expect(radius(tester), BorderRadius.zero);
     expect(tester.getRect(strip).left, tester.getRect(header).left);
@@ -168,7 +170,7 @@ void main() {
     await pump(
       tester,
       gap: 2,
-      segment: const BoardBandSegment(starts: false, ends: false),
+      segment: const BoardBandSegment(day: 1, days: 3),
     );
     expect(
       tester.getRect(background).left,
@@ -185,7 +187,7 @@ void main() {
     await pump(
       tester,
       gap: 2,
-      segment: const BoardBandSegment(starts: true, ends: true, label: who),
+      segment: const BoardBandSegment(day: 0, days: 1, label: who),
     );
     expect(
       tester.getRect(strip).left,
@@ -200,7 +202,7 @@ void main() {
   testWidgets('without a label the strip runs on blank', (tester) async {
     await pump(
       tester,
-      segment: const BoardBandSegment(starts: false, ends: false),
+      segment: const BoardBandSegment(day: 1, days: 3),
     );
     expect(band, findsOneWidget);
     expect(
@@ -214,8 +216,8 @@ void main() {
     await pump(
       tester,
       segment: BoardBandSegment(
-        starts: true,
-        ends: false,
+        day: 0,
+        days: 2,
         label: who,
         onTap: () => taps++,
       ),
@@ -228,7 +230,7 @@ void main() {
     await pump(
       tester,
       collapsed: true,
-      segment: const BoardBandSegment(starts: true, ends: true, label: who),
+      segment: const BoardBandSegment(day: 0, days: 1, label: who),
     );
     expect(tester.getSize(header).height, collapsedHeaderHeight);
     expect(band, findsNothing);
@@ -236,8 +238,167 @@ void main() {
     expect(find.text('čt 8.10.'), findsOneWidget);
   });
 
+  group('the band\'s one label', () {
+    const short = 'BB Hráč';
+
+    testWidgets('a band begun before the piece: the label at the piece\'s '
+        'left, the strip\'s padding in', (tester) async {
+      await pump(
+        tester,
+        segment: const BoardBandSegment(day: 2, days: 5, label: short),
+      );
+      final label = find.descendant(of: band, matching: find.text(short));
+      expect(label, findsOneWidget);
+      expect(tester.getRect(label).left, tester.getRect(strip).left + 6);
+      expect(tester.getRect(strip).left, tester.getRect(header).left);
+    });
+
+    testWidgets('a band too narrow for its label cuts it at its start', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        segment: const BoardBandSegment(
+          day: 0,
+          days: 1,
+          label: '$who, Jan Novák, Petr Svoboda',
+        ),
+      );
+      final label = find.descendant(
+        of: band,
+        matching: find.textContaining(who),
+      );
+      expect(label, findsOneWidget);
+      expect(tester.getRect(label).left, tester.getRect(strip).left + 6);
+      expect(tester.getRect(label).width, tester.getRect(strip).width - 12);
+      expect(tester.widget<Text>(label).overflow, TextOverflow.ellipsis);
+    });
+
+    // Seven 100 px columns in a 450 px row 10 px in from the screen's
+    // edge: one band from a day before the list to column 3, the next over
+    // columns 4–6 — the kiosk's board in small.
+    Future<ScrollController> pumpRow(
+      WidgetTester tester, {
+      double textScale = 1,
+    }) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.only(left: 10),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 450,
+                  height: boardHeaderHeight(0) + boardBandHeight,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    controller: scroll,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: 7,
+                    itemBuilder: (context, i) => SizedBox(
+                      width: 100,
+                      child: BoardColumnHeader(
+                        date: date.addDays(i),
+                        isToday: false,
+                        priority: const [],
+                        height: boardHeaderHeight(0) + boardBandHeight,
+                        gap: 2,
+                        bandPosition: KioskDutyBandPosition.middle,
+                        band: i <= 3
+                            ? BoardBandSegment(
+                                day: i + 1,
+                                days: 5,
+                                label: who,
+                                scroll: scroll,
+                                column: i,
+                              )
+                            : BoardBandSegment(
+                                day: i - 4,
+                                days: 3,
+                                label: short,
+                                scroll: scroll,
+                                column: i,
+                              ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return scroll;
+    }
+
+    Rect stripIn(WidgetTester tester, int column) => tester.getRect(
+      find.descendant(
+        of: find.byWidgetPredicate(
+          (w) => w is BoardBand && w.segment.column == column,
+        ),
+        matching: find.byType(Material),
+      ),
+    );
+
+    testWidgets('one run wherever the row stands: stuck to the row\'s left '
+        'edge while the band runs off it, crossing the columns as one '
+        'text; the next band\'s label at its start', (tester) async {
+      final scroll = await pumpRow(tester);
+      // The row's left edge, the strip's padding in.
+      expect(bandLabelRun(tester, who).left, 16);
+      expect(bandLabelRun(tester, who).width, greaterThan(100));
+      for (final x in [50.0, 99.5, 150.0, 180.0]) {
+        scroll.jumpTo(x);
+        await tester.pump();
+        expect(
+          bandLabelRun(tester, who).left,
+          closeTo(16, 0.01),
+          reason: '$x',
+        );
+        expect(
+          bandLabelRun(tester, short).left,
+          closeTo(stripIn(tester, 4).left + 6, 0.01),
+          reason: '$x',
+        );
+      }
+    });
+
+    testWidgets('near its end the band\'s end pushes the label off the row; '
+        'it never passes the end — measured at the reader\'s text size', (
+      tester,
+    ) async {
+      for (final scale in [1.0, 1.5]) {
+        final scroll = await pumpRow(tester, textScale: scale);
+        scroll.jumpTo(250);
+        await tester.pump();
+        final run = bandLabelRun(tester, who);
+        expect(
+          run.right,
+          closeTo(stripIn(tester, 3).right - 6, 0.01),
+          reason: '$scale',
+        );
+        expect(run.left, lessThan(10), reason: '$scale');
+        expect(
+          bandLabelRun(tester, short).left,
+          closeTo(stripIn(tester, 4).left + 6, 0.01),
+          reason: '$scale',
+        );
+      }
+    });
+  });
+
   group('where the band runs', () {
-    const piece = BoardBandSegment(starts: true, ends: true, label: who);
+    const piece = BoardBandSegment(day: 0, days: 1, label: who);
     final label = find.text('čt 8.10.');
 
     testWidgets('middle: between the day label and the match lines', (
@@ -333,7 +494,7 @@ void main() {
         await pump(
           tester,
           gap: 2,
-          segment: const BoardBandSegment(starts: false, ends: false),
+          segment: const BoardBandSegment(day: 1, days: 3),
           priority: matches,
           position: position,
         );

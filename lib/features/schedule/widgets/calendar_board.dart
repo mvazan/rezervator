@@ -363,28 +363,51 @@ double stickyBandLabelLeft({
 }
 
 /// One day's piece of a band drawn across the board's day headers, like an
-/// all-day event — the kiosk's canteen duty (0073). The caller decides
-/// where the band [starts] and [ends] (rounded there) and on which days
-/// its [label] is read; null leaves the piece blank, the band running on.
+/// all-day event — the kiosk's canteen duty (0073). The band runs [days]
+/// days and this piece is its [day]: rounded where the band starts and
+/// ends. Every piece carries the band's one [label] and draws the part of
+/// it that crosses the piece, where [stickyBandLabelLeft] puts it in the
+/// header list ([scroll]) — so it reads as one text however the board
+/// scrolls; null leaves the band blank.
 class BoardBandSegment {
   const BoardBandSegment({
-    required this.starts,
-    required this.ends,
+    required this.day,
+    required this.days,
     this.label,
     this.onTap,
-  });
+    this.scroll,
+    this.column = 0,
+  }) : assert(0 <= day && day < days);
 
-  final bool starts;
-  final bool ends;
+  /// This piece's day in the band, from 0 — the band's first day may lie
+  /// before the board's first column (a band begun before it).
+  final int day;
+
+  /// How many days the band runs.
+  final int days;
+
   final String? label;
   final VoidCallback? onTap;
+
+  /// The header list the pieces scroll in: the label follows it frame by
+  /// frame. Null: a list standing at its start.
+  final ScrollController? scroll;
+
+  /// This piece's column in that list — its columns one width, from 0.
+  final int column;
+
+  /// The band's first day: rounded, a little in from the column's side.
+  bool get starts => day == 0;
+
+  /// The band's last day, likewise.
+  bool get ends => day == days - 1;
 }
 
 /// A [BoardBandSegment] in its [boardBandHeight]: a strip tinted
 /// `secondaryContainer`, out to the column's edge where the band runs on —
 /// over the header's [bleed] too, so the neighbours' pieces meet — a
-/// little in and rounded where it starts or ends, the label one
-/// ellipsised line at its start.
+/// little in and rounded where it starts or ends, with its part of the
+/// band's one-line label ([BoardBandSegment.label]).
 class BoardBand extends StatelessWidget {
   const BoardBand({
     super.key,
@@ -394,6 +417,13 @@ class BoardBand extends StatelessWidget {
   });
 
   static const radius = Radius.circular(6);
+
+  /// How far in from the header's background the strip starts or ends.
+  static const endInset = 4.0;
+
+  /// The label's room from the strip's ends, and from the row's left edge
+  /// it sticks to ([stickyBandLabelLeft]).
+  static const labelPadding = 6.0;
 
   final BoardBandSegment segment;
 
@@ -411,6 +441,8 @@ class BoardBand extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final label = segment.label;
+    final left = segment.starts ? endInset : -bleed;
+    final right = segment.ends ? endInset : -bleed;
     return Padding(
       padding: leading
           ? const EdgeInsets.only(bottom: 2)
@@ -424,8 +456,8 @@ class BoardBand extends StatelessWidget {
           clipBehavior: Clip.none,
           children: [
             Positioned.fill(
-              left: segment.starts ? 4 : -bleed,
-              right: segment.ends ? 4 : -bleed,
+              left: left,
+              right: right,
               child: Material(
                 color: scheme.secondaryContainer,
                 borderRadius: BorderRadius.horizontal(
@@ -435,29 +467,134 @@ class BoardBand extends StatelessWidget {
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: segment.onTap,
-                  child: label == null
-                      ? const SizedBox.expand()
-                      : Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSecondaryContainer,
-                              ),
-                            ),
-                          ),
-                        ),
+                  child: const SizedBox.expand(),
                 ),
               ),
             ),
+            // Over the strip, not in it: the label stays [labelPadding]
+            // clear of the rounded ends, so a plain clip to the strip
+            // will do — and the neighbours' clips meet on one pixel, the
+            // text across them unbroken. The strip takes the touch.
+            if (label != null)
+              Positioned.fill(
+                left: left,
+                right: right,
+                child: IgnorePointer(
+                  child: _BandLabel(
+                    segment: segment,
+                    label: label,
+                    bleed: bleed,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// A piece's part of the band's label: the whole label where
+/// [stickyBandLabelLeft] puts it, clipped to the piece's strip — nothing
+/// where it does not cross the piece. Only this rebuilds while the header
+/// list scrolls; the strip and the header stay as they are.
+class _BandLabel extends StatelessWidget {
+  const _BandLabel({
+    required this.segment,
+    required this.label,
+    required this.bleed,
+    required this.style,
+  });
+
+  final BoardBandSegment segment;
+  final String label;
+  final double bleed;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style.merge(this.style);
+    // Measured as the [Text] below lays it out, the reader's text size
+    // included: the end must push the label's real right edge.
+    final painter = TextPainter(
+      text: TextSpan(text: label, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final labelWidth = painter.width;
+    painter.dispose();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // In the header list's scroll space: the column's width and where
+        // this strip, the band's start and its end lie.
+        const pad = BoardBand.labelPadding;
+        final end = bleed + BoardBand.endInset;
+        final s = segment;
+        final stripWidth = constraints.maxWidth;
+        final columnWidth =
+            (s.starts ? end : 0) + stripWidth + (s.ends ? end : 0);
+        final stripLeft = s.column * columnWidth + (s.starts ? end : 0);
+        final firstColumn = s.column - s.day;
+        final bandStart = firstColumn * columnWidth + end;
+        final bandEnd = (firstColumn + s.days) * columnWidth - end;
+        // A band narrower than the label cuts it at its start.
+        final room = bandEnd - bandStart - 2 * pad;
+        final cut = labelWidth > room;
+        final width = cut ? (room > 0 ? room : 0.0) : labelWidth;
+
+        final scroll = s.scroll;
+
+        Widget place(BuildContext context, Widget? _) {
+          final viewportLeft = scroll != null && scroll.hasClients
+              ? scroll.offset
+              : 0.0;
+          final left = stickyBandLabelLeft(
+            viewportLeft: viewportLeft,
+            bandStart: bandStart,
+            bandEnd: bandEnd,
+            labelWidth: width,
+            padding: pad,
+          );
+          final x = left - stripLeft;
+          if (x >= stripWidth || x + width <= 0) {
+            return const SizedBox.shrink();
+          }
+          return Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              Positioned(
+                left: x,
+                top: 0,
+                bottom: 0,
+                width: cut ? width : null,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  // Read once: by the piece where the label starts.
+                  child: ExcludeSemantics(
+                    excluding: x < 0,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: style,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+
+        return scroll == null
+            ? place(context, null)
+            : ListenableBuilder(listenable: scroll, builder: place);
+      },
     );
   }
 }

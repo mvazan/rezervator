@@ -142,11 +142,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// today, not on the oldest day, and again when that changes.
   (int, double)? _alignedFor;
 
-  /// The first column in view where the horizontal scroll last settled —
-  /// a visitor's or the idle reset's. The duty band names who serves there
-  /// (see [_dutySegment]).
-  int _firstVisible = 0;
-
   /// Today's block spans in minutes-from-midnight — the idle reset anchors
   /// on the START of the block containing "now" (the board doesn't creep
   /// down mid-block; it advances when the block ends).
@@ -206,33 +201,24 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     resetToNow(HourMinute(now.hour, now.minute));
   }
 
-  /// The horizontal scroll settled with column [first] at the left. Only
-  /// the duty band shows it ([rebuild]); without one the board is not
-  /// rebuilt for it.
-  void _settledOn(int first, {required bool rebuild}) {
-    if (first == _firstVisible) return;
-    if (rebuild) {
-      setState(() => _firstVisible = first);
-    } else {
-      _firstVisible = first;
-    }
+  /// The duty's piece over the header of [date], the board's [column]
+  /// ([entry] null = no duty there). Who serves is the band's one label:
+  /// it rides the period's start, sticks to the row's left edge while the
+  /// period runs off it — a period begun off to the left still says who —
+  /// and moves with the header strip's own scroll ([_hHeader]), frame by
+  /// frame, without rebuilding the board.
+  BoardBandSegment? _dutySegment(Day date, KioskDutyEntry? entry, int column) {
+    if (entry == null) return null;
+    final period = entry.period;
+    return BoardBandSegment(
+      day: date.differenceInDays(period.startsOn),
+      days: period.endsOn.differenceInDays(period.startsOn) + 1,
+      label: entry.who,
+      onTap: widget.onOpenDuty,
+      scroll: _hHeader,
+      column: column,
+    );
   }
-
-  /// The duty's piece over one day's header ([on], null = no duty there).
-  /// The names stand where a visitor starts reading: the period's first
-  /// day and the [first] column in view — a period begun off to the left
-  /// still says who.
-  BoardBandSegment? _dutySegment(
-    ({KioskDutyEntry entry, bool starts, bool ends})? on, {
-    required bool first,
-  }) => on == null
-      ? null
-      : BoardBandSegment(
-          starts: on.starts,
-          ends: on.ends,
-          label: on.starts || first ? on.entry.who : null,
-          onTap: widget.onOpenDuty,
-        );
 
   Future<void> _book(
     BuildContext context,
@@ -451,7 +437,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         _todayOffset = todayIndex * columnWidth;
         if (_alignedFor != (pastDays, columnWidth)) {
           _alignedFor = (pastDays, columnWidth);
-          _firstVisible = todayIndex;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_hScroll.hasClients) _hScroll.jumpTo(_todayOffset);
           });
@@ -499,8 +484,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                               ? null
                               : settings.kioskDutyBandPosition,
                           band: _dutySegment(
-                            dutyOn?.call(days[index].date),
-                            first: index == _firstVisible,
+                            days[index].date,
+                            dutyOn?.call(days[index].date)?.entry,
+                            index,
                           ),
                         ),
                       ),
@@ -529,12 +515,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                             onNotification: (n) {
                               if (n.metrics.axis != Axis.horizontal) {
                                 return false;
-                              }
-                              if (n is ScrollEndNotification) {
-                                _settledOn(
-                                  (n.metrics.pixels / columnWidth).round(),
-                                  rebuild: dutyOn != null,
-                                );
                               }
                               if (n is ScrollStartNotification &&
                                   n.dragDetails != null) {
