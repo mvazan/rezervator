@@ -380,6 +380,28 @@ void main() {
       }
     });
 
+    testWidgets('a screen reader reads each band\'s names once, from the '
+        'piece where the label starts, wherever the row stands', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final scroll = await pumpRow(tester);
+      // The nodes a screen reader walks that say [label].
+      int read(String label) => tester.semantics
+          .simulatedAccessibilityTraversal()
+          .where((node) => node.label.contains(label))
+          .length;
+      // At rest the names cross two pieces; then stuck, cut, pushed.
+      expect(bandLabelRun(tester, who).right, greaterThan(110));
+      for (final x in [0.0, 150.0, 250.0, 370.0]) {
+        scroll.jumpTo(x);
+        await tester.pump();
+        expect(read(who), 1, reason: '$x');
+        expect(read(short), 1, reason: '$x');
+      }
+      semantics.dispose();
+    });
+
     testWidgets('the row built anew around the same list — the old list '
         'still on the controller in that frame: the label drawn, where the '
         'new list stands', (tester) async {
