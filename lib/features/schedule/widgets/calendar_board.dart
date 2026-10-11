@@ -37,8 +37,9 @@ double boardHeaderHeight(int maxEvents) =>
 const double collapsedHeaderHeight = 20.0;
 
 /// What a [BoardBand] adds to the header's height: an 18px strip and the
-/// 2px above it. A board drawing one adds it to [boardHeaderHeight] for
-/// every column, banded or not, so the day labels stay on one line.
+/// 2px between it and the label or the events. A board drawing one adds it
+/// to [boardHeaderHeight] for every column, banded or not, so the day
+/// labels stay on one line — wherever in the header the band runs.
 const double boardBandHeight = 20.0;
 
 /// One time-positioned widget inside a [CalendarColumn].
@@ -361,7 +362,12 @@ class BoardBandSegment {
 /// little in and rounded where it starts or ends, the label one
 /// ellipsised line at its start.
 class BoardBand extends StatelessWidget {
-  const BoardBand({super.key, required this.segment, this.bleed = 0});
+  const BoardBand({
+    super.key,
+    required this.segment,
+    this.bleed = 0,
+    this.leading = false,
+  });
 
   static const radius = Radius.circular(6);
 
@@ -371,13 +377,20 @@ class BoardBand extends StatelessWidget {
   /// the header's [BoardColumnHeader.gap].
   final double bleed;
 
+  /// The band opens the header (above the day label): its 2px go under the
+  /// strip, which then sits on the header's top edge. Otherwise they go
+  /// above it, apart from the label or the events.
+  final bool leading;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final label = segment.label;
     return Padding(
-      padding: const EdgeInsets.only(top: 2),
+      padding: leading
+          ? const EdgeInsets.only(bottom: 2)
+          : const EdgeInsets.only(top: 2),
       child: SizedBox(
         height: boardBandHeight - 2,
         width: double.infinity,
@@ -430,9 +443,10 @@ class BoardBand extends StatelessWidget {
 /// matter how many events a day has — with the day's events stacked under
 /// it, one ellipsized line each ('🏠 domáci zápas · od–do', away matches
 /// without any icon, ⛔ blockages; pass [headerEvents]' output). A quiet
-/// [subtitle] shows when there are none. A [band] runs between the label
-/// and the events. When [collapsed], only the day label renders as a thin
-/// strip. Typed on [date] so widget tests can enumerate visible days.
+/// [subtitle] shows when there are none. A [band] runs above the label,
+/// between the label and the events or along the bottom edge
+/// ([bandPosition]). When [collapsed], only the day label renders as a
+/// thin strip. Typed on [date] so widget tests can enumerate visible days.
 class BoardColumnHeader extends StatelessWidget {
   const BoardColumnHeader({
     super.key,
@@ -447,8 +461,9 @@ class BoardColumnHeader extends StatelessWidget {
     this.watch,
     this.onOpenMatch,
     this.band,
+    this.bandPosition,
     this.gap = 0,
-  });
+  }) : assert(band == null || bandPosition != null);
 
   final Day date;
   final bool isToday;
@@ -480,11 +495,18 @@ class BoardColumnHeader extends StatelessWidget {
   /// [showDayMatchesDialog]).
   final void Function(PrioritySlot match)? onOpenMatch;
 
-  /// The kiosk's: this day's piece of a band across the headers (the
-  /// canteen duty, 0073), a [BoardBand] under the day label — [height]
-  /// must hold its [boardBandHeight] too. Null (the app's week board): no
-  /// strip, no room for one.
+  /// The kiosk's: this day's piece of the band across the headers (the
+  /// canteen duty, 0073), a [BoardBand] where [bandPosition] says; null =
+  /// none on this day.
   final BoardBandSegment? band;
+
+  /// The kiosk's, with the band on: where it runs in the headers (the
+  /// admin's choice, 0073) — on the top edge above the day label, under
+  /// the label, or on the bottom edge under the events, there however many
+  /// lines the day has. [height] must hold its [boardBandHeight], the same
+  /// in each; a day without a [band] piece keeps its label on the line of
+  /// the others. Null (the app's week board): no band, no room for one.
+  final KioskDutyBandPosition? bandPosition;
 
   /// The kiosk's: how far the background stands in from each side — the
   /// room the board keeps between neighbouring headers, drawn inside the
@@ -509,6 +531,10 @@ class BoardColumnHeader extends StatelessWidget {
         color: isToday ? Colors.white : scheme.onSurface,
       ),
     );
+    // Gone in the thin strip, which has room for the label alone.
+    final bandAt = collapsed ? null : bandPosition;
+    final piece = band;
+    final pad = collapsed ? 2.0 : 4.0;
     // The content is ALWAYS the full top-anchored column; collapsing just
     // animates the container height down so the event lines clip away —
     // that's what makes the squeeze read as one smooth motion instead of a
@@ -519,8 +545,12 @@ class BoardColumnHeader extends StatelessWidget {
       height: collapsed ? collapsedHeaderHeight : height,
       margin: EdgeInsets.symmetric(horizontal: gap),
       // The sides inset the label and the events, not the [band]: it runs
-      // on from column to column.
-      padding: EdgeInsets.symmetric(vertical: collapsed ? 2 : 4),
+      // on from column to column. On the top or the bottom edge it takes
+      // that edge's padding too.
+      padding: EdgeInsets.only(
+        top: bandAt == KioskDutyBandPosition.top ? 0 : pad,
+        bottom: bandAt == KioskDutyBandPosition.bottom ? 0 : pad,
+      ),
       decoration: BoxDecoration(
         gradient:
             isToday ? const LinearGradient(colors: brandGradientColors) : null,
@@ -533,10 +563,15 @@ class BoardColumnHeader extends StatelessWidget {
         // line visible under the day label.
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // Above the label the band's room stays on a day without a
+          // piece: the labels keep to one line.
+          if (bandAt == KioskDutyBandPosition.top)
+            piece == null
+                ? const SizedBox(height: boardBandHeight)
+                : BoardBand(segment: piece, bleed: gap, leading: true),
           Padding(padding: _inset, child: dayText),
-          // Gone in the thin strip, which has room for the label alone.
-          if (band != null && !collapsed)
-            BoardBand(segment: band!, bleed: gap),
+          if (bandAt == KioskDutyBandPosition.middle && piece != null)
+            BoardBand(segment: piece, bleed: gap),
           Padding(
             padding: _inset,
             child: AnimatedOpacity(
@@ -605,6 +640,12 @@ class BoardColumnHeader extends StatelessWidget {
                       : const SizedBox.shrink(),
             ),
           ),
+          // The header's height is fixed: the room the day's lines leave
+          // goes above the band, which stays on the bottom edge.
+          if (bandAt == KioskDutyBandPosition.bottom && piece != null) ...[
+            const Spacer(),
+            BoardBand(segment: piece, bleed: gap),
+          ],
         ],
       ),
     );

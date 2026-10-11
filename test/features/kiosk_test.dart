@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
-import 'package:rezervator/core/ui.dart' show dayFull, today;
+import 'package:rezervator/core/ui.dart' show dayFull, dayLabel, today;
+import 'package:rezervator/core/widgets/emoji_text.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/duties.dart'
@@ -1362,6 +1363,7 @@ void main() {
       bool dutyBoard = false,
       bool dutyDrawer = false,
       int dutyShare = 30,
+      KioskDutyBandPosition dutyBandPosition = KioskDutyBandPosition.middle,
       List<DutyPeriod> dutyPeriods = const [],
       List<DutyAssignment> dutyAssignments = const [],
     }) => ProviderScope(
@@ -1404,6 +1406,7 @@ void main() {
               kioskDutyBoard: dutyBoard,
               kioskDutyDrawer: dutyDrawer,
               kioskDutyShare: dutyShare,
+              kioskDutyBandPosition: dutyBandPosition,
             ),
           ),
         ),
@@ -3467,18 +3470,9 @@ void main() {
       });
 
       testWidgets('the band runs on unbroken from day to day, through the '
-          'gap between the headers; the next duty starts apart', (
-        tester,
-      ) async {
+          'gap between the headers, wherever in them it runs; the next duty '
+          'starts apart', (tester) async {
         fullHd(tester);
-        await tester.pumpWidget(
-          app(
-            dutyBoard: true,
-            dutyPeriods: periods,
-            dutyAssignments: assignments,
-          ),
-        );
-        await tester.pumpAndSettle();
         Rect strip(int d) => tester.getRect(
           find.descendant(
             of: find.descendant(
@@ -3498,13 +3492,171 @@ void main() {
               .first,
         );
 
-        for (var d = 8; d < 11; d++) {
-          expect(strip(d).right, strip(d + 1).left);
-          // The headers themselves keep their gap.
-          expect(background(d + 1).left - background(d).right, 4);
+        for (final position in KioskDutyBandPosition.values) {
+          await tester.pumpWidget(
+            app(
+              // Matches on one day only: the band still one straight line.
+              slots: [fed('m', day, 'Domácí')],
+              dutyBoard: true,
+              dutyBandPosition: position,
+              dutyPeriods: periods,
+              dutyAssignments: assignments,
+            ),
+          );
+          await tester.pumpAndSettle();
+          for (var d = 8; d < 11; d++) {
+            expect(strip(d).right, strip(d + 1).left, reason: '$position');
+            expect(strip(d).top, strip(d + 1).top, reason: '$position');
+            expect(strip(d).bottom, strip(d + 1).bottom, reason: '$position');
+            // The headers themselves keep their gap.
+            expect(
+              background(d + 1).left - background(d).right,
+              4,
+              reason: '$position',
+            );
+          }
+          // Sunday ends one duty, Monday starts the next: rounded, apart.
+          expect(
+            strip(12).left,
+            greaterThan(strip(11).right),
+            reason: '$position',
+          );
+          await finish(tester);
         }
-        // Sunday ends one duty, Monday starts the next: rounded, apart.
-        expect(strip(12).left, greaterThan(strip(11).right));
+      });
+
+      testWidgets('where the admin wants it: above the date, between the '
+          'date and the matches, or under the matches on the headers\' '
+          'bottom edge — the headers as tall in each', (tester) async {
+        fullHd(tester);
+        Finder within(Day date, Finder f) =>
+            find.descendant(of: headerOf(date), matching: f);
+        Rect strip(Day date) => tester.getRect(
+          within(
+            date,
+            find.descendant(
+              of: find.byType(BoardBand),
+              matching: find.byType(Material),
+            ),
+          ),
+        );
+        Rect label(Day date) =>
+            tester.getRect(within(date, find.textContaining(dayLabel(date))));
+        Rect header(Day date) => tester.getRect(headerOf(date));
+        // Today's two matches, Saturday's none.
+        final lines = within(day, find.byType(EmojiText));
+        final saturday = Day(2026, 10, 10);
+
+        for (final position in KioskDutyBandPosition.values) {
+          await tester.pumpWidget(
+            app(
+              slots: [
+                fed('m', day, 'Domácí'),
+                fed('m2', day, 'Domácí B', hour: 18),
+              ],
+              dutyBoard: true,
+              dutyBandPosition: position,
+              dutyPeriods: periods,
+              dutyAssignments: assignments,
+            ),
+          );
+          await tester.pumpAndSettle();
+          final why = '$position';
+          expect(lines, findsNWidgets(2), reason: why);
+          expect(
+            header(day).height,
+            boardHeaderHeight(2) + boardBandHeight,
+            reason: why,
+          );
+          switch (position) {
+            case KioskDutyBandPosition.top:
+              expect(strip(day).top, header(day).top, reason: why);
+              expect(
+                strip(day).bottom,
+                lessThanOrEqualTo(label(day).top),
+                reason: why,
+              );
+            case KioskDutyBandPosition.middle:
+              expect(
+                strip(day).top,
+                greaterThanOrEqualTo(label(day).bottom),
+                reason: why,
+              );
+              expect(
+                strip(day).bottom,
+                lessThanOrEqualTo(tester.getRect(lines.first).top),
+                reason: why,
+              );
+            case KioskDutyBandPosition.bottom:
+              expect(
+                strip(day).top,
+                greaterThanOrEqualTo(tester.getRect(lines.last).bottom),
+                reason: why,
+              );
+              expect(strip(day).bottom, header(day).bottom, reason: why);
+              // A day without matches: the band on the same bottom edge.
+              expect(strip(saturday).top, strip(day).top, reason: why);
+              expect(strip(saturday).bottom, strip(day).bottom, reason: why);
+          }
+          // The date above the matches, on one line across the days.
+          expect(
+            label(day).bottom,
+            lessThanOrEqualTo(tester.getRect(lines.first).top),
+            reason: why,
+          );
+          expect(label(saturday).top, label(day).top, reason: why);
+          await finish(tester);
+        }
+      });
+
+      testWidgets('above the date, a day without a duty keeps the band\'s '
+          'room: the dates stay on one line', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyBoard: true,
+            dutyBandPosition: KioskDutyBandPosition.top,
+            dutyPeriods: periods,
+            // Nobody on this week's duty: no band until Monday.
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now') a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        final monday = Day(2026, 10, 12);
+        expect(bandOn(tester, day), isNull);
+        expect(bandOn(tester, monday)!.label, 'BB Hráč');
+        double labelTop(Day date) => tester
+            .getRect(
+              find.descendant(
+                of: headerOf(date),
+                matching: find.textContaining(dayLabel(date)),
+              ),
+            )
+            .top;
+        // Monday's band on the top edge, its date under it — today's date
+        // on the same line, over nothing.
+        expect(
+          tester
+              .getRect(
+                find.descendant(
+                  of: find.descendant(
+                    of: headerOf(monday),
+                    matching: find.byType(BoardBand),
+                  ),
+                  matching: find.byType(Material),
+                ),
+              )
+              .top,
+          tester.getRect(headerOf(monday)).top,
+        );
+        expect(labelTop(day), labelTop(monday));
+        expect(
+          tester.getSize(headerOf(day)).height,
+          boardHeaderHeight(0) + boardBandHeight,
+        );
 
         await finish(tester);
       });
