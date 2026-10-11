@@ -10570,10 +10570,12 @@ end $$;
 \ir ../migrations/0073_kiosk_duty.sql
 
 -- 0073: the canteen duty on the kiosk — all three places off for a new
--- alley (its settings row comes from seed_tenant_defaults), the card's
--- share of the drawer 10–90, and with all of it on the public overview
--- still hands out its six settings, nothing more. The file just ran a
--- second time: the migration is re-runnable.
+-- alley (its settings row comes from seed_tenant_defaults), the band
+-- between the date and the matches, the card's share of the drawer 10–90,
+-- the band at the top, in the middle or at the bottom and nowhere else,
+-- and with all of it on the public overview still hands out its six
+-- settings, nothing more. The file just ran a second time: the migration
+-- is re-runnable.
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -10584,14 +10586,27 @@ begin
   if not exists (select 1 from schedule_settings
                   where tenant_id = v_new
                     and not kiosk_duty_header and not kiosk_duty_board
-                    and not kiosk_duty_drawer and kiosk_duty_share = 30) then
-    raise exception 'FAIL: a new alley''s kiosk does not start with the duty off and a 30 percent card (0073)';
+                    and not kiosk_duty_drawer and kiosk_duty_share = 30
+                    and kiosk_duty_band_position = 'middle') then
+    raise exception 'FAIL: a new alley''s kiosk does not start with the duty off, a 30 percent card and the band in the middle (0073)';
   end if;
   if not exists (select 1 from pg_constraint
                   where conrelid = 'schedule_settings'::regclass
                     and conname = 'schedule_settings_kiosk_duty_share_check') then
     raise exception 'FAIL: the duty card''s share has no named check (0073)';
   end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'schedule_settings'::regclass
+                    and conname =
+                      'schedule_settings_kiosk_duty_band_position_check') then
+    raise exception 'FAIL: the duty band''s position has no named check (0073)';
+  end if;
+  begin
+    update schedule_settings set kiosk_duty_band_position = 'left'
+     where tenant_id = v_a;
+    raise exception 'FAIL: a duty band position other than top, middle or bottom was accepted (0073)';
+  exception when check_violation then null;
+  end;
   begin
     update schedule_settings set kiosk_duty_share = 9 where tenant_id = v_a;
     raise exception 'FAIL: a duty card under 10 percent of the drawer was accepted (0073)';
@@ -10604,9 +10619,12 @@ begin
   end;
   update schedule_settings
      set kiosk_duty_header = true, kiosk_duty_board = true,
-         kiosk_duty_drawer = true, kiosk_duty_share = 10
+         kiosk_duty_drawer = true, kiosk_duty_share = 10,
+         kiosk_duty_band_position = 'top'
    where tenant_id = v_a;
-  update schedule_settings set kiosk_duty_share = 90 where tenant_id = v_a;
+  update schedule_settings
+     set kiosk_duty_share = 90, kiosk_duty_band_position = 'bottom'
+   where tenant_id = v_a;
   v_keys := array(select jsonb_object_keys(
                            public_week('kuzelna-a', current_date)->'settings')
                   order by 1);
@@ -10617,9 +10635,10 @@ begin
   end if;
   update schedule_settings
      set kiosk_duty_header = false, kiosk_duty_board = false,
-         kiosk_duty_drawer = false, kiosk_duty_share = 30
+         kiosk_duty_drawer = false, kiosk_duty_share = 30,
+         kiosk_duty_band_position = 'middle'
    where tenant_id = v_a;
-  raise notice 'OK: the kiosk''s duty is off for a new alley, its card 10–90 percent, and stays off the public overview (0073)';
+  raise notice 'OK: the kiosk''s duty is off for a new alley, its card 10–90 percent, its band top, middle or bottom, and stays off the public overview (0073)';
 end $$;
 
 -- 0052 One device token, one profile ----------------------------------------
