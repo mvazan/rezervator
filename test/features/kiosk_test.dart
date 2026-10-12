@@ -637,6 +637,25 @@ void main() {
     },
   );
 
+  testWidgets('d4: a long name in the status bar chip ellipsizes, the bar '
+      'does not overflow', (tester) async {
+    const ghost = PlayerName(
+      id: 'ghost',
+      displayName: 'Bohumil Kroupa-Novotný z Horní Dolní Lhoty',
+      hasAccount: false,
+    );
+    await tester.pumpWidget(kioskApp(roster: [...players, ghost]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(ghost.displayName));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Rezervuje: Bohumil'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('e: reserved cells have no cancel affordance (tap → no dialog)', (
     tester,
   ) async {

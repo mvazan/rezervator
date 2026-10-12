@@ -49,6 +49,10 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '12. 10. 2026', [
+    'Kiosk: upozornění v záhlaví i upozornění při rezervaci mohou mít až '
+        '300 znaků (dosud 200).',
+  ]),
   Release(null, '11. 10. 2026', [
     'Kiosk: pás služby v kalendáři říká, co jména znamenají — „… má '
         'službu (12.–18. 10.)“.',

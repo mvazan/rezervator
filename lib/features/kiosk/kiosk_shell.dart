@@ -596,7 +596,7 @@ class _StatusBar extends ConsumerWidget {
                 children: [
                   // The admin's warning: alone in the bar's middle.
                   if (warning != null)
-                    Expanded(child: KioskWarning(text: warning)),
+                    Expanded(child: KioskWarning(text: warning, maxLines: 3)),
                   // Today's matches, one tap target each: a match with a score
                   // opens its Zápis, as everywhere else on the kiosk; one
                   // with a video and no score yet, its stream.
@@ -673,7 +673,13 @@ class _StatusBar extends ConsumerWidget {
                     child: const Text('Rezervovat'),
                   )
                 : Container(
-                    constraints: const BoxConstraints(minHeight: 56),
+                    // Capped, so a long name ellipsizes in its chip rather
+                    // than push the bar wider than the screen — the middle
+                    // is all that gives way (it may shrink to nothing).
+                    constraints: const BoxConstraints(
+                      minHeight: 56,
+                      maxWidth: 360,
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 8,

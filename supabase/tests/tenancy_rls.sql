@@ -10624,9 +10624,9 @@ begin
   exception when check_violation then null;
   end;
   begin
-    update schedule_settings set kiosk_warning = repeat('x', 201)
+    update schedule_settings set kiosk_warning = repeat('x', 301)
      where tenant_id = v_a;
-    raise exception 'FAIL: a warning over 200 characters was accepted (0068)';
+    raise exception 'FAIL: a warning over 300 characters was accepted (0068, 0074)';
   exception when check_violation then null;
   end;
   update schedule_settings set kiosk_warning = 'Dráha 3 je mimo provoz.'
@@ -12126,6 +12126,47 @@ begin
     raise exception 'FAIL: anon can schedule a notice';
   end if;
   raise notice 'OK: only the alley''s admin schedules a notice; its ping waits as one job (0064)';
+end $$;
+
+-- 0074: the warning and the picker note may run to 300 characters. 0074
+-- runs twice (it re-runs); a text of 300 is kept, one of 301 and a blank
+-- one are not.
+\ir ../migrations/0074_kiosk_picker_note_300.sql
+\ir ../migrations/0074_kiosk_picker_note_300.sql
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_note text;
+begin
+  select kiosk_picker_note into v_note from schedule_settings where tenant_id = v_a;
+  update schedule_settings set kiosk_picker_note = repeat('x', 300),
+                               kiosk_warning = repeat('x', 300)
+   where tenant_id = v_a;
+  begin
+    update schedule_settings set kiosk_warning = repeat('x', 301)
+     where tenant_id = v_a;
+    raise exception 'FAIL: a warning over 300 characters was accepted (0074)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_warning = '   ' where tenant_id = v_a;
+    raise exception 'FAIL: a blank warning was accepted (0074)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_picker_note = repeat('x', 301)
+     where tenant_id = v_a;
+    raise exception 'FAIL: a picker note over 300 characters was accepted (0074)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_picker_note = '   ' where tenant_id = v_a;
+    raise exception 'FAIL: a blank picker note was accepted (0074)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_picker_note = v_note,
+                               kiosk_warning = null where tenant_id = v_a;
+  raise notice 'OK: the warning and the picker note take up to 300 characters, not blank (0074)';
 end $$;
 
 rollback;

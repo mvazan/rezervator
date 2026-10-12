@@ -72,13 +72,13 @@ void main() {
       )
       .didExceedMaxLines;
 
-  final longest = 'Na kiosku se z tréninku odhlásit nedá. ' * 6;
-  final note200 = longest.substring(0, 200).trim();
+  final longest = 'Na kiosku se z tréninku odhlásit nedá. ' * 9;
+  final note300 = longest.substring(0, 300).trim();
 
   for (final (size, note, what) in [
     (const Size(1920, 1080), ScheduleSettings.defaultPickerNote, 'default'),
-    (const Size(1920, 1080), note200, '200 characters'),
-    (const Size(800, 1280), note200, '200 characters'),
+    (const Size(1920, 1080), note300, '300 characters'),
+    (const Size(800, 1280), note300, '300 characters'),
     (const Size(375, 812), ScheduleSettings.defaultPickerNote, 'default'),
   ]) {
     testWidgets('the $what note is whole at ${size.width.toInt()} × '
@@ -89,4 +89,33 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('a 300 character warning is whole in the status bar (3 lines)',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final text = ('Dráha 3 je mimo provoz, trénink se přesouvá na dráhy 1 a 2. ' * 6)
+        .substring(0, 300)
+        .trim();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(Brightness.dark),
+        home: Scaffold(
+          body: Row(
+            children: [
+              Expanded(child: KioskWarning(text: text, maxLines: 3)),
+              const SizedBox(width: 300),
+            ],
+          ),
+        ),
+      ),
+    );
+    final cut = tester
+        .renderObject<RenderParagraph>(
+          find.descendant(of: find.text(text), matching: find.byType(RichText)),
+        )
+        .didExceedMaxLines;
+    expect(cut, isFalse);
+  });
 }

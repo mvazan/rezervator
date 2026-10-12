@@ -144,7 +144,8 @@ void main() {
         r"kiosk_picker_note text\s+default '([^']+)'",
       ).firstMatch(sql)!.group(1);
       expect(column, ScheduleSettings.defaultPickerNote);
-      expect(ScheduleSettings.defaultPickerNote.length, lessThanOrEqualTo(200));
+      expect(ScheduleSettings.defaultPickerNote.length,
+          lessThanOrEqualTo(ScheduleSettings.pickerNoteMaxLength));
     });
 
     test('fromJson reads the stream windows at once (0072); one when absent',

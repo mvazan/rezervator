@@ -936,6 +936,14 @@ class ScheduleSettings {
     maxActiveReservations: 3,
   );
 
+  /// The most characters a [kioskWarning] may have — the column's check
+  /// (0074).
+  static const warningMaxLength = 300;
+
+  /// The most characters a [kioskPickerNote] may have — the column's check
+  /// (0074).
+  static const pickerNoteMaxLength = 300;
+
   /// The [kioskPickerNote] every alley starts with — the column's default
   /// in 0070, letter for letter (a test compares the two); Správa → Kiosk
   /// offers it back.

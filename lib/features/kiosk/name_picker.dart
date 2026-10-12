@@ -51,13 +51,13 @@ const firstLetterHint =
     'přezdívku nemáš.';
 
 /// The widest the admin's note under the letters gets: a wide screen does
-/// not stretch it into one line nobody reads to the end (two lines of its
-/// 18 px bold hold the column's 200 characters at this width).
+/// not stretch it into one line nobody reads to the end (three lines of its
+/// 18 px bold hold the column's 300 characters at this width).
 const _noteMaxWidth = 1000.0;
 
 /// Lines the note may take before an ellipsis: its end says where to
 /// cancel, so a narrower screen gets more lines rather than a cut — the
-/// default text keeps whole down to a phone, 200 characters down to a
+/// default text keeps whole down to a phone, 300 characters down to a
 /// portrait tablet.
 const _noteMaxLines = 6;
 
