@@ -673,7 +673,13 @@ class _StatusBar extends ConsumerWidget {
                     child: const Text('Rezervovat'),
                   )
                 : Container(
-                    constraints: const BoxConstraints(minHeight: 56),
+                    // Capped, so a long name ellipsizes in its chip rather
+                    // than push the bar wider than the screen — the middle
+                    // is all that gives way (it may shrink to nothing).
+                    constraints: const BoxConstraints(
+                      minHeight: 56,
+                      maxWidth: 360,
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 8,
