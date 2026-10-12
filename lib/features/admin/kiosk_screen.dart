@@ -273,6 +273,7 @@ class KioskSettingsScreen extends ConsumerWidget {
       label: 'Text upozornění',
       initial: settings.kioskPickerNote ?? ScheduleSettings.defaultPickerNote,
       defaultText: ScheduleSettings.defaultPickerNote,
+      maxLength: ScheduleSettings.pickerNoteMaxLength,
     );
     if (text == null || !context.mounted) return;
     await _panel(context, settings, {'kiosk_picker_note': text});
@@ -1105,8 +1106,9 @@ class KioskSettingsScreen extends ConsumerWidget {
   }
 }
 
-/// The kiosk warning's text: one or a few lines, at most 200 characters
-/// (the column's check, 0068). Pops the trimmed text, null when cancelled.
+/// The kiosk warning's text: one or a few lines, at most
+/// [ScheduleSettings.warningMaxLength] characters (the column's check, 0068,
+/// 0074). Pops the trimmed text, null when cancelled.
 class _WarningDialog extends StatefulWidget {
   const _WarningDialog({required this.initial});
 
@@ -1135,9 +1137,9 @@ class _WarningDialogState extends State<_WarningDialog> {
         child: TextField(
           controller: _text,
           autofocus: true,
-          maxLength: 200,
+          maxLength: ScheduleSettings.warningMaxLength,
           minLines: 1,
-          maxLines: 3,
+          maxLines: 4,
           decoration: const InputDecoration(
             labelText: 'Text upozornění',
             hintText: 'Třeba: Dráha 3 je mimo provoz.',

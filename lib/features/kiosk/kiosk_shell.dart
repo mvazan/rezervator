@@ -596,7 +596,7 @@ class _StatusBar extends ConsumerWidget {
                 children: [
                   // The admin's warning: alone in the bar's middle.
                   if (warning != null)
-                    Expanded(child: KioskWarning(text: warning)),
+                    Expanded(child: KioskWarning(text: warning, maxLines: 3)),
                   // Today's matches, one tap target each: a match with a score
                   // opens its Zápis, as everywhere else on the kiosk; one
                   // with a video and no score yet, its stream.
