@@ -104,8 +104,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
 
   void _drillInto(String prefix) => setState(() => _prefix = prefix);
 
-  void _back() =>
-      setState(() => _prefix = _prefix.substring(0, _prefix.length - 1));
+  void _back() => setState(() => _prefix = nameIndexParent(_prefix));
 
   @override
   Widget build(BuildContext context) {
@@ -253,8 +252,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                               children: [
                                 for (final prefix in prefixes)
                                   _LetterTile(
-                                    letter:
-                                        prefix.substring(prefix.length - 1),
+                                    letter: nameIndexLabel(prefix),
                                     onTap: () => _drillInto(prefix),
                                   ),
                               ],
