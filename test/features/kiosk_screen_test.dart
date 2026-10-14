@@ -1088,6 +1088,28 @@ void main() {
     );
   });
 
+  for (final (label, before, after, column) in [
+    ('Písmo upozornění', '22', 28, 'kiosk_warning_font_size'),
+    ('Šířka přehledu zápasů dne', '560', 800, 'kiosk_day_matches_width'),
+  ]) {
+    testWidgets('„$label“ (0075) shows $before by default and PATCHes its '
+        'own column', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      final field = find.widgetWithText(TextField, label);
+      await tester.ensureVisible(field);
+      expect(tester.widget<TextField>(field).controller!.text, before);
+      await tester.enterText(field, '$after');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(
+        jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {column: after},
+      );
+    });
+  }
+
   group('the note when booking (0070)', () {
     Map<String, dynamic> lastPatch() => jsonDecode(
           requests.lastWhere((r) => r.method == 'PATCH').body,

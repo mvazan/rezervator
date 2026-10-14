@@ -750,6 +750,8 @@ class ScheduleSettings {
     this.kioskNameday = false,
     this.kioskWarning,
     this.kioskBandFontSize = 10,
+    this.kioskWarningFontSize = 22,
+    this.kioskDayMatchesWidth = 560,
     this.kioskTodaysMatches = true,
     this.kioskStreamMax = 1,
     this.kioskDutyHeader = false,
@@ -838,6 +840,14 @@ class ScheduleSettings {
   /// The px size of the bands' text (matches, blockages, rentals) on the
   /// kiosk board (0069); the app keeps 10.
   final int kioskBandFontSize;
+
+  /// The px size of both red notices on the kiosk (0075): the status-bar
+  /// warning and the name picker's note. 22 = the picker's own hint.
+  final int kioskWarningFontSize;
+
+  /// The px width of the day's matches dialog on the kiosk board (0075);
+  /// the app keeps 340.
+  final int kioskDayMatchesWidth;
 
   /// The kiosk's status bar lists today's matches beside the clock (0071);
   /// off = it says what it says on a day without a match.
@@ -1009,6 +1019,10 @@ class ScheduleSettings {
           _ => null,
         },
         kioskBandFontSize: json['kiosk_band_font_size'] as int? ?? 10,
+        kioskWarningFontSize:
+            json['kiosk_warning_font_size'] as int? ?? 22,
+        kioskDayMatchesWidth:
+            json['kiosk_day_matches_width'] as int? ?? 560,
         kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
         kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
         kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,

@@ -732,6 +732,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.onOpenMatch,
     this.onPlayVideo,
     this.pulseLive = true,
+    this.dayMatchesWidth = 340,
     this.band,
     this.bandPosition,
     this.gap = 0,
@@ -774,6 +775,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// The live badge in the day's list pulses (see [showDayMatchesDialog]);
   /// the kiosk's „Opakující se animace“.
   final bool pulseLive;
+
+  /// The width of the day's list (see [showDayMatchesDialog]): the app's
+  /// 340, the kiosk's as its admin sets it (0075).
+  final double dayMatchesWidth;
 
   /// The kiosk's: this day's piece of the band across the headers (the
   /// canteen duty, 0073), a [BoardBand] where [bandPosition] says; null =
@@ -874,6 +879,7 @@ class BoardColumnHeader extends StatelessWidget {
                                 onOpenMatch: onOpenMatch,
                                 onPlayVideo: onPlayVideo,
                                 pulseLive: pulseLive,
+                                width: dayMatchesWidth,
                               ),
                       child: Column(
                         children: [

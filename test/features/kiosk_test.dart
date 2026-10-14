@@ -127,6 +127,7 @@ void main() {
     bool kioskLowRes = false,
     String? kioskPickerNote,
     int kioskIdleSeconds = 60,
+    int kioskWarningFontSize = 22,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -140,6 +141,7 @@ void main() {
       kioskLowRes: kioskLowRes,
       kioskPickerNote: kioskPickerNote,
       kioskIdleSeconds: kioskIdleSeconds,
+      kioskWarningFontSize: kioskWarningFontSize,
     );
     return ProviderScope(
       overrides: [
@@ -809,6 +811,38 @@ void main() {
       expect(counts[i], greaterThanOrEqualTo(counts[i - 1]));
     }
 
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
+
+  testWidgets('the picker note is as big as the hint above the letters, or '
+      'as big as the admin sets it (0075)', (tester) async {
+    double size(String text) => tester
+        .widget<Text>(find.text(text))
+        .style!
+        .fontSize!;
+    const note = 'Odhlásit se tu nedá.';
+    await tester.pumpWidget(kioskApp(kioskPickerNote: note));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    final hint = tester
+        .widget<Text>(find.text(firstLetterHint))
+        .style!
+        .fontSize!;
+    expect(size(note), greaterThanOrEqualTo(hint));
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: note, kioskWarningFontSize: 30),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(size(note), 30);
     await tester.tap(find.byIcon(Icons.close));
     await tester.pumpAndSettle();
     await finish(tester);
@@ -1588,6 +1622,16 @@ void main() {
       expect(find.byType(AlertDialog), findsOneWidget);
       // The score still renders non-interactively.
       final dialog = find.byType(AlertDialog);
+      // The kiosk's width for the list (0075): 560 unless the admin says.
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.byWidgetPredicate(
+            (w) => w is SizedBox && w.width == 560,
+          ),
+        ),
+        findsOneWidget,
+      );
       expect(
         find.descendant(of: dialog, matching: find.text('5 : 3')),
         findsOneWidget,

@@ -389,6 +389,19 @@ class KioskSettingsScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+                _number(
+                  context,
+                  settings,
+                  'Písmo upozornění',
+                  settings?.kioskWarningFontSize ?? 22,
+                  'kiosk_warning_font_size',
+                  unit: 'px',
+                  min: 14,
+                  max: 40,
+                  helper:
+                      'Obě upozornění, v záhlaví i při rezervaci. 22 je '
+                      'stejně velké jako nápověda „Vyber první písmeno…“.',
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tmavý režim'),
@@ -481,6 +494,19 @@ class KioskSettingsScreen extends ConsumerWidget {
                       'Pásy zápasů, blokací a pronájmů na tabuli; appka má '
                       '10. Kde se pás vejde, má zápas pohár, domácí, '
                       'pomlčku a hosty pod sebou a dlouhý název se zalomí.',
+                ),
+                _number(
+                  context,
+                  settings,
+                  'Šířka přehledu zápasů dne',
+                  settings?.kioskDayMatchesWidth ?? 560,
+                  'kiosk_day_matches_width',
+                  unit: 'px',
+                  min: 340,
+                  max: 1200,
+                  helper:
+                      'Okno se zápasy dne po klepnutí na záhlaví dne. Appka '
+                      'má 340; širší než obrazovka okno nikdy nebude.',
                 ),
                 _number(
                   context,
