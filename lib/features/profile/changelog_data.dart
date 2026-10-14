@@ -49,6 +49,15 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '14. 10. 2026', [
+    'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
+        'dole) a „Ch“ má jako v abecedě vlastní dlaždici za H. Dotyky ve '
+        'výběru se počítají jako aktivita, takže kdo se dlouho hledá, toho '
+        'kiosk nevrátí na tabuli.',
+    'Kiosk: upozornění v záhlaví i při rezervaci mají větší písmo (jako '
+        'nápověda „Vyber první písmeno…“) a správce si jeho velikost nastaví. '
+        'Přehled zápasů dne je širší, šířku také nastaví správce.',
+  ]),
   Release(null, '12. 10. 2026', [
     'Kiosk: upozornění v záhlaví i upozornění při rezervaci mohou mít až '
         '300 znaků (dosud 200).',
