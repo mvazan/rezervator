@@ -139,6 +139,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final picked = await showNamePicker(
       context,
       brightness: kioskDark ? Brightness.dark : Brightness.light,
+      wrap: _touchable,
     );
     if (!mounted) return;
     setState(() {

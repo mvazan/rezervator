@@ -126,6 +126,7 @@ void main() {
     KioskDisplay? display,
     bool kioskLowRes = false,
     String? kioskPickerNote,
+    int kioskIdleSeconds = 60,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -138,6 +139,7 @@ void main() {
       kioskFitDay: kioskFitDay,
       kioskLowRes: kioskLowRes,
       kioskPickerNote: kioskPickerNote,
+      kioskIdleSeconds: kioskIdleSeconds,
     );
     return ProviderScope(
       overrides: [
@@ -749,6 +751,31 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets('a touch in the name picker counts as activity: a visitor '
+      'searching for their name is not sent back to the board', (tester) async {
+    await tester.pumpWidget(kioskApp(kioskIdleSeconds: 30));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kdo si rezervuje?'), findsOneWidget);
+
+    // Drilling in and back again, 20 s apart: each tap restarts the 30 s.
+    await tester.pump(const Duration(seconds: 20));
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 20));
+    await tester.tap(find.text('Zpět'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 20));
+    expect(find.text('Kdo si rezervuje?'), findsOneWidget);
+
+    // Left alone, it still closes.
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pumpAndSettle();
+    expect(find.text('Kdo si rezervuje?'), findsNothing);
+    await finish(tester);
+  });
 
   testWidgets('g: NamePicker renders dark even when the app theme is light', (
     tester,

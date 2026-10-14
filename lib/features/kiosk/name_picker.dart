@@ -61,15 +61,22 @@ const _noteMaxWidth = 1000.0;
 /// portrait tablet.
 const _noteMaxLines = 6;
 
+/// [wrap] is the kiosk shell's: it counts a touch on the picker for the
+/// idle timer, so a visitor still looking for their name is not sent back
+/// to the board mid-search (the reset closes the picker with every other
+/// dialog).
 Future<PlayerName?> showNamePicker(
   BuildContext context, {
   Brightness brightness = Brightness.dark,
+  Widget Function(Widget child) wrap = _unwrapped,
 }) {
   return showDialog<PlayerName>(
     context: context,
-    builder: (_) => NamePicker(brightness: brightness),
+    builder: (_) => wrap(NamePicker(brightness: brightness)),
   );
 }
+
+Widget _unwrapped(Widget child) => child;
 
 class NamePicker extends ConsumerStatefulWidget {
   const NamePicker({super.key, this.brightness = Brightness.dark});
