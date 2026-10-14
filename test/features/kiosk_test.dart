@@ -126,6 +126,8 @@ void main() {
     KioskDisplay? display,
     bool kioskLowRes = false,
     String? kioskPickerNote,
+    int kioskIdleSeconds = 60,
+    int kioskWarningFontSize = 22,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -138,6 +140,8 @@ void main() {
       kioskFitDay: kioskFitDay,
       kioskLowRes: kioskLowRes,
       kioskPickerNote: kioskPickerNote,
+      kioskIdleSeconds: kioskIdleSeconds,
+      kioskWarningFontSize: kioskWarningFontSize,
     );
     return ProviderScope(
       overrides: [
@@ -749,6 +753,100 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets('a touch in the name picker counts as activity: a visitor '
+      'searching for their name is not sent back to the board', (tester) async {
+    await tester.pumpWidget(kioskApp(kioskIdleSeconds: 30));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kdo si rezervuje?'), findsOneWidget);
+
+    // Drilling in and back again, 20 s apart: each tap restarts the 30 s.
+    await tester.pump(const Duration(seconds: 20));
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 20));
+    await tester.tap(find.text('Zpět'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 20));
+    expect(find.text('Kdo si rezervuje?'), findsOneWidget);
+
+    // Left alone, it still closes.
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pumpAndSettle();
+    expect(find.text('Kdo si rezervuje?'), findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('the first letters stand in even rows, the bottom ones '
+      'taking the odd letter', (tester) async {
+    // 27 first letters: the 26 of the roster plus „Ch“.
+    await tester.pumpWidget(kioskApp(
+      roster: [...players, const PlayerName(id: 'ch', displayName: 'Chalupa')],
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+
+    final tiles = find.byWidgetPredicate(
+      (w) => w.runtimeType.toString() == '_LetterTile',
+    );
+    expect(tiles, findsNWidgets(27));
+    expect(find.text('Ch'), findsOneWidget);
+    final perRow = <double, int>{};
+    for (final e in tiles.evaluate()) {
+      final y = tester.getTopLeft(find.byWidget(e.widget)).dy;
+      perRow[y] = (perRow[y] ?? 0) + 1;
+    }
+    final counts = (perRow.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key)))
+        .map((e) => e.value)
+        .toList();
+    expect(counts.length, greaterThan(1));
+    expect(counts.reduce((a, b) => a > b ? a : b) -
+        counts.reduce((a, b) => a < b ? a : b), lessThanOrEqualTo(1));
+    // Top to bottom, never fewer than the row above.
+    for (var i = 1; i < counts.length; i++) {
+      expect(counts[i], greaterThanOrEqualTo(counts[i - 1]));
+    }
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
+
+  testWidgets('the picker note is as big as the hint above the letters, or '
+      'as big as the admin sets it (0075)', (tester) async {
+    double size(String text) => tester
+        .widget<Text>(find.text(text))
+        .style!
+        .fontSize!;
+    const note = 'Odhlásit se tu nedá.';
+    await tester.pumpWidget(kioskApp(kioskPickerNote: note));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    final hint = tester
+        .widget<Text>(find.text(firstLetterHint))
+        .style!
+        .fontSize!;
+    expect(size(note), greaterThanOrEqualTo(hint));
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: note, kioskWarningFontSize: 30),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(size(note), 30);
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
 
   testWidgets('g: NamePicker renders dark even when the app theme is light', (
     tester,
@@ -1524,6 +1622,16 @@ void main() {
       expect(find.byType(AlertDialog), findsOneWidget);
       // The score still renders non-interactively.
       final dialog = find.byType(AlertDialog);
+      // The kiosk's width for the list (0075): 560 unless the admin says.
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.byWidgetPredicate(
+            (w) => w is SizedBox && w.width == 560,
+          ),
+        ),
+        findsOneWidget,
+      );
       expect(
         find.descendant(of: dialog, matching: find.text('5 : 3')),
         findsOneWidget,

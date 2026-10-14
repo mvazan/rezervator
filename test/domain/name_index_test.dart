@@ -37,6 +37,53 @@ void main() {
         unorderedEquals(['Novák Jan', 'Novotná Eva']));
   });
 
+  test('balancedRows: even rows, the bottom ones take the odd tile', () {
+    expect(balancedRows(26, 14), [13, 13]);
+    expect(balancedRows(27, 14), [13, 14]);
+    expect(balancedRows(15, 14), [7, 8]);
+    expect(balancedRows(14, 14), [14]);
+    expect(balancedRows(29, 14), [9, 10, 10]);
+    expect(balancedRows(3, 0), [1, 1, 1]);
+    expect(balancedRows(0, 14), isEmpty);
+  });
+
+  group('Ch is a letter of its own', () {
+    final roster = [
+      p('Cibulka'), p('Cyril'), p('Chalupa'), p('chmel'), p('Hora'),
+      p('Ida'), p('Schovanec'), p('Scott'),
+    ];
+
+    test('first letters: C and Ch apart, Ch after H', () {
+      final node = nameIndex(players: roster, prefix: '', capacity: 3);
+      expect((node as PrefixesNode).prefixes, ['C', 'H', 'CH', 'I', 'S']);
+    });
+
+    test('C keeps its own names, Ch its own', () {
+      final c = nameIndex(players: roster, prefix: 'C', capacity: 5);
+      expect((c as NamesNode).players.map((x) => x.displayName),
+          ['Cibulka', 'Cyril']);
+      final ch = nameIndex(players: roster, prefix: 'CH', capacity: 5);
+      expect((ch as NamesNode).players.map((x) => x.displayName),
+          ['Chalupa', 'chmel']);
+    });
+
+    test('inside a name too: Sch… is S, then Ch', () {
+      final s = nameIndex(players: roster, prefix: 'S', capacity: 1);
+      expect((s as PrefixesNode).prefixes, ['SC', 'SCH']);
+      final sc = nameIndex(players: roster, prefix: 'SC', capacity: 5);
+      expect((sc as NamesNode).players.map((x) => x.displayName), ['Scott']);
+    });
+
+    test('labels and going back treat Ch as one letter', () {
+      expect(nameIndexLabel('CH'), 'Ch');
+      expect(nameIndexLabel('SCH'), 'Ch');
+      expect(nameIndexLabel('SC'), 'C');
+      expect(nameIndexParent('SCH'), 'S');
+      expect(nameIndexParent('CH'), '');
+      expect(nameIndexParent('NO'), 'N');
+    });
+  });
+
   test('prefix matching is case-insensitive', () {
     final node = nameIndex(players: players, prefix: 'd', capacity: 10);
     expect(node, isA<NamesNode>());

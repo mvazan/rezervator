@@ -41,7 +41,9 @@ import '../../../core/push_screen.dart';
 /// trophy): a tap closes the dialog and plays it in the kiosk's stream
 /// window. Only without [interactive] — the app keeps the browser.
 /// [pulseLive] false keeps the live badge still (the kiosk's „Opakující se
-/// animace“ off).
+/// animace“ off). [width] is the list's: the app's 340, the kiosk's as its
+/// admin sets it (0075) — never past the screen, the dialog's own insets
+/// keep it in.
 Future<void> showDayMatchesDialog(
   BuildContext context,
   Day date,
@@ -51,6 +53,7 @@ Future<void> showDayMatchesDialog(
   void Function(PrioritySlot match)? onOpenMatch,
   void Function(PrioritySlot match)? onPlayVideo,
   bool pulseLive = true,
+  double width = 340,
 }) {
   if (events.isEmpty) return Future.value();
   // Captured before the dialog opens: the same Navigator that will host the
@@ -65,7 +68,7 @@ Future<void> showDayMatchesDialog(
       return AlertDialog(
         title: Text(dayFull(date)),
         content: SizedBox(
-          width: 340,
+          width: width,
           child: SingleChildScrollView(
             child: Consumer(
               builder: (context, ref, _) {

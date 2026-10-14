@@ -12169,4 +12169,29 @@ begin
   raise notice 'OK: the warning and the picker note take up to 300 characters, not blank (0074)';
 end $$;
 
+-- 0075: the notices' font size and the day dialog's width keep to their
+-- ranges and off the public overview. 0075 runs twice (it re-runs).
+\ir ../migrations/0075_kiosk_warning_font_day_width.sql
+\ir ../migrations/0075_kiosk_warning_font_day_width.sql
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_warning_font_size = 41 where tenant_id = v_a;
+    raise exception 'FAIL: a notice font size of 41 px was accepted (0075)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_day_matches_width = 300 where tenant_id = v_a;
+    raise exception 'FAIL: a day dialog 300 px wide was accepted (0075)';
+  exception when check_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ?| array[
+       'kiosk_warning_font_size', 'kiosk_day_matches_width'] then
+    raise exception 'FAIL: the public overview hands out a 0075 setting';
+  end if;
+  raise notice 'OK: the notice font and the day dialog width keep to their ranges, off the public overview (0075)';
+end $$;
+
 rollback;

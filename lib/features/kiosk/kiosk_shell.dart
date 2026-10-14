@@ -139,6 +139,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final picked = await showNamePicker(
       context,
       brightness: kioskDark ? Brightness.dark : Brightness.light,
+      wrap: _touchable,
     );
     if (!mounted) return;
     setState(() {
@@ -534,6 +535,8 @@ class _StatusBar extends ConsumerWidget {
     // beside the clock — today's matches, the info line and the notices
     // step aside, so nobody reads past it.
     final warning = ref.watch(settingsProvider).value?.kioskWarning;
+    final warningFontSize =
+        ref.watch(settingsProvider).value?.kioskWarningFontSize ?? 22;
     final info = warning != null ? '' : _infoLine(ref, todayDay);
     final todays = warning != null
         ? const <PrioritySlot>[]
@@ -596,7 +599,13 @@ class _StatusBar extends ConsumerWidget {
                 children: [
                   // The admin's warning: alone in the bar's middle.
                   if (warning != null)
-                    Expanded(child: KioskWarning(text: warning, maxLines: 3)),
+                    Expanded(
+                      child: KioskWarning(
+                        text: warning,
+                        maxLines: 4,
+                        fontSize: warningFontSize.toDouble(),
+                      ),
+                    ),
                   // Today's matches, one tap target each: a match with a score
                   // opens its Zápis, as everywhere else on the kiosk; one
                   // with a video and no score yet, its stream.

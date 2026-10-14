@@ -51,25 +51,32 @@ const firstLetterHint =
     'přezdívku nemáš.';
 
 /// The widest the admin's note under the letters gets: a wide screen does
-/// not stretch it into one line nobody reads to the end (three lines of its
-/// 18 px bold hold the column's 300 characters at this width).
+/// not stretch it into one line nobody reads to the end (four lines of its
+/// default 22 px bold hold the column's 300 characters at this width).
 const _noteMaxWidth = 1000.0;
 
 /// Lines the note may take before an ellipsis: its end says where to
 /// cancel, so a narrower screen gets more lines rather than a cut — the
 /// default text keeps whole down to a phone, 300 characters down to a
 /// portrait tablet.
-const _noteMaxLines = 6;
+const _noteMaxLines = 9;
 
+/// [wrap] is the kiosk shell's: it counts a touch on the picker for the
+/// idle timer, so a visitor still looking for their name is not sent back
+/// to the board mid-search (the reset closes the picker with every other
+/// dialog).
 Future<PlayerName?> showNamePicker(
   BuildContext context, {
   Brightness brightness = Brightness.dark,
+  Widget Function(Widget child) wrap = _unwrapped,
 }) {
   return showDialog<PlayerName>(
     context: context,
-    builder: (_) => NamePicker(brightness: brightness),
+    builder: (_) => wrap(NamePicker(brightness: brightness)),
   );
 }
+
+Widget _unwrapped(Widget child) => child;
 
 class NamePicker extends ConsumerStatefulWidget {
   const NamePicker({super.key, this.brightness = Brightness.dark});
@@ -97,8 +104,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
 
   void _drillInto(String prefix) => setState(() => _prefix = prefix);
 
-  void _back() =>
-      setState(() => _prefix = _prefix.substring(0, _prefix.length - 1));
+  void _back() => setState(() => _prefix = nameIndexParent(_prefix));
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +193,9 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     final note = ref.watch(
       settingsProvider.select((s) => s.value?.kioskPickerNote),
     );
+    final noteSize = ref.watch(
+      settingsProvider.select((s) => s.value?.kioskWarningFontSize ?? 22),
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
@@ -239,25 +248,13 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                               ),
                               const SizedBox(height: 24),
                             ],
-                            Wrap(
-                              spacing: _tileGap,
-                              runSpacing: _tileGap,
-                              alignment: WrapAlignment.center,
-                              children: [
-                                for (final prefix in prefixes)
-                                  _LetterTile(
-                                    letter:
-                                        prefix.substring(prefix.length - 1),
-                                    onTap: () => _drillInto(prefix),
-                                  ),
-                              ],
-                            ),
+                            _letterRows(prefixes, constraints.maxWidth),
                             // The admin's note under the letters: the hint
                             // and the letters are what the page is for, the
                             // note is for whoever came to cancel. The later
                             // pages go without it.
                             if (_prefix.isEmpty && note != null)
-                              ..._note(note),
+                              ..._note(note, noteSize),
                           ],
                         ),
                       // A small alley (up to `_capacity` players) opens on
@@ -269,7 +266,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                           children: [
                             _nameGrid(context, players, constraints.maxWidth),
                             if (_prefix.isEmpty && note != null)
-                              ..._note(note),
+                              ..._note(note, noteSize),
                           ],
                         ),
                     },
@@ -283,12 +280,49 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     );
   }
 
+  /// The letters in even rows ([balancedRows]): a Wrap fills each row to
+  /// the edge and leaves the rest on a short last one, which reads as a
+  /// grid with letters missing.
+  Widget _letterRows(List<String> prefixes, double width) {
+    final fit = ((width + _tileGap) / (_letterTile + _tileGap)).floor();
+    final rows = <List<String>>[];
+    var start = 0;
+    for (final count in balancedRows(prefixes.length, fit)) {
+      rows.add(prefixes.sublist(start, start + count));
+      start += count;
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) const SizedBox(height: _tileGap),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < rows[r].length; i++) ...[
+                if (i > 0) const SizedBox(width: _tileGap),
+                _LetterTile(
+                  letter: nameIndexLabel(rows[r][i]),
+                  onTap: () => _drillInto(rows[r][i]),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
   /// The admin's note (0070) under the first page's tiles.
-  List<Widget> _note(String note) => [
+  List<Widget> _note(String note, int size) => [
         const SizedBox(height: 24),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: _noteMaxWidth),
-          child: KioskWarning(text: note, maxLines: _noteMaxLines),
+          child: KioskWarning(
+            text: note,
+            maxLines: _noteMaxLines,
+            fontSize: size.toDouble(),
+          ),
         ),
       ];
 

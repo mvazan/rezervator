@@ -90,7 +90,7 @@ void main() {
     });
   }
 
-  testWidgets('a 300 character warning is whole in the status bar (3 lines)',
+  testWidgets('a 300 character warning is whole in the status bar (4 lines at 22 px)',
       (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -104,7 +104,7 @@ void main() {
         home: Scaffold(
           body: Row(
             children: [
-              Expanded(child: KioskWarning(text: text, maxLines: 3)),
+              Expanded(child: KioskWarning(text: text, maxLines: 4)),
               const SizedBox(width: 300),
             ],
           ),
