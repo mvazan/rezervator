@@ -777,6 +777,43 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('the first letters stand in even rows, the bottom ones '
+      'taking the odd letter', (tester) async {
+    // 27 first letters: the 26 of the roster plus „Ch“.
+    await tester.pumpWidget(kioskApp(
+      roster: [...players, const PlayerName(id: 'ch', displayName: 'Chalupa')],
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+
+    final tiles = find.byWidgetPredicate(
+      (w) => w.runtimeType.toString() == '_LetterTile',
+    );
+    expect(tiles, findsNWidgets(27));
+    expect(find.text('Ch'), findsOneWidget);
+    final perRow = <double, int>{};
+    for (final e in tiles.evaluate()) {
+      final y = tester.getTopLeft(find.byWidget(e.widget)).dy;
+      perRow[y] = (perRow[y] ?? 0) + 1;
+    }
+    final counts = (perRow.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key)))
+        .map((e) => e.value)
+        .toList();
+    expect(counts.length, greaterThan(1));
+    expect(counts.reduce((a, b) => a > b ? a : b) -
+        counts.reduce((a, b) => a < b ? a : b), lessThanOrEqualTo(1));
+    // Top to bottom, never fewer than the row above.
+    for (var i = 1; i < counts.length; i++) {
+      expect(counts[i], greaterThanOrEqualTo(counts[i - 1]));
+    }
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
+
   testWidgets('g: NamePicker renders dark even when the app theme is light', (
     tester,
   ) async {

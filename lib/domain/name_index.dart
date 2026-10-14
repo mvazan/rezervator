@@ -62,6 +62,19 @@ class NamesNode extends NameIndexNode {
   final List<PlayerName> players;
 }
 
+/// How many of [count] tiles go on each row when at most [maxPerRow] fit
+/// on one: as few rows as that allows, as even as they can be, and the
+/// rows that get one more are the bottom ones — 7 letters on two rows are
+/// 3 over 4, never a full row over a stray one.
+List<int> balancedRows(int count, int maxPerRow) {
+  if (count <= 0) return const [];
+  final perRow = maxPerRow < 1 ? 1 : maxPerRow;
+  final rows = (count + perRow - 1) ~/ perRow;
+  final base = count ~/ rows;
+  final extra = count % rows;
+  return [for (var r = 0; r < rows; r++) base + (r >= rows - extra ? 1 : 0)];
+}
+
 NameIndexNode nameIndex({
   required List<PlayerName> players,
   required String prefix,

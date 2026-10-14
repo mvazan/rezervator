@@ -245,18 +245,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                               ),
                               const SizedBox(height: 24),
                             ],
-                            Wrap(
-                              spacing: _tileGap,
-                              runSpacing: _tileGap,
-                              alignment: WrapAlignment.center,
-                              children: [
-                                for (final prefix in prefixes)
-                                  _LetterTile(
-                                    letter: nameIndexLabel(prefix),
-                                    onTap: () => _drillInto(prefix),
-                                  ),
-                              ],
-                            ),
+                            _letterRows(prefixes, constraints.maxWidth),
                             // The admin's note under the letters: the hint
                             // and the letters are what the page is for, the
                             // note is for whoever came to cancel. The later
@@ -285,6 +274,39 @@ class _NamePickerState extends ConsumerState<NamePicker> {
           ),
         ],
       ),
+    );
+  }
+
+  /// The letters in even rows ([balancedRows]): a Wrap fills each row to
+  /// the edge and leaves the rest on a short last one, which reads as a
+  /// grid with letters missing.
+  Widget _letterRows(List<String> prefixes, double width) {
+    final fit = ((width + _tileGap) / (_letterTile + _tileGap)).floor();
+    final rows = <List<String>>[];
+    var start = 0;
+    for (final count in balancedRows(prefixes.length, fit)) {
+      rows.add(prefixes.sublist(start, start + count));
+      start += count;
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) const SizedBox(height: _tileGap),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < rows[r].length; i++) ...[
+                if (i > 0) const SizedBox(width: _tileGap),
+                _LetterTile(
+                  letter: nameIndexLabel(rows[r][i]),
+                  onTap: () => _drillInto(rows[r][i]),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
     );
   }
 

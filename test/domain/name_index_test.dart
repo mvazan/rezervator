@@ -37,6 +37,16 @@ void main() {
         unorderedEquals(['Novák Jan', 'Novotná Eva']));
   });
 
+  test('balancedRows: even rows, the bottom ones take the odd tile', () {
+    expect(balancedRows(26, 14), [13, 13]);
+    expect(balancedRows(27, 14), [13, 14]);
+    expect(balancedRows(15, 14), [7, 8]);
+    expect(balancedRows(14, 14), [14]);
+    expect(balancedRows(29, 14), [9, 10, 10]);
+    expect(balancedRows(3, 0), [1, 1, 1]);
+    expect(balancedRows(0, 14), isEmpty);
+  });
+
   group('Ch is a letter of its own', () {
     final roster = [
       p('Cibulka'), p('Cyril'), p('Chalupa'), p('chmel'), p('Hora'),
