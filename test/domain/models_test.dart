@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/domain/kiosk_header.dart';
 import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
 
@@ -360,6 +361,69 @@ void main() {
       final decoded = jsonDecode(column);
       expect(decoded, KioskPanels.defaults.toJson());
       expect(KioskPanels.fromJson(decoded), KioskPanels.defaults);
+    });
+
+    test('fromJson reads the header\'s modules (0081); the default layout '
+        'when absent', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      final read = ScheduleSettings.fromJson({
+        ...base,
+        'kiosk_header': {
+          'modules': [
+            {'id': 'weather', 'side': 'left'},
+            {'id': 'nameday', 'side': 'off'},
+            {'id': 'duty', 'side': 'right'},
+            {'id': 'notices', 'side': 'right'},
+          ],
+        },
+      });
+      expect(read.kioskHeader.sideOf(KioskHeaderModule.weather),
+          PanelSide.left);
+      expect(
+        [for (final m in read.kioskHeader.modulesOn(PanelSide.right)) m.id],
+        ['duty', 'notices'],
+      );
+      expect(ScheduleSettings.fromJson(base).kioskHeader, KioskHeader.defaults);
+      expect(ScheduleSettings.defaults.kioskHeader, KioskHeader.defaults);
+    });
+
+    test('fromJson reads the weather\'s title (0081) trimmed; blank or '
+        'absent is none', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      ScheduleSettings settings(Object? title) =>
+          ScheduleSettings.fromJson({...base, 'kiosk_weather_title': title});
+      expect(settings('  Dnes v Brně  ').kioskWeatherTitle, 'Dnes v Brně');
+      expect(settings('   ').kioskWeatherTitle, isNull);
+      expect(settings(null).kioskWeatherTitle, isNull);
+      expect(ScheduleSettings.fromJson(base).kioskWeatherTitle, isNull);
+      expect(ScheduleSettings.defaults.kioskWeatherTitle, isNull);
+    });
+
+    test('a cached row from before 0081, with the dropped header switches '
+        'still in it, reads as the default header', () {
+      // No conversion in the app: the old switches are 0081's business.
+      final s = ScheduleSettings.fromJson({
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+        'kiosk_weather': true,
+        'kiosk_nameday': true,
+        'kiosk_duty_header': true,
+        'kiosk_notices_header': false,
+      });
+      expect(s.kioskHeader, KioskHeader.defaults);
+      expect(s.kioskWeatherTitle, isNull);
     });
   });
 

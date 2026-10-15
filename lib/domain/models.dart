@@ -2,6 +2,7 @@
 /// Pure Dart — no Flutter imports — so all logic on top is unit-testable.
 library;
 
+import 'kiosk_header.dart';
 import 'kiosk_layout.dart';
 
 /// A wall-clock time of day, independent of Flutter's TimeOfDay.
@@ -801,6 +802,8 @@ class ScheduleSettings {
     this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
     this.kioskPanels = KioskPanels.defaults,
     this.kioskNoticesHeader = true,
+    this.kioskHeader = KioskHeader.defaults,
+    this.kioskWeatherTitle,
     this.kioskPickerMode = KioskPickerMode.letters,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
@@ -910,6 +913,15 @@ class ScheduleSettings {
   /// (0077, `kiosk_notices_header`) — whether the notices are in a panel
   /// too is [kioskPanels]' business.
   final bool kioskNoticesHeader;
+
+  /// The header's modules (0081, `kiosk_header`): which of the weather,
+  /// the name day, the duty and the notices stand left of the centre,
+  /// which right and which are off, in their order.
+  final KioskHeader kioskHeader;
+
+  /// The weather module's title (0081), typed by the admin („Dnes v
+  /// Brně“); null shows [kioskWeatherDefaultTitle].
+  final String? kioskWeatherTitle;
 
   /// How the kiosk's name picker starts (0076).
   final KioskPickerMode kioskPickerMode;
@@ -1054,6 +1066,11 @@ class ScheduleSettings {
         ),
         kioskPanels: KioskPanels.fromJson(json['kiosk_panels']),
         kioskNoticesHeader: json['kiosk_notices_header'] as bool? ?? true,
+        kioskHeader: KioskHeader.fromJson(json['kiosk_header']),
+        kioskWeatherTitle: switch (json['kiosk_weather_title']) {
+          final String t when t.trim().isNotEmpty => t.trim(),
+          _ => null,
+        },
         kioskPickerMode: KioskPickerMode.parse(
           json['kiosk_picker_mode'] as String?,
         ),
