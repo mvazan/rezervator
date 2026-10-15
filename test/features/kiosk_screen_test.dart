@@ -330,6 +330,7 @@ void main() {
       double? lat,
       double? lon,
       String? title,
+      Set<KioskWeatherItem> items = kioskWeatherItemsDefault,
       bool todays = true,
     }) => ScheduleSettings(
       laneCount: 4,
@@ -341,6 +342,7 @@ void main() {
       kioskWeatherLat: lat,
       kioskWeatherLon: lon,
       kioskWeatherTitle: title,
+      kioskWeatherItems: items,
       kioskTodaysMatches: todays,
       tenantId: 't',
     );
@@ -476,7 +478,8 @@ void main() {
             'počasí. Svátek podle českého kalendáře; ve státní svátek bez '
             'jména jeho název. Služba podle plánu ve Správě → Služby; ťuk '
             'ukáže plán. Nadpis počasí je místo („Brno“), kiosk za něj dá '
-            'dvojtečku.',
+            'dvojtečku. Teplotu teď kiosk ukáže vždy, ostatní údaje vybereš '
+            'u počasí.',
           ),
         ),
         findsOneWidget,
@@ -664,6 +667,120 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(inTile('Nadpis počasí', 'Dnes v Brně'), findsOneWidget);
+    });
+
+    group('„Údaje počasí“ (0082)', () {
+      const labels = [
+        'Nejvyšší a nejnižší',
+        'Pocitová teplota',
+        'Vítr',
+        'Srážky',
+      ];
+      Finder chip(String label) => find.widgetWithText(FilterChip, label);
+      bool selected(WidgetTester tester, String label) =>
+          tester.widget<FilterChip>(chip(label)).selected;
+
+      testWidgets('under the weather\'s title while the weather is placed: '
+          'four chips in the kiosk\'s order, the high and low and the rain '
+          'picked by default; none while it is off', (tester) async {
+        tall(tester);
+        await tester.pumpWidget(app(settings: laid(KioskHeader.defaults)));
+        await tester.pumpAndSettle();
+        expect(find.text('Údaje počasí'), findsNothing);
+        expect(find.byType(FilterChip), findsNothing);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(app(settings: laid(weatherLeft)));
+        await tester.pumpAndSettle();
+        final items = find.widgetWithText(ListTile, 'Údaje počasí');
+        expect(inSection('Záhlaví', items), findsOneWidget);
+        expect(
+          tester.getTopLeft(items).dy,
+          greaterThan(
+            tester
+                .getTopLeft(find.widgetWithText(ListTile, 'Nadpis počasí'))
+                .dy,
+          ),
+        );
+        // In reading order: further right on a line, or on a later one.
+        Offset at(String label) => tester.getTopLeft(chip(label));
+        for (var i = 0; i < labels.length; i++) {
+          expect(
+            find.descendant(of: items, matching: chip(labels[i])),
+            findsOneWidget,
+            reason: labels[i],
+          );
+          if (i > 0) {
+            final (before, here) = (at(labels[i - 1]), at(labels[i]));
+            expect(
+              here.dy > before.dy ||
+                  (here.dy == before.dy && here.dx > before.dx),
+              isTrue,
+              reason: labels[i],
+            );
+          }
+        }
+        expect(
+          [for (final l in labels) selected(tester, l)],
+          [true, false, false, true],
+        );
+      });
+
+      testWidgets('a tap PATCHes the whole set in the kiosk\'s order', (
+        tester,
+      ) async {
+        tall(tester);
+        await tester.pumpWidget(app(settings: laid(weatherLeft)));
+        await tester.pumpAndSettle();
+        Future<void> tap(String label) async {
+          await tester.ensureVisible(chip(label));
+          await tester.tap(chip(label));
+          await tester.pumpAndSettle();
+        }
+
+        // The settings stay as laid: each tap starts from the default.
+        await tap('Pocitová teplota');
+        expect(lastPatch(), {
+          'kiosk_weather_items': ['range', 'feels', 'rain'],
+        });
+        await tap('Vítr');
+        expect(lastPatch(), {
+          'kiosk_weather_items': ['range', 'wind', 'rain'],
+        });
+        await tap('Nejvyšší a nejnižší');
+        expect(lastPatch(), {
+          'kiosk_weather_items': ['rain'],
+        });
+        expect(patches(), 3);
+      });
+
+      testWidgets('all off is the temperature alone; one back on', (
+        tester,
+      ) async {
+        tall(tester);
+        await tester.pumpWidget(
+          app(settings: laid(weatherLeft, items: {KioskWeatherItem.wind})),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          [for (final l in labels) selected(tester, l)],
+          [false, false, true, false],
+        );
+        await tester.ensureVisible(chip('Vítr'));
+        await tester.tap(chip('Vítr'));
+        await tester.pumpAndSettle();
+        expect(lastPatch(), {'kiosk_weather_items': <String>[]});
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(app(settings: laid(weatherLeft, items: {})));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(chip('Srážky'));
+        await tester.tap(chip('Srážky'));
+        await tester.pumpAndSettle();
+        expect(lastPatch(), {
+          'kiosk_weather_items': ['rain'],
+        });
+      });
     });
 
     testWidgets('„Nadpis počasí“: typed in a dialog starting from the '

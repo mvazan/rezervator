@@ -655,6 +655,31 @@ class KioskSettingsScreen extends ConsumerWidget {
     });
   }
 
+  /// A value the weather may show beside the temperature now (0082), as
+  /// its chip under „Údaje počasí“ names it.
+  static String _weatherItemLabel(KioskWeatherItem item) => switch (item) {
+    KioskWeatherItem.range => 'Nejvyšší a nejnižší',
+    KioskWeatherItem.feels => 'Pocitová teplota',
+    KioskWeatherItem.wind => 'Vítr',
+    KioskWeatherItem.rain => 'Srážky',
+  };
+
+  /// [item] on or off among the weather's values — the whole set PATCHed,
+  /// in the enum's order.
+  Future<void> _weatherItem(
+    BuildContext context,
+    ScheduleSettings settings,
+    KioskWeatherItem item,
+    bool on,
+  ) {
+    final items = settings.kioskWeatherItems;
+    return _panel(context, settings, {
+      'kiosk_weather_items': kioskWeatherItemsToJson(
+        on ? {...items, item} : items.difference({item}),
+      ),
+    });
+  }
+
   /// The „Poloha“ column of the Záhlaví table: room for „Uprostřed“ in a
   /// list and for „Vlevo, vždy první“.
   static const _headerSideWidth = 170.0;
@@ -662,7 +687,7 @@ class KioskSettingsScreen extends ConsumerWidget {
   /// „Záhlaví“ (0082): the table that puts the header's modules left or
   /// right of the centre and orders them — the clock and today's matches
   /// with their fixed places as its first and last rows — then the
-  /// weather's place and title while the weather is in the header.
+  /// weather's place, title and values while the weather is in the header.
   Widget _headerSection(
     BuildContext context,
     ScheduleSettings? settings,
@@ -769,6 +794,33 @@ class KioskSettingsScreen extends ConsumerWidget {
               child: const Text('Upravit…'),
             ),
           ),
+          // What the weather shows beside the temperature now, which it
+          // always shows (0082).
+          ListTile(
+            key: const ValueKey('kiosk-weather-items'),
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.thermostat),
+            title: const Text('Údaje počasí'),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final item in KioskWeatherItem.values)
+                    FilterChip(
+                      label: Text(_weatherItemLabel(item)),
+                      selected: (settings?.kioskWeatherItems ??
+                              kioskWeatherItemsDefault)
+                          .contains(item),
+                      onSelected: settings == null
+                          ? null
+                          : (on) => _weatherItem(context, settings, item, on),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ],
         Padding(
           padding: const EdgeInsets.only(top: 4),
@@ -778,7 +830,8 @@ class KioskSettingsScreen extends ConsumerWidget {
             'počasí. Svátek podle českého kalendáře; ve státní svátek bez '
             'jména jeho název. Služba podle plánu ve Správě → Služby; ťuk '
             'ukáže plán. Nadpis počasí je místo („Brno“), kiosk za něj dá '
-            'dvojtečku.',
+            'dvojtečku. Teplotu teď kiosk ukáže vždy, ostatní údaje vybereš '
+            'u počasí.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
