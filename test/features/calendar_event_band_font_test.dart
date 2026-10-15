@@ -33,7 +33,7 @@ void main() {
     (text: '🏆 $time', wraps: true),
     bandGap,
     (text: home, wraps: true),
-    (text: '–', wraps: false),
+    (text: 'x', wraps: false),
     (text: away, wraps: true),
   ];
 

@@ -59,7 +59,7 @@ const appChangelog = <Release>[
     'Kiosk, hraný zápas v panelu: ťuk na „⟳ před … min“ obnoví výsledky; '
         'ikona se po ťuknutí točí, dokud nová data nedorazí.',
     'Kalendář a kiosk: zápas v rozvrhu má nahoře pohár a vedle něj čas, '
-        'pod volným řádkem domácí, pomlčku a hosty pod sebou.',
+        'pod volným řádkem domácí, „x“ a hosty pod sebou.',
     'Zápasy dne (ťuk na záhlaví dne): pod zápasem čas a kuželna, kde se '
         'hraje, pod tím soutěž a kolo. Výsledek vpravo je výraznější '
         'a kuželky stojí pod ním, na řádku soutěže.',

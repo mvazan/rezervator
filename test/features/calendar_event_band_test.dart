@@ -16,7 +16,7 @@ void main() {
     (text: cup, wraps: true),
     bandGap,
     (text: home, wraps: true),
-    (text: '–', wraps: false),
+    (text: 'x', wraps: false),
     (text: away, wraps: true),
   ];
 
@@ -50,12 +50,12 @@ void main() {
       .maxLines;
 
   testWidgets('a tall band: the cup with the time, a blank line, then home, '
-      'dash and away each on a line of its own, in that order', (tester) async {
+      'x and away each on a line of its own, in that order', (tester) async {
     await tester.pumpWidget(band(width: 160, height: 300));
     final rows = [
       findEmojiText(cup),
       find.text(home),
-      find.text('–'),
+      find.text('x'),
       find.text(away),
     ];
     for (final row in rows) {
@@ -76,14 +76,14 @@ void main() {
   });
 
   testWidgets('the lines to spare go to the names and the cup\'s line: a '
-      'long name may take several; the dash keeps to one', (tester) async {
+      'long name may take several; the x keeps to one', (tester) async {
     // 300 px of 14 px lines: 21; five rows leave 16, five more each of the
     // three that wrap.
     await tester.pumpWidget(band(width: 60, height: 300));
     expect(maxLinesOf(tester, home), 6);
     expect(maxLinesOf(tester, away), 6);
     expect(maxLinesOf(tester, cup), 6);
-    expect(maxLinesOf(tester, '–'), 1);
+    expect(maxLinesOf(tester, 'x'), 1);
     // The narrow column wraps the name instead of cutting it.
     expect(tester.getSize(find.text(home)).height, greaterThan(20));
 
@@ -95,10 +95,10 @@ void main() {
   testWidgets('a line short of the stack: the blank line goes first', (
     tester,
   ) async {
-    // Four lines: the cup's, home, dash, away — no blank line between.
+    // Four lines: the cup's, home, x, away — no blank line between.
     await tester.pumpWidget(band(width: 160, height: 60));
     expect(findEmojiText(cup), findsOneWidget);
-    expect(find.text('–'), findsOneWidget);
+    expect(find.text('x'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text(home)).dy -
           tester.getBottomLeft(findEmojiText(cup)).dy,
@@ -111,7 +111,7 @@ void main() {
   ) async {
     await tester.pumpWidget(band(width: 160, height: 45));
     expect(findEmojiText(oneLine), findsOneWidget);
-    expect(find.text('–'), findsNothing);
+    expect(find.text('x'), findsNothing);
   });
 
   testWidgets('a larger font: bigger text, and a taller band before it '

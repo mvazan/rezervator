@@ -13,7 +13,7 @@ String slotEventLabel(PrioritySlot m) =>
 
 /// One line of a stacked band: its [text], and whether it may wrap onto
 /// more lines (a team's name, the cup with the time in a narrow column) or
-/// keeps to one (the dash). An empty [text] is [bandGap].
+/// keeps to one (the „x“). An empty [text] is [bandGap].
 typedef BandLine = ({String text, bool wraps});
 
 /// A blank line between a band's lines — the first a band gives up when it
@@ -21,7 +21,7 @@ typedef BandLine = ({String text, bool wraps});
 const BandLine bandGap = (text: '', wraps: false);
 
 /// A match band's text in lines — the cup and the time, a blank line, then
-/// the home team, a dash, the away team — so a narrow column never breaks
+/// the home team, an „x“, the away team — so a narrow column never breaks
 /// a team's name in half to fit „A – B“ on two lines, and a long name may
 /// take several lines of its own. Null for anything but a match with both
 /// teams (a blockage, a match typed with one name): those keep
@@ -35,7 +35,7 @@ List<BandLine>? matchBandLines(PrioritySlot m) =>
         ),
         bandGap,
         (text: m.homeTeam, wraps: true),
-        (text: '–', wraps: false),
+        (text: 'x', wraps: false),
         (text: m.awayTeam, wraps: true),
       ]
     : null;

@@ -534,7 +534,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   helper:
                       'Pásy zápasů, blokací a pronájmů na tabuli; appka má '
                       '10. Kde se pás vejde, má zápas nahoře pohár s časem '
-                      'a pod mezerou domácí, pomlčku a hosty pod sebou; '
+                      'a pod mezerou domácí, „x“ a hosty pod sebou; '
                       'dlouhý název se zalomí.',
                 ),
                 _number(

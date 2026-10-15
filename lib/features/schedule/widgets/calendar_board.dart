@@ -318,7 +318,7 @@ class CalendarEventBand extends StatelessWidget {
   final bool bold;
 
   /// The same, line by line ([matchBandLines]: the cup with the time, a
-  /// blank line, home, dash, away) — shown when the band is tall enough for
+  /// blank line, home, „x“, away) — shown when the band is tall enough for
   /// every line, else without its blank lines ([bandGap]) when that is
   /// enough; a team's name then wraps within its own line, onto as many as
   /// the band has to spare, rather than the pair breaking in the middle of
