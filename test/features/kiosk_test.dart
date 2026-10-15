@@ -4275,6 +4275,176 @@ void main() {
       await finish(tester);
     });
 
+    // The notices' card, and its dots' decorations from left to right.
+    final noticesCard = find.ancestor(
+      of: drawerText('NÁSTĚNKA'),
+      matching: find.byType(KioskCard),
+    );
+    List<BoxDecoration> noticeDots(WidgetTester tester) => [
+      for (final c in tester.widgetList<Container>(
+        find.descendant(of: noticesCard, matching: find.byType(Container)),
+      ))
+        if (c.decoration case final BoxDecoration d
+            when d.shape == BoxShape.circle)
+          d,
+    ];
+
+    testWidgets('fresh notices (0080) in the card: the newest first with '
+        '„NOVÉ“ before its title, a stripe along the card and its dot in the '
+        'primary colour — a ring while it waits; an old one plain', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [
+            notice('1', 'Brigáda'),
+            notice(
+              '2',
+              'Turnaj',
+              posted: nowAt.subtract(const Duration(days: 1)),
+            ),
+          ],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final primary = Theme.of(
+        tester.element(find.byType(KioskPanelView)),
+      ).colorScheme.primary;
+      final chip = find.descendant(
+        of: noticesCard,
+        matching: find.byType(KioskNewChip),
+      );
+
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(chip, findsOneWidget);
+      expect(
+        tester.getRect(chip).right,
+        lessThan(tester.getRect(drawerText('Turnaj')).left),
+      );
+      expect(tester.widget<KioskCard>(noticesCard).stripe, primary);
+      expect(noticeDots(tester)[0].color, primary);
+      expect(noticeDots(tester)[1].color, isNot(primary));
+      expect(noticeDots(tester)[1].border, isNull);
+
+      // The old one's turn: plain — and the fresh one's dot a ring.
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+      expect(chip, findsNothing);
+      expect(tester.widget<KioskCard>(noticesCard).stripe, Colors.transparent);
+      expect(noticeDots(tester)[0].color, isNull);
+      expect((noticeDots(tester)[0].border! as Border).left.color, primary);
+      expect(noticeDots(tester)[1].color, primary);
+
+      await finish(tester);
+    });
+
+    testWidgets('fresh notices shown longer (0080): in the card a fresh one '
+        'stays two turns, an old one one — and no „NOVÉ“', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [
+            notice('1', 'Brigáda'),
+            notice(
+              '2',
+              'Turnaj',
+              posted: nowAt.subtract(const Duration(days: 1)),
+            ),
+          ],
+          drawerOpen: true,
+          noticesFresh: KioskNoticesFresh.longer,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(find.byType(KioskNewChip), findsNothing);
+      expect(tester.widget<KioskCard>(noticesCard).stripe, Colors.transparent);
+
+      // One turn (12 s) on: still the fresh one.
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      // Its second turn over: the old one, for one turn.
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('a notice posted while the kiosk runs shows at once, first — '
+        'in the card and in the status bar', (tester) async {
+      fullHd(tester);
+      final up = StreamController<List<Message>>();
+      addTearDown(up.close);
+      final before = [notice('1', 'Brigáda'), notice('2', 'Zámek')];
+      await tester.pumpWidget(app(noticesStream: up.stream, drawerOpen: true));
+      up.add(before);
+      await tester.pumpAndSettle();
+      expect(drawerText('Zámek'), findsOneWidget);
+
+      // A turn on, the older one shows ...
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+
+      // ... when a new one goes up: it is shown at once, in both places.
+      up.add([...before, notice('3', 'Turnaj', posted: nowAt)]);
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsNothing);
+      final bar = find.byType(KioskHeadline);
+      expect(
+        find.descendant(of: bar, matching: find.text('Turnaj')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: bar, matching: find.text('1/3')),
+        findsOneWidget,
+      );
+
+      await finish(tester);
+    });
+
+    testWidgets('notices taken down while the last one shows: the card shows '
+        'the last one left, its dot lit', (tester) async {
+      fullHd(tester);
+      final up = StreamController<List<Message>>();
+      addTearDown(up.close);
+      final three = [
+        notice('1', 'Brigáda'),
+        notice('2', 'Zámek'),
+        notice('3', 'Turnaj'),
+      ];
+      await tester.pumpWidget(app(noticesStream: up.stream, drawerOpen: true));
+      up.add(three);
+      await tester.pumpAndSettle();
+      // Back from the newest to the last of the three.
+      await tester.fling(drawerText('Turnaj'), const Offset(300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+
+      // Brigáda is taken down.
+      up.add(three.skip(1).toList());
+      await tester.pumpAndSettle();
+      expect(drawerText('Zámek'), findsOneWidget);
+      final primary = Theme.of(
+        tester.element(find.byType(KioskPanelView)),
+      ).colorScheme.primary;
+      final dots = noticeDots(tester);
+      expect(dots, hasLength(2));
+      expect(dots[0].color, isNot(primary));
+      expect(dots[1].color, primary);
+
+      await finish(tester);
+    });
+
     testWidgets('a whole notice is no link; only a cut one opens', (
       tester,
     ) async {

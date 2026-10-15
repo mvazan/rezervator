@@ -38,6 +38,7 @@ import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
 import 'kiosk_guide.dart' show KioskGuideCard;
+import 'kiosk_new_chip.dart';
 import 'kiosk_week.dart' show KioskWeekCard;
 
 const _resultRowHeight = 64.0;
@@ -294,6 +295,8 @@ class KioskPanelView extends ConsumerWidget {
       KioskModule.notices => _NoticesCard(
         notices: content.notices,
         turn: noticeTurn,
+        fresh: settings?.kioskNoticesFresh ?? KioskNoticesFresh.highlight,
+        freshDays: settings?.kioskNoticesFreshDays ?? 3,
         fill: !noticesAlone,
         onOpen: onOpenNotice,
       ),
@@ -570,6 +573,7 @@ class KioskCard extends StatelessWidget {
     required this.child,
     this.fill = false,
     this.action,
+    this.stripe,
   });
 
   final IconData icon;
@@ -580,6 +584,11 @@ class KioskCard extends StatelessWidget {
   /// At the right of the title row.
   final Widget? action;
 
+  /// A 4 px stripe of this colour along the card's left edge, drawn over
+  /// the card (it takes no room) and following its rounded corners — the
+  /// notices' card marks a fresh notice with it (0080). Null = none.
+  final Color? stripe;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -589,6 +598,13 @@ class KioskCard extends StatelessWidget {
         color: scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(14),
       ),
+      foregroundDecoration: switch (stripe) {
+        final color? => BoxDecoration(
+          border: Border(left: BorderSide(color: color, width: 4)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        null => null,
+      },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
@@ -758,27 +774,41 @@ const _noticeTitleStyle = TextStyle(fontSize: 20, fontWeight: FontWeight.w800);
 const _noticeBodyStyle = TextStyle(fontSize: 16, height: 1.3);
 const _noticeFooterHeight = 32.0;
 
-/// The notices, one at a time. A single notice just stays; several take
-/// turns every [turn], with dots to say how many there are. What does not
-/// fit the card is cut, and only then „Více“ offers the full text.
-class _NoticesCard extends StatefulWidget {
+/// Between „NOVÉ“ and the title of a fresh notice.
+const _chipGap = 8.0;
+
+/// The notices, one at a time, the newest first. A single notice just
+/// stays; several take turns, each a [turn] of its own — a fresh one
+/// (0080) twice as long when the admin wants it so — with dots to say how
+/// many there are; a notice newly on top shows at once. What does not fit
+/// the card is cut, and only then „Více“ offers the full text. While the
+/// admin highlights fresh notices, a fresh one wears „NOVÉ“ before its
+/// title, a stripe along the card's left edge and a dot of that colour.
+class _NoticesCard extends ConsumerStatefulWidget {
   const _NoticesCard({
     required this.notices,
     required this.turn,
+    required this.fresh,
+    required this.freshDays,
     required this.fill,
     required this.onOpen,
   });
 
+  /// Newest first (`kioskNotices`).
   final List<Message> notices;
   final Duration turn;
+
+  /// What a fresh notice gets (0080) and for how many days it is fresh.
+  final KioskNoticesFresh fresh;
+  final int freshDays;
   final bool fill;
   final void Function(Message notice) onOpen;
 
   @override
-  State<_NoticesCard> createState() => _NoticesCardState();
+  ConsumerState<_NoticesCard> createState() => _NoticesCardState();
 }
 
-class _NoticesCardState extends State<_NoticesCard> {
+class _NoticesCardState extends ConsumerState<_NoticesCard> {
   Timer? _timer;
   int _index = 0;
 
@@ -791,20 +821,47 @@ class _NoticesCardState extends State<_NoticesCard> {
   @override
   void didUpdateWidget(_NoticesCard old) {
     super.didUpdateWidget(old);
-    if (old.turn != widget.turn) _start();
+    final notices = widget.notices;
+    if (notices.firstOrNull?.id != old.notices.firstOrNull?.id) {
+      // A new notice on top (or the order changed): the newest at once,
+      // for a whole turn of its own.
+      _index = 0;
+      _start();
+    } else if (_index >= notices.length) {
+      // Fewer notices: the last one, so a dot is always lit.
+      _index = notices.isEmpty ? 0 : notices.length - 1;
+      _start();
+    } else if (old.turn != widget.turn ||
+        old.fresh != widget.fresh ||
+        old.freshDays != widget.freshDays) {
+      _start();
+    }
   }
 
+  /// A turn for the notice shown: one-shot, re-armed after every step —
+  /// the timer's or a swipe's — so each notice gets its own.
   void _start() {
     _timer?.cancel();
-    _timer = Timer.periodic(widget.turn, (_) => _step(1));
+    final notices = widget.notices;
+    if (notices.isEmpty) return;
+    _timer = Timer(
+      kioskNoticeTurn(
+        notices[_index.clamp(0, notices.length - 1)],
+        now: ref.read(nowProvider).value ?? DateTime.now(),
+        turn: widget.turn,
+        fresh: widget.fresh,
+        days: widget.freshDays,
+      ),
+      () => _step(1),
+    );
   }
 
   /// To the next ([direction] 1) or previous (-1) notice — on the timer or
-  /// by a swipe; either way the next turn is a whole [turn] away.
+  /// by a swipe; either way the next turn is a whole one away.
   void _step(int direction) {
-    if (!mounted || widget.notices.length < 2) return;
+    if (!mounted) return;
     final n = widget.notices.length;
-    setState(() => _index = (_index + direction) % n);
+    if (n > 1) setState(() => _index = (_index + direction) % n);
     _start();
   }
 
@@ -818,16 +875,31 @@ class _NoticesCardState extends State<_NoticesCard> {
   Widget build(BuildContext context) {
     final notices = widget.notices;
     final scheme = Theme.of(context).colorScheme;
-    final m = notices[_index.clamp(0, notices.length - 1)];
+    // Watched: a notice stops being fresh as the minutes go by.
+    final now = ref.watch(nowProvider).value ?? DateTime.now();
+    bool isNew(Message m) =>
+        widget.fresh.highlights && isFreshNotice(m, now, widget.freshDays);
+    final shown = _index.clamp(0, notices.length - 1);
+    final m = notices[shown];
+    final highlighted = isNew(m);
     return KioskCard(
       icon: Icons.campaign_outlined,
       title: 'NÁSTĚNKA',
       fill: widget.fill,
+      // Transparent for a plain notice rather than none: the card keeps
+      // its build from one notice to the next, and the notices their fade.
+      stripe: highlighted ? scheme.primary : Colors.transparent,
       child: _Swipe(
         onSwipe: _step,
         child: LayoutBuilder(
           builder: (context, box) {
-            final fit = _fitNotice(context, m, box);
+            final fit = _fitNotice(context, m, box, chip: highlighted);
+            final title = Text(
+              m.title ?? '',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: _noticeTitleStyle,
+            );
             // Only a cut notice has more to read; a whole one is not a link.
             return InkWell(
               onTap: fit.truncated ? () => widget.onOpen(m) : null,
@@ -855,12 +927,22 @@ class _NoticesCardState extends State<_NoticesCard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                m.title ?? '',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: _noticeTitleStyle,
-                              ),
+                              if (highlighted)
+                                // „NOVÉ“ on the title's first line, the
+                                // title wrapping beside it — measured so
+                                // in [_fitNotice].
+                                Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                    const KioskNewChip(),
+                                    const SizedBox(width: _chipGap),
+                                    Expanded(child: title),
+                                  ],
+                                )
+                              else
+                                title,
                               const SizedBox(height: 6),
                               Text(
                                 m.body,
@@ -897,11 +979,18 @@ class _NoticesCardState extends State<_NoticesCard> {
                             margin: const EdgeInsets.only(right: 6),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: i == _index
+                              // The shown one filled; a fresh one waiting
+                              // for its turn a ring of the same colour.
+                              color: i == shown
                                   ? scheme.primary
+                                  : isNew(notices[i])
+                                  ? null
                                   : scheme.onSurfaceVariant.withValues(
                                       alpha: 0.35,
                                     ),
+                              border: i != shown && isNew(notices[i])
+                                  ? Border.all(color: scheme.primary, width: 2)
+                                  : null,
                             ),
                           ),
                         const Spacer(),
@@ -934,26 +1023,42 @@ class _NoticesCardState extends State<_NoticesCard> {
 
   /// How much of [m] fits [box] (the card's interior): the height of the
   /// text block, the body lines that fit, and whether anything is cut. An
-  /// unbounded box (a lone notice card) shows everything.
+  /// unbounded box (a lone notice card) shows everything. With [chip] the
+  /// title shares its width with „NOVÉ“.
   ({double height, int? bodyLines, bool truncated}) _fitNotice(
     BuildContext context,
     Message m,
-    BoxConstraints box,
-  ) {
+    BoxConstraints box, {
+    required bool chip,
+  }) {
     final scaler = MediaQuery.textScalerOf(context);
     final direction = Directionality.of(context);
     // The same style the Text widgets resolve: theirs merged into the
     // ambient one, or the measure would differ from what is drawn.
     final base = DefaultTextStyle.of(context).style;
-    TextPainter paint(String text, TextStyle style, int? maxLines) =>
-        TextPainter(
-          text: TextSpan(text: text, style: base.merge(style)),
-          textDirection: direction,
-          textScaler: scaler,
-          maxLines: maxLines,
-        )..layout(maxWidth: box.maxWidth);
+    TextPainter paint(
+      String text,
+      TextStyle style,
+      int? maxLines, {
+      double? width,
+    }) => TextPainter(
+      text: TextSpan(text: text, style: base.merge(style)),
+      textDirection: direction,
+      textScaler: scaler,
+      maxLines: maxLines,
+    )..layout(maxWidth: width ?? box.maxWidth);
 
-    final title = paint(m.title ?? '', _noticeTitleStyle, 2);
+    final chipWidth = chip
+        ? paint(KioskNewChip.label, KioskNewChip.textStyle, 1).width +
+              KioskNewChip.padding.horizontal +
+              _chipGap
+        : 0.0;
+    final title = paint(
+      m.title ?? '',
+      _noticeTitleStyle,
+      2,
+      width: box.maxWidth - chipWidth,
+    );
     final body = paint(m.body, _noticeBodyStyle, null);
     final natural = title.height + 6 + body.height;
     final available = box.hasBoundedHeight
