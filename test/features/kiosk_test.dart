@@ -32,6 +32,7 @@ import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
+import 'package:rezervator/features/kiosk/kiosk_new_chip.dart';
 import 'package:rezervator/features/kiosk/kiosk_warning.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
@@ -1749,6 +1750,8 @@ void main() {
       String title, {
       bool show = true,
       String body = 'Sejdeme se v devět.',
+      // When it went up; null = the [id]th of September.
+      DateTime? posted,
     }) => Message(
       id: id,
       kind: MessageKind.notice,
@@ -1762,8 +1765,8 @@ void main() {
       expiresAt: null,
       notify: true,
       showOnKiosk: show,
-      createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
-      updatedAt: DateTime(2026, 9, 1),
+      createdAt: posted ?? DateTime(2026, 9, int.tryParse(id) ?? 1),
+      updatedAt: posted ?? DateTime(2026, 9, 1),
     );
     // Each stand-in player's „the video has ended“, by video id.
     final streamEnded = <String, VoidCallback?>{};
@@ -1826,6 +1829,11 @@ void main() {
       int share = 40,
       int zapisPercent = 80,
       int noticeRotation = 12,
+      // What a fresh notice gets (0080), and for how many days it is one.
+      KioskNoticesFresh noticesFresh = KioskNoticesFresh.highlight,
+      int noticesFreshDays = 3,
+      // The notices as they change while the kiosk runs; null = [notices].
+      Stream<List<Message>>? noticesStream,
       int liveRotation = 12,
       bool panelEnabled = true,
       int pastDays = 0,
@@ -1894,6 +1902,8 @@ void main() {
             kioskWeeksAhead: weeksAhead,
             kioskZapisPercent: zapisPercent,
             kioskNoticesRotationSeconds: noticeRotation,
+            kioskNoticesFresh: noticesFresh,
+            kioskNoticesFreshDays: noticesFreshDays,
             kioskLiveRotationSeconds: liveRotation,
             kioskPastDays: pastDays,
             kioskIdleSeconds: idleSeconds,
@@ -1942,7 +1952,9 @@ void main() {
           ]),
         ),
         playersProvider.overrideWith((ref) async => players),
-        messagesProvider.overrideWith((ref) => Stream.value(notices)),
+        messagesProvider.overrideWith(
+          (ref) => noticesStream ?? Stream.value(notices),
+        ),
         kioskSocketOpenProvider.overrideWithValue(socketOpen ?? () => true),
         kioskRefreshMatchProvider.overrideWithValue((id) async {
           onRefresh?.call(id);
@@ -5299,6 +5311,43 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
 
+      await finish(tester);
+    });
+
+    testWidgets('fresh notices (0080) in the status bar: „NOVÉ“ on one '
+        'posted within the admin\'s days, none on an older one or with the '
+        'highlight off', (tester) async {
+      fullHd(tester);
+      final bar = find.byType(KioskHeadline);
+      Finder inBar(Finder f) => find.descendant(of: bar, matching: f);
+      final notices = [
+        notice('1', 'Brigáda'),
+        notice(
+          '2',
+          'Turnaj',
+          posted: nowAt.subtract(const Duration(days: 2)),
+        ),
+      ];
+
+      await tester.pumpWidget(app(notices: notices));
+      await tester.pumpAndSettle();
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      expect(inBar(find.byType(KioskNewChip)), findsOneWidget);
+      await finish(tester);
+
+      // Fresh for a day only: two days up is not.
+      await tester.pumpWidget(app(notices: notices, noticesFreshDays: 1));
+      await tester.pumpAndSettle();
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      expect(inBar(find.byType(KioskNewChip)), findsNothing);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(notices: notices, noticesFresh: KioskNoticesFresh.off),
+      );
+      await tester.pumpAndSettle();
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      expect(inBar(find.byType(KioskNewChip)), findsNothing);
       await finish(tester);
     });
 
