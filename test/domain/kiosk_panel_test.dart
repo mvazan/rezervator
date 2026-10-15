@@ -49,6 +49,8 @@ void main() {
     DateTime? expiresAt,
     MessageKind? kind,
     bool showOnKiosk = true,
+    DateTime? createdAt,
+    DateTime? visibleFrom,
   }) =>
       Message(
         id: id,
@@ -63,25 +65,27 @@ void main() {
         expiresAt: expiresAt,
         notify: true,
         showOnKiosk: showOnKiosk,
-        createdAt: DateTime(2026, 9, 1),
-        updatedAt: DateTime(2026, 9, 1),
+        visibleFrom: visibleFrom,
+        createdAt: createdAt ?? DateTime(2026, 9, 1),
+        updatedAt: createdAt ?? DateTime(2026, 9, 1),
       );
 
   // Thursday 8 October 2026: its week is Mon 5 – Sun 11 October.
   final today = Day(2026, 10, 8);
   List<String> ids(KioskMatchWindow w) => [for (final s in w.matches) s.id];
 
-  test('kioskNotices keeps active ones, drops expired, hidden and messages',
-      () {
+  test('kioskNotices keeps active ones, newest first; drops expired, hidden '
+      'and messages', () {
     final now = DateTime(2026, 10, 8, 12);
     final got = kioskNotices([
-      notice('a-open'),
-      notice('b-later', expiresAt: DateTime(2026, 10, 9)),
+      notice('a-open', createdAt: DateTime(2026, 9, 20)),
+      notice('b-later', createdAt: DateTime(2026, 10, 2),
+          expiresAt: DateTime(2026, 10, 9)),
       notice('gone', expiresAt: DateTime(2026, 10, 7)),
       notice('msg', kind: MessageKind.message),
       notice('hidden', showOnKiosk: false),
     ], now);
-    expect([for (final m in got) m.id], ['a-open', 'b-later']);
+    expect([for (final m in got) m.id], ['b-later', 'a-open']);
   });
 
   test('the competition year runs from 1 July to 30 June', () {

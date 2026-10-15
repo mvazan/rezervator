@@ -9,7 +9,7 @@ import 'results.dart' show isLive;
 import 'youtube.dart' show youtubeVideoId;
 
 /// The notices on the wall right now: kind notice, not expired, not hidden
-/// from the kiosk by the admin, oldest posted first (the Nástěnka order).
+/// from the kiosk by the admin, newest first (the Nástěnka order).
 List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
     splitNotices(
       messages.where((m) => m.kind == MessageKind.notice && m.showOnKiosk),

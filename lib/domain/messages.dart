@@ -47,10 +47,18 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
 bool isScheduled(Message m, DateTime now) =>
     m.visibleFrom != null && m.visibleFrom!.isAfter(now);
 
+/// When [m] went up on the Nástěnka: the time it was posted for
+/// ([Message.visibleFrom], kept only when it was ahead) or else when it
+/// was posted. The Nástěnka's order, its „vyvěšeno“ day and the kiosk's
+/// fresh notices all count from it.
+DateTime noticePostedAt(Message m) => m.visibleFrom ?? m.createdAt;
+
 /// Notices split into active (showing, not expired), expired and
-/// scheduled (posted ahead of time, not showing yet — the admin's alone),
-/// oldest posted first in each group — the Nástěnka order (ties by id, see
-/// [splitMessages]); the scheduled ones by when they show.
+/// scheduled (posted ahead of time, not showing yet — the admin's alone).
+/// Active and expired newest first — the Nástěnka order, by
+/// [noticePostedAt], ties by id the same way so the order is total (see
+/// [splitMessages]); the scheduled ones by when they show, the first to
+/// show first.
 ({List<Message> active, List<Message> expired, List<Message> scheduled})
 splitNotices(
   Iterable<Message> notices,
@@ -58,8 +66,8 @@ splitNotices(
 ) {
   final sorted = [...notices]
     ..sort((a, b) {
-      final byPosted = a.createdAt.compareTo(b.createdAt);
-      return byPosted != 0 ? byPosted : a.id.compareTo(b.id);
+      final byPosted = noticePostedAt(b).compareTo(noticePostedAt(a));
+      return byPosted != 0 ? byPosted : b.id.compareTo(a.id);
     });
   bool isExpired(Message m) =>
       m.expiresAt != null && !m.expiresAt!.isAfter(now);
@@ -72,7 +80,12 @@ splitNotices(
     scheduled: [
       for (final m in sorted)
         if (!isExpired(m) && isScheduled(m, now)) m,
-    ]..sort((a, b) => a.visibleFrom!.compareTo(b.visibleFrom!)),
+    ]..sort((a, b) {
+        final byShown = a.visibleFrom!.compareTo(b.visibleFrom!);
+        if (byShown != 0) return byShown;
+        final byWritten = a.createdAt.compareTo(b.createdAt);
+        return byWritten != 0 ? byWritten : a.id.compareTo(b.id);
+      }),
   );
 }
 
@@ -295,8 +308,9 @@ String? contextLabel(Message m, TimeBlock? block) {
 }
 
 /// „vyvěšeno so 28. 9. · platí do 12. 10.“ / „vyvěšeno so 28. 9. · do
-/// odvolání“ — the Nástěnka card footer, in local calendar days; the
-/// expiry is written without its weekday, as the spec writes it.
+/// odvolání“ — the Nástěnka card footer, in local calendar days; „vyvěšeno“
+/// is the day it went up ([noticePostedAt]), and the expiry is written
+/// without its weekday, as the spec writes it.
 String noticeFooter(Message m, DateTime now) {
   if (isScheduled(m, now)) {
     final from = m.visibleFrom!.toLocal();
@@ -305,7 +319,7 @@ String noticeFooter(Message m, DateTime now) {
         '${from.minute.toString().padLeft(2, '0')} · '
         '${until == null ? 'do odvolání' : 'platí do ${until.day}. ${until.month}.'}';
   }
-  final posted = dutyDayLabel(Day.fromDateTime(m.createdAt.toLocal()));
+  final posted = dutyDayLabel(Day.fromDateTime(noticePostedAt(m).toLocal()));
   final expires = m.expiresAt?.toLocal();
   final until = expires == null
       ? 'do odvolání'
