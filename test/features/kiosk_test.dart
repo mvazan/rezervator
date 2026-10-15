@@ -3633,6 +3633,80 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('the busiest header: every value of the weather beside '
+          'the name day, the duty, the matches and the notices — cut to '
+          'fit, the weather keeps its larger share', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.left)
+            .withSide(KioskHeaderModule.notices, PanelSide.right);
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: KioskWeather(
+              temperature: 14,
+              kind: WeatherKind.clear,
+              isDay: true,
+              max: 16,
+              min: 7,
+              feelsLike: 11.2,
+              wind: 18,
+              gusts: 35,
+              precipitationChance: 60,
+              precipitationSum: 3.2,
+              fetchedAt: nowAt,
+            ),
+            weatherTitle: 'Brno',
+            weatherItems: KioskWeatherItem.values.toSet(),
+            notices: [notice('1', 'Brigáda v sobotu od devíti')],
+            dutyPeriods: [current],
+            dutyAssignments: serving,
+            slots: [fed('m', day, 'Domácí'), away],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final weather = rectOf(tester, KioskWeatherModule);
+        final duty = rectOf(tester, KioskDutyModule);
+        // Both cut to what the centre and the notices leave: the weather,
+        // whose row scales down, gets half as much again as the duty's
+        // names — not an equal part.
+        expect(
+          tester
+              .renderObject<RenderParagraph>(
+                find.descendant(
+                  of: find.text('AA Hráč a PP Hráč'),
+                  matching: find.byType(RichText),
+                ),
+              )
+              .didExceedMaxLines,
+          isTrue,
+        );
+        expect(
+          weather.width,
+          closeTo(
+            duty.width * kioskHeaderWeatherShare / kioskHeaderModuleShare,
+            1,
+          ),
+        );
+        expect(
+          weather.width,
+          greaterThan(rectOf(tester, KioskNameDayModule).width),
+        );
+        // The centre and the notices keep their room.
+        expect(
+          tester.getRect(homeLabel).left,
+          greaterThan(weather.right),
+        );
+        expect(
+          tester.getRect(find.byType(GradientButton)).right,
+          lessThanOrEqualTo(1920),
+        );
+        await finish(tester);
+      });
+
       testWidgets('a tap on a module shows: its ink paints on the module\'s '
           'own Material, above the bar\'s opaque background', (tester) async {
         fullHd(tester);

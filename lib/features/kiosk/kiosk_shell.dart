@@ -673,11 +673,12 @@ class _StatusBar extends ConsumerWidget {
 
   /// What lies between the clock and „Rezervace tréninku“, [width] wide:
   /// the [left] modules, the [centre], the [right] modules. A module with
-  /// a short value takes at most a fifth of the screen — and on a narrow
-  /// kiosk with large text no more than its part of what the clock and
-  /// the button leave, keeping [_centreRoom] for the centre and as much
-  /// again for the notices: the names are cut and the weather shrinks, the
-  /// button is never pushed off the screen.
+  /// a short value takes at most a fifth of the screen, the weather
+  /// [kioskHeaderWeatherShare] — and on a narrow kiosk with large text, or
+  /// a busy one, no more than its part of what the clock and the button
+  /// leave, in proportion to those shares, keeping [_centreRoom] for the
+  /// centre and as much again for the notices: the names are cut and the
+  /// weather shrinks, the button is never pushed off the screen.
   List<Widget> _middle({
     required double width,
     required TextScaler textScaler,
@@ -692,23 +693,31 @@ class _StatusBar extends ConsumerWidget {
       for (var i = 0; i < right.length; i++)
         i == 0 && centre != null ? 24 : kioskHeaderGap,
     ];
-    final short = [...left, ...right].where((w) => w is! Expanded).length;
+    // Split by each module's own share, not equally: the weather's row,
+    // longer than a name, would shrink while the names left room unused.
+    double weight(Widget w) => w is KioskWeatherModule
+        ? kioskHeaderWeatherShare
+        : kioskHeaderModuleShare;
+    final weights = [
+      for (final w in [...left, ...right])
+        if (w is! Expanded) weight(w),
+    ].fold(0.0, (a, b) => a + b);
     // Each of the two that is there keeps its room: the matches beside the
     // notices would squeeze the headline under its icon.
     final room =
         ((centre != null ? 1 : 0) + (flexible ? 1 : 0)) *
         math.min(width / 3, textScaler.scale(_centreRoom));
-    final share = short == 0
+    final unit = weights == 0
         ? double.infinity
         : math.max(
             0.0,
-            (width - gaps.fold(0.0, (a, b) => a + b) - room) / short,
+            (width - gaps.fold(0.0, (a, b) => a + b) - room) / weights,
           );
     Widget capped(Widget w) => w is Expanded
         ? w
         : ConstrainedBox(
             key: w.key,
-            constraints: BoxConstraints(maxWidth: share),
+            constraints: BoxConstraints(maxWidth: weight(w) * unit),
             child: w,
           );
     var gap = 0;
