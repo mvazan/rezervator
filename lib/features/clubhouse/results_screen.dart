@@ -325,6 +325,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         : teamChipLabels(picked.teams);
     return Column(
       mainAxisSize: MainAxisSize.min,
+      // Full width, so a row shorter than the screen starts at the left
+      // edge like the one above it, not centred.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _chipRow([
           (

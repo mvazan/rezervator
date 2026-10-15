@@ -349,10 +349,14 @@ void main() {
       for (final c in ['Celý oddíl', 'A', 'B', 'C']) {
         expect(chip(c), findsOneWidget, reason: c);
       }
-      // Under the oddíly.
+      // Under the oddíly, starting at the same left edge.
       expect(
         tester.getTopLeft(chip('A')).dy,
         greaterThan(tester.getBottomLeft(chip('Vše')).dy),
+      );
+      expect(
+        tester.getTopLeft(chip('Celý oddíl')).dx,
+        closeTo(tester.getTopLeft(chip('Vše')).dx, 0.5),
       );
       expect(picked(tester, 'Celý oddíl'), isTrue);
       expect(find.text('$husovice – $souperA'), findsOneWidget);
