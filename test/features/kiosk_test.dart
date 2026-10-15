@@ -7,7 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
-import 'package:rezervator/core/ui.dart' show dayFull, dayLabel, today;
+import 'package:rezervator/core/ui.dart'
+    show dayFull, dayLabel, initialsOf, today;
 import 'package:rezervator/core/widgets/emoji_text.dart';
 import 'package:rezervator/core/widgets/gradient_button.dart';
 import 'package:rezervator/data/clock.dart';
@@ -518,8 +519,8 @@ void main() {
     },
   );
 
-  testWidgets('the main action is the bar\'s largest text: „Rezervace '
-      'tréninku“ in 26 px extra bold', (tester) async {
+  testWidgets('the main action: „Rezervace tréninku“ in 26 px extra bold, '
+      'on its gradient in a button 72 px tall', (tester) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -530,7 +531,8 @@ void main() {
     ).style;
     expect(style.fontSize, 26);
     expect(style.fontWeight, FontWeight.w800);
-    expect(tester.getSize(find.byType(GradientButton)).height,
+    // As drawn — after the scaling that fits it to a narrow bar.
+    expect(tester.getRect(find.byType(GradientButton)).height,
         greaterThanOrEqualTo(72));
     await finish(tester);
   });
@@ -551,8 +553,33 @@ void main() {
     final banner = find.text('Rezervuje: Bobo');
     expect(banner, findsOneWidget);
     expect(find.textContaining('Jan Novák'), findsNothing);
+    // The avatar goes by the nick too.
     expect(
-      find.ancestor(of: banner, matching: find.byType(DecoratedBox)),
+      find.descendant(
+        of: find.byType(CircleAvatar),
+        matching: find.text(initialsOf('Bobo')),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('JN'), findsNothing);
+    // No box: nothing between the banner and the bar's own background
+    // paints one.
+    final bar = Theme.of(tester.element(banner)).colorScheme
+        .surfaceContainerHighest;
+    expect(
+      find.ancestor(
+        of: banner,
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is DecoratedBox ||
+              w is Card ||
+              w is Chip ||
+              (w is ColoredBox && w.color.a > 0 && w.color != bar) ||
+              (w is Material &&
+                  w.type != MaterialType.canvas &&
+                  w.type != MaterialType.transparency),
+        ),
+      ),
       findsNothing,
       reason: 'no box around the banner',
     );
@@ -1941,7 +1968,8 @@ void main() {
         app(notices: [notice('1', 'Brigáda')], drawerOpen: true),
       );
       await tester.pumpAndSettle();
-      bool open() => tester.widget<KioskDrawer>(find.byType(KioskDrawer)).open;
+      // Open = as wide as its columns; shut = nothing of it on screen.
+      bool open() => tester.getSize(find.byType(KioskDrawer)).width > 0;
       expect(open(), isTrue);
       expect(find.byType(KioskDrawerButton), findsOneWidget);
 
@@ -1972,6 +2000,42 @@ void main() {
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+
+    testWidgets('hidden for a pick, the drawer keeps the match being played: '
+        'it still asks for the score, and is back as it was — not opened '
+        'anew — once the pick is cleared', (tester) async {
+      fullHd(tester);
+      final asked = <String>[];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+          liveRefresh: 30,
+          onRefresh: asked.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(liveView, findsOneWidget);
+      expect(asked, ['m']);
+
+      await tester.tap(find.text(kioskReserveLabel));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(players.first.displayName));
+      await tester.pumpAndSettle();
+      expect(liveView, findsNothing, reason: 'out of sight');
+      await tester.pump(const Duration(seconds: 31));
+      expect(asked, ['m', 'm'], reason: 'still asking while hidden');
+
+      await tester.tap(find.byTooltip('Zrušit výběr'));
+      await tester.pumpAndSettle();
+      expect(liveView, findsOneWidget);
+      // A live view opened anew would ask at once.
+      expect(asked, ['m', 'm']);
+      await finish(tester);
+    });
 
     group('stream window', () {
       const video = 'https://www.youtube.com/watch?v=wOq9EODb8w8';

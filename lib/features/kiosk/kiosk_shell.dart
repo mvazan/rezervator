@@ -6,6 +6,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -326,12 +327,12 @@ class _KioskShellState extends ConsumerState<KioskShell>
     // and it opens again after the idle time.
     final restingOpen =
         (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
+    final open = _drawerOverride ?? restingOpen;
+    void toggle() => setState(() => _drawerOverride = !open);
     // A visitor picked their name: the board is what they came for — the
     // drawer and its button step aside until the pick is cleared (or the
-    // idle reset), then the drawer is as it was.
+    // idle reset), then the drawer is as it was, live match and all.
     final picking = _selected != null;
-    final open = !picking && (_drawerOverride ?? restingOpen);
-    void toggle() => setState(() => _drawerOverride = !open);
     // The board and the drawer each on their own layer: the drawer's turns
     // (a notice, the live match) do not re-record the board, nor the
     // board's scroll the drawer. On the web the GPU still redraws every
@@ -346,6 +347,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
               child: KioskDrawer(
                 content: content,
                 open: open,
+                hidden: picking,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatch,
                 onPlay: play,
@@ -704,13 +706,16 @@ class _StatusBar extends ConsumerWidget {
                     ),
                   )
                 // Who books: the name the board shows (the nick), plain on
-                // the bar. Capped, so a long name ellipsizes rather than
-                // push the bar wider than the screen — the middle is all
-                // that gives way (it may shrink to nothing).
+                // the bar. Capped like the button, so a long name
+                // ellipsizes rather than push the bar wider than the
+                // screen — the middle is all that gives way.
                 : ConstrainedBox(
-                    constraints: const BoxConstraints(
+                    constraints: BoxConstraints(
                       minHeight: 72,
-                      maxWidth: 420,
+                      maxWidth: math.min(
+                        420,
+                        MediaQuery.sizeOf(context).width * 0.4,
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
