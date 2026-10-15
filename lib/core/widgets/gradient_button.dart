@@ -69,30 +69,36 @@ class GradientButton extends StatelessWidget {
       ],
     );
 
-    return Ink(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        gradient: enabled
-            ? const LinearGradient(colors: brandGradientColors)
-            : null,
-        color: enabled ? null : scheme.onSurface.withValues(alpha: 0.12),
-      ),
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: radius,
-        child: Container(
-          constraints: BoxConstraints(minHeight: minHeight),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          child: enabled
-              ? content
-              : DefaultTextStyle.merge(
-                  style: TextStyle(
-                    color: scheme.onSurface.withValues(alpha: 0.38),
-                    fontWeight: fontWeight,
+    // Its own (transparent) Material: an [Ink] paints on the nearest one,
+    // and anything opaque between — the kiosk status bar's background —
+    // would hide the gradient under it, leaving a bare label.
+    return Material(
+      type: MaterialType.transparency,
+      child: Ink(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          gradient: enabled
+              ? const LinearGradient(colors: brandGradientColors)
+              : null,
+          color: enabled ? null : scheme.onSurface.withValues(alpha: 0.12),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: radius,
+          child: Container(
+            constraints: BoxConstraints(minHeight: minHeight),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            child: enabled
+                ? content
+                : DefaultTextStyle.merge(
+                    style: TextStyle(
+                      color: scheme.onSurface.withValues(alpha: 0.38),
+                      fontWeight: fontWeight,
+                    ),
+                    child: content,
                   ),
-                  child: content,
-                ),
+          ),
         ),
       ),
     );
