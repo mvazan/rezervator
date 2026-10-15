@@ -3,7 +3,7 @@
 /// `KioskInfoPanel` only renders it.
 library;
 
-import 'messages.dart' show splitNotices;
+import 'messages.dart' show noticePostedAt, splitNotices;
 import 'models.dart';
 import 'results.dart' show isLive;
 import 'youtube.dart' show youtubeVideoId;
@@ -15,6 +15,29 @@ List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
       messages.where((m) => m.kind == MessageKind.notice && m.showOnKiosk),
       now,
     ).active;
+
+/// Whether [m] is a fresh notice on the kiosk (0080): up for less than
+/// [days] days at [now], counted from when it went up ([noticePostedAt]).
+/// A posting time still ahead of [now] is never fresh — the notice is not
+/// up yet.
+bool isFreshNotice(Message m, DateTime now, int days) {
+  final posted = noticePostedAt(m);
+  return !posted.isAfter(now) &&
+      now.difference(posted) < Duration(days: days);
+}
+
+/// How long [m] stays on the kiosk — the panel's card and the status bar —
+/// before the next notice: twice [turn] when fresh notices linger
+/// ([KioskNoticesFresh.lingers]) and [m] is fresh for [days]
+/// ([isFreshNotice]), otherwise [turn].
+Duration kioskNoticeTurn(
+  Message m, {
+  required DateTime now,
+  required Duration turn,
+  required KioskNoticesFresh fresh,
+  required int days,
+}) =>
+    fresh.lingers && isFreshNotice(m, now, days) ? turn * 2 : turn;
 
 bool _decided(MatchResult? r) =>
     r?.status == MatchStatus.finished || r?.status == MatchStatus.forfeit;

@@ -88,6 +88,76 @@ void main() {
     expect([for (final m in got) m.id], ['b-later', 'a-open']);
   });
 
+  group('fresh notices (0080)', () {
+    final now = DateTime(2026, 10, 8, 12);
+
+    test('fresh while up for less than the days, counted from when it went '
+        'up', () {
+      // Up for 2 days 23:59 of 3: fresh; exactly 3 days: no longer.
+      expect(
+        isFreshNotice(
+            notice('n', createdAt: DateTime(2026, 10, 5, 12, 1)), now, 3),
+        isTrue,
+      );
+      expect(
+        isFreshNotice(notice('n', createdAt: DateTime(2026, 10, 5, 12)), now, 3),
+        isFalse,
+      );
+      // Posted this very minute: fresh even for a single day; a day ago:
+      // not.
+      expect(isFreshNotice(notice('n', createdAt: now), now, 1), isTrue);
+      expect(
+        isFreshNotice(notice('n', createdAt: DateTime(2026, 10, 7, 12)), now, 1),
+        isFalse,
+      );
+      // Written long ago for yesterday morning: it went up then.
+      final ahead = notice('ahead',
+          createdAt: DateTime(2026, 9, 1), visibleFrom: DateTime(2026, 10, 7, 8));
+      expect(isFreshNotice(ahead, now, 3), isTrue);
+      // A posting time still ahead of now is never fresh: it is not up.
+      expect(
+        isFreshNotice(
+            notice('later', visibleFrom: DateTime(2026, 10, 9, 8)), now, 3),
+        isFalse,
+      );
+      expect(
+        isFreshNotice(
+            notice('skew', createdAt: DateTime(2026, 10, 8, 12, 0, 5)), now, 3),
+        isFalse,
+      );
+    });
+
+    test('a fresh notice stays twice the turn only when fresh ones linger',
+        () {
+      const turn = Duration(seconds: 12);
+      final fresh = notice('fresh', createdAt: DateTime(2026, 10, 7, 12));
+      final old = notice('old', createdAt: DateTime(2026, 9, 20));
+      for (final (mode, freshTurn) in [
+        (KioskNoticesFresh.off, turn),
+        (KioskNoticesFresh.highlight, turn),
+        (KioskNoticesFresh.longer, turn * 2),
+        (KioskNoticesFresh.both, turn * 2),
+      ]) {
+        expect(
+          kioskNoticeTurn(fresh, now: now, turn: turn, fresh: mode, days: 3),
+          freshTurn,
+          reason: mode.name,
+        );
+        expect(
+          kioskNoticeTurn(old, now: now, turn: turn, fresh: mode, days: 3),
+          turn,
+          reason: mode.name,
+        );
+      }
+      // Fresh for a single day, the same notice is an old one.
+      expect(
+        kioskNoticeTurn(fresh,
+            now: now, turn: turn, fresh: KioskNoticesFresh.both, days: 1),
+        turn,
+      );
+    });
+  });
+
   test('the competition year runs from 1 July to 30 June', () {
     expect(kioskSeason(Day(2026, 10, 8)), (
       start: Day(2026, 7, 1),
