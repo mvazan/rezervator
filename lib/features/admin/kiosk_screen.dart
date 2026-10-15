@@ -864,8 +864,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                       settings?.kioskFollowBoard ?? true,
                       'kiosk_follow_board',
                       subtitle:
-                          'Když návštěvník posune tabuli na jiné dny, '
-                          'seznam zápasů naskočí na zápasy těch dnů.',
+                          'Když návštěvník posune tabuli, seznam se posune '
+                          'jen o zápasy dnů, které přibyly.',
                     ),
                     _number(
                       context,

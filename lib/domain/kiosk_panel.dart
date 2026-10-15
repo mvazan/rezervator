@@ -105,6 +105,36 @@ int kioskFirstUpcomingIndex(
   return matches.length;
 }
 
+/// The days a visitor's scroll of the board brought into view: those of
+/// [next] that [previous] did not show — before it when the board went
+/// back, after it when it went forward (the days that left the screen do
+/// not count). Null when nothing new came into view. [previous] null = the
+/// board as it opens, [today] at its left edge and as many days as [next].
+({Day first, Day last})? kioskNewlyShownDays(
+  ({Day first, Day last})? previous,
+  ({Day first, Day last}) next, {
+  required Day today,
+}) {
+  final prev =
+      previous ??
+      (first: today, last: today.addDays(next.last.differenceInDays(next.first)));
+  if (next.first.isBefore(prev.first)) {
+    final dayBefore = prev.first.addDays(-1);
+    return (
+      first: next.first,
+      last: next.last.isBefore(dayBefore) ? next.last : dayBefore,
+    );
+  }
+  if (next.last.isAfter(prev.last)) {
+    final dayAfter = prev.last.addDays(1);
+    return (
+      first: next.first.isAfter(dayAfter) ? next.first : dayAfter,
+      last: next.last,
+    );
+  }
+  return null;
+}
+
 /// The matches being played whose figures the drawer can show: status in
 /// progress, still within the live window at [now] ([isLive]: a row the
 /// site left „in progress“ is not live the next day), AND [withData] says

@@ -3768,6 +3768,74 @@ void main() {
       });
     }
 
+    testWidgets('the match list follows the board a day at a time: a day back '
+        'whose match the list shows already leaves it be; day by day it moves '
+        'no further than the match that came into view', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [
+            for (var i = 1; i <= 14; i++) fed('p$i', day.addDays(-i), 'Den$i '),
+            fed('n', day.addDays(2), 'Příští '),
+          ],
+          results: {
+            for (var i = 1; i <= 14; i++) 'p$i': res('p$i', 'finished', 5, 3),
+          },
+          drawerOpen: true,
+          showNotices: false,
+          weeksBack: 2,
+          weeksAhead: 1,
+          pastDays: 14,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final list = find.descendant(
+        of: find.byType(KioskDrawer),
+        matching: find.byType(CustomScrollView),
+      );
+      final listBox = tester.getRect(list);
+      bool visible(String t) {
+        final f = find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.textContaining(t),
+        );
+        if (f.evaluate().isEmpty) return false;
+        final r = tester.getRect(f.first);
+        return r.top >= listBox.top - 1 && r.bottom <= listBox.bottom + 1;
+      }
+
+      double pixels() => tester
+          .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)),
+          )
+          .position
+          .pixels;
+      final column = tester.getSize(find.byType(ScheduleDayColumn).first).width;
+      // Most of a column, past the touch slop: the board snaps one day.
+      Future<void> dayBack() async {
+        await tester.dragFrom(const Offset(400, 600), Offset(column * 0.7 + 18, 0));
+        await tester.pumpAndSettle();
+      }
+
+      // Yesterday's match is on the list already, above the coming one.
+      expect(visible('Den1 '), isTrue);
+      final opened = pixels();
+      await dayBack();
+      expect(pixels(), opened, reason: 'a day the list shows: no scroll');
+
+      // Further back, day by day: each new match comes into view, the list
+      // moving at most a row at a time — never a jump to put it on top.
+      for (var i = 2; i <= 14; i++) {
+        final before = pixels();
+        await dayBack();
+        expect(visible('Den$i '), isTrue, reason: 'day -$i');
+        expect((before - pixels()).abs(), lessThanOrEqualTo(65),
+            reason: 'day -$i');
+      }
+
+      await finish(tester);
+    });
+
     testWidgets('a match being played takes the whole drawer, even closed by '
         'default, and reopens it after a minute', (tester) async {
       fullHd(tester);
