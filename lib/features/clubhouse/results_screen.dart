@@ -45,6 +45,8 @@ class ResultsScreen extends ConsumerStatefulWidget {
 }
 
 class _ResultsScreenState extends ConsumerState<ResultsScreen> {
+  /// The oddíl picked in the filter's first row ([_clubKey]), null = Vše.
+  String? _club;
   String? _team;
   bool _scrolledToRecentResults = false;
   bool _didLiveRefreshCheck = false;
@@ -92,14 +94,25 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   GlobalKey? debugMatchKey(String matchId) => _matchKeys[matchId];
 
   void _selectAll() => setState(() {
+    _club = null;
     _team = null;
     _scrolledToRecentResults = false;
   });
 
-  void _selectTeam(String team) => setState(() {
+  void _selectClub(String club) => setState(() {
+    _club = club;
+    _team = null;
+    _scrolledToRecentResults = false;
+  });
+
+  /// A team, or null = the whole picked oddíl.
+  void _selectTeam(String? team) => setState(() {
     _team = team;
     _scrolledToRecentResults = false;
   });
+
+  /// An oddíl's key in [_club]: its id, '' for „Ostatní“.
+  static String _clubKey(ResultsClub c) => c.clubId ?? '';
 
   void _selectMode(ResultsMode mode) {
     unawaited(ref.read(resultsModeProvider.notifier).set(mode));
@@ -258,27 +271,93 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     );
   }
 
-  Widget _filterChips(List<String> teams) {
+  /// One horizontally scrolling row of chips; [tooltip] when the label is
+  /// short for a longer name.
+  Widget _chipRow(
+    List<({String label, String? tooltip, bool selected, VoidCallback onTap})>
+    chips, {
+    double top = 8,
+  }) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.fromLTRB(12, top, 12, 8),
       child: Row(
         children: [
-          ChoiceChip(
-            label: const Text('Vše'),
-            selected: _team == null,
-            onSelected: (_) => _selectAll(),
-          ),
-          for (final team in teams) ...[
-            const SizedBox(width: 8),
+          for (final (i, c) in chips.indexed) ...[
+            if (i > 0) const SizedBox(width: 8),
             ChoiceChip(
-              label: Text(team),
-              selected: _team == team,
-              onSelected: (_) => _selectTeam(team),
+              label: Text(c.label),
+              tooltip: c.tooltip,
+              selected: c.selected,
+              onSelected: (_) => c.onTap(),
             ),
           ],
         ],
       ),
+    );
+  }
+
+  /// The Oddíly filter. With more than one oddíl (or teams of none) it is
+  /// two rows — Vše and the oddíly, then, once an oddíl of two or more
+  /// teams is picked, the whole oddíl and its teams by letter
+  /// ([teamChipLabels]) — instead of a chip for every team of the alley.
+  /// With one, its teams in one row, as ever.
+  Widget _teamFilter(List<ResultsClub> clubs, ResultsClub? picked) {
+    if (clubs.length < 2) {
+      return _chipRow([
+        (
+          label: 'Vše',
+          tooltip: null,
+          selected: _team == null,
+          onTap: _selectAll,
+        ),
+        for (final t in clubs.expand((c) => c.teams))
+          (
+            label: t,
+            tooltip: null,
+            selected: _team == t,
+            onTap: () => _selectTeam(t),
+          ),
+      ]);
+    }
+    final labels = picked == null
+        ? const <String, String>{}
+        : teamChipLabels(picked.teams);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _chipRow([
+          (
+            label: 'Vše',
+            tooltip: null,
+            selected: picked == null,
+            onTap: _selectAll,
+          ),
+          for (final c in clubs)
+            (
+              label: c.name,
+              tooltip: null,
+              selected: picked == c,
+              onTap: () => _selectClub(_clubKey(c)),
+            ),
+        ]),
+        if (picked != null && picked.teams.length > 1)
+          _chipRow(top: 0, [
+            (
+              label: 'Celý oddíl',
+              tooltip: null,
+              selected: _team == null,
+              onTap: () => _selectTeam(null),
+            ),
+            for (final t in picked.teams)
+              (
+                label: labels[t]!,
+                tooltip: labels[t] == t ? null : t,
+                selected: _team == t,
+                onTap: () => _selectTeam(t),
+              ),
+          ]),
+      ],
     );
   }
 
@@ -403,6 +482,17 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final exceptions =
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
 
+    final clubs = resultsClubs(
+      teams: ourTeams,
+      teamRows: ref.watch(teamsProvider).value ?? const <Team>[],
+      clubs: ref.watch(clubsProvider).value ?? const <Club>[],
+    );
+    final picked = clubs.where((c) => _clubKey(c) == _club).firstOrNull;
+    // One team, the picked oddíl's teams, or no filter.
+    final filterTeams = _team != null
+        ? {_team!}
+        : picked?.teams.toSet();
+
     final competitions = ref.watch(leagueCompetitionsProvider);
     final savedMode = ref.watch(resultsModeProvider);
     final mode = competitions.isEmpty ? ResultsMode.teams : savedMode;
@@ -474,7 +564,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       sections = [
         for (final d in resultsTimeline(
           slots: slots,
-          team: _team,
+          teams: filterTeams,
           mineOnly: false,
           followedTeams: const [],
           exceptions: const {},
@@ -571,7 +661,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
           if (inCompetitions)
             _competitionChips(competitions, slug)
           else
-            _filterChips(ourTeams),
+            _teamFilter(clubs, picked),
           if (leagueFailed)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),

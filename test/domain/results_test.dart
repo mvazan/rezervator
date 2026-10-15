@@ -488,7 +488,7 @@ void main() {
     test('team filter wins over mineOnly/all and matches either side', () {
       final days = resultsTimeline(
         slots: slots,
-        team: 'KS Devítka Brno A',
+        teams: {'KS Devítka Brno A'},
         mineOnly: false,
         followedTeams: const [],
         exceptions: const {},
@@ -978,6 +978,66 @@ void main() {
       final ordered = [for (final g in competitionRounds(all)) ...g.matches];
       expect(mostRecentDecidedInOrder(ordered, results, Day(2026, 10, 12)), 'slot1');
       expect(mostRecentDecidedInOrder(ordered, results, Day(2026, 10, 1)), isNull);
+    });
+  });
+
+  group('resultsClubs', () {
+    test('teams by oddíl, the oddíly Czech-sorted, Ostatní last', () {
+      final clubs = resultsClubs(
+        teams: const ['Žabovřesky A', 'Čáslav B', 'Čáslav A', 'Bez oddílu', 'Neznámý'],
+        teamRows: const [
+          Team(id: '1', name: 'Žabovřesky A', clubId: 'z'),
+          Team(id: '2', name: 'Čáslav A', clubId: 'c'),
+          Team(id: '3', name: 'Čáslav B', clubId: 'c'),
+          Team(id: '4', name: 'Bez oddílu'),
+        ],
+        clubs: const [
+          Club(id: 'z', name: 'Žabovřesky'),
+          Club(id: 'c', name: 'Čáslav'),
+          Club(id: 'x', name: 'Prázdný'),
+        ],
+      );
+      expect([for (final c in clubs) c.name], ['Čáslav', 'Žabovřesky', 'Ostatní']);
+      expect(clubs.first.teams, ['Čáslav A', 'Čáslav B']);
+      expect(clubs.last.clubId, isNull);
+      expect(clubs.last.teams, ['Bez oddílu', 'Neznámý']);
+    });
+
+    test('a team whose oddíl is gone counts as Ostatní', () {
+      final clubs = resultsClubs(
+        teams: const ['A'],
+        teamRows: const [Team(id: '1', name: 'A', clubId: 'gone')],
+        clubs: const [],
+      );
+      expect(clubs.single.name, 'Ostatní');
+    });
+  });
+
+  group('teamChipLabels', () {
+    test('the letters after the shared words', () {
+      expect(
+        teamChipLabels(const ['SKK Veverky Brno A', 'SKK Veverky Brno B']),
+        {'SKK Veverky Brno A': 'A', 'SKK Veverky Brno B': 'B'},
+      );
+    });
+
+    test('the team with nothing after them is A', () {
+      expect(
+        teamChipLabels(const ['TJ Sokol Husovice', 'TJ Sokol Husovice B']),
+        {'TJ Sokol Husovice': 'A', 'TJ Sokol Husovice B': 'B'},
+      );
+    });
+
+    test('full names when the rest would not read as letters', () {
+      for (final teams in [
+        const ['Jediný tým'],
+        const ['KK Brno ženy', 'KK Brno muži'],
+        const ['Sokol', 'Slavia'],
+        const ['TJ X', 'TJ X A'],
+      ]) {
+        expect(teamChipLabels(teams), {for (final t in teams) t: t},
+            reason: '$teams');
+      }
     });
   });
 

@@ -70,6 +70,8 @@ const appChangelog = <Release>[
     'Kalendář po dnech: čas bloku je začátek, pomlčka a konec pod sebou — '
         'v každém řádku stejně, i při větším písmu.',
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
+    'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
+        'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
@@ -77,6 +79,8 @@ const appChangelog = <Release>[
     'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
     'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo.',
     'Kalendář po dnech: čas bloku jednotně pod sebou.',
+    'Výsledky: filtr nejdřív podle oddílu, pak družstva; KP místo '
+        'Krajského přeboru.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
