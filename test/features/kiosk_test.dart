@@ -4798,19 +4798,12 @@ void main() {
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
         // The folded duel's card stays in the tree (cross-fade), hidden:
-        // only the visible ones count.
+        // only the visible ones count — and only a visible name is tapped.
         final openCards = find.byType(DuelCard).hitTestable();
-        // A tap opens a duel as the full card with its lane table. More
-        // may be open while they fit; past that the first opened folds.
-        expect(openCards, findsNothing);
-        await tester.tap(find.textContaining('Hráč1').first);
-        await tester.pumpAndSettle();
-        expect(openCards, findsOneWidget);
-        expect(find.text('Plné'), findsWidgets);
-        await tester.tap(find.textContaining('Hráč2').first);
-        await tester.pumpAndSettle();
-        expect(openCards, findsNWidgets(2));
-        // Each opening animates; the fit is measured once it has.
+        Finder name(int pos) => find.textContaining('Hráč$pos').hitTestable();
+        // Each opening animates; the fit is measured once it has, a timer
+        // after the animation — so every tap waits it out, or the check
+        // would race the fold.
         Future<void> settle() async {
           for (var i = 0; i < 6; i++) {
             await tester.pump(const Duration(milliseconds: 320));
@@ -4818,8 +4811,23 @@ void main() {
           }
         }
 
+        // A tap opens a duel as the full card with its lane table.
+        expect(openCards, findsNothing);
+        await tester.tap(name(1).first);
+        await settle();
+        expect(openCards, findsOneWidget);
+        expect(find.text('Plné'), findsWidgets);
+
+        // More may be open while they fit; past that the first opened
+        // folds. Two open cards overflow 1080 px by a few pixels, so the
+        // rest runs 120 px taller: two fit there, a third does not.
+        tester.view.physicalSize = const Size(1920, 1200);
+        await tester.pumpAndSettle();
+        await tester.tap(name(2).first);
+        await settle();
+        expect(openCards, findsNWidgets(2));
         for (var pos = 3; pos <= 6; pos++) {
-          await tester.tap(find.textContaining('Hráč$pos').first);
+          await tester.tap(name(pos).first);
           await settle();
         }
         final scroll = tester
