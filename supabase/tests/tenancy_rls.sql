@@ -10804,6 +10804,12 @@ begin
   raise notice 'OK: the kiosk''s duty is off for a new alley, its band top, middle or bottom, and stays off the public overview (0073)';
 end $$;
 
+-- 0067 and 0073 (above) brought back three of the header's old switches
+-- and 0077 the fourth: 0081 converts them into kiosk_header and drops them
+-- again, so everything below sees the schema as it is (0081's own checks
+-- are at the end of the file).
+\ir ../migrations/0081_kiosk_header.sql
+
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
 -- account on a device kept (signed out offline, session expired, an older
@@ -12604,6 +12610,12 @@ begin
   raise notice 'OK: an admin saves the kiosk panels through the check as authenticated (0077)';
 end $$;
 
+-- 0073 and 0077 (above) brought back the duty's and the notices' header
+-- switches: 0081 drops them again (the weather's and the name day's are
+-- gone, so it converts nothing), so everything below sees the schema as it
+-- is (0081's own checks are at the end of the file).
+\ir ../migrations/0081_kiosk_header.sql
+
 -- 0078: „Hráči týdne“. kiosk_week_players gives an alley's approved members
 -- and its kiosk the lines of the alley's OWN side in the finished federation
 -- matches of one Monday to Sunday. The side is told by team slug, never by
@@ -12888,6 +12900,292 @@ begin
   end if;
   update schedule_settings set kiosk_zapis_nav = 'bar' where tenant_id = v_a;
   raise notice 'OK: the Zápis pages with the bar for a new alley, one of three ways, off the public overview (0079)';
+end $$;
+
+-- 0081: the kiosk's header modules. Alleys with the four old switches in
+-- the combinations that matter, set through the old columns — 0067, 0073
+-- and 0077 bring them back — and then 0081 twice: the first run converts
+-- them into kiosk_header and drops the four columns, the second finds them
+-- gone and skips the conversion (it would fail on a missing column
+-- otherwise) and changes nothing.
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000081001', 'Kuželna (0081) vše vypnuto'),
+  ('00000000-0000-0000-0000-000000081002', 'Kuželna (0081) vše zapnuto'),
+  ('00000000-0000-0000-0000-000000081003', 'Kuželna (0081) jen počasí'),
+  ('00000000-0000-0000-0000-000000081004', 'Kuželna (0081) bez nástěnky'),
+  ('00000000-0000-0000-0000-000000081005', 'Kuželna (0081) svátek a služba');
+\ir ../migrations/0067_kiosk_weather_nameday.sql
+\ir ../migrations/0073_kiosk_duty.sql
+\ir ../migrations/0077_kiosk_panels.sql
+-- Each alley's old switches and what 0081 must make of them.
+create temp table kiosk_0081_case (
+  tenant_id uuid primary key,
+  weather boolean, nameday boolean, duty boolean, notices boolean,
+  header jsonb);
+insert into kiosk_0081_case values
+  -- The suite's alley A at the old defaults: the new default.
+  ('00000000-0000-0000-0000-00000000000a', false, false, false, true,
+   '{"modules": [{"id": "weather", "side": "off"},
+                 {"id": "nameday", "side": "off"},
+                 {"id": "duty", "side": "off"},
+                 {"id": "notices", "side": "right"}]}'),
+  -- Everything off, the notices too.
+  ('00000000-0000-0000-0000-000000081001', false, false, false, false,
+   '{"modules": [{"id": "weather", "side": "off"},
+                 {"id": "nameday", "side": "off"},
+                 {"id": "duty", "side": "off"},
+                 {"id": "notices", "side": "off"}]}'),
+  -- Everything on (the weather with a place, set below): the three left
+  -- after the clock in that order, the notices right.
+  ('00000000-0000-0000-0000-000000081002', true, true, true, true,
+   '{"modules": [{"id": "weather", "side": "left"},
+                 {"id": "nameday", "side": "left"},
+                 {"id": "duty", "side": "left"},
+                 {"id": "notices", "side": "right"}]}'),
+  -- The weather alone and without a place: left all the same — the kiosk
+  -- shows nothing without a place, as before.
+  ('00000000-0000-0000-0000-000000081003', true, false, false, false,
+   '{"modules": [{"id": "weather", "side": "left"},
+                 {"id": "nameday", "side": "off"},
+                 {"id": "duty", "side": "off"},
+                 {"id": "notices", "side": "off"}]}'),
+  -- Everything but the notices.
+  ('00000000-0000-0000-0000-000000081004', true, true, true, false,
+   '{"modules": [{"id": "weather", "side": "left"},
+                 {"id": "nameday", "side": "left"},
+                 {"id": "duty", "side": "left"},
+                 {"id": "notices", "side": "off"}]}'),
+  -- The name day and the duty, the notices at their default.
+  ('00000000-0000-0000-0000-000000081005', false, true, true, true,
+   '{"modules": [{"id": "weather", "side": "off"},
+                 {"id": "nameday", "side": "left"},
+                 {"id": "duty", "side": "left"},
+                 {"id": "notices", "side": "right"}]}');
+update schedule_settings s
+   set kiosk_weather = c.weather, kiosk_nameday = c.nameday,
+       kiosk_duty_header = c.duty, kiosk_notices_header = c.notices
+  from kiosk_0081_case c
+ where c.tenant_id = s.tenant_id;
+update schedule_settings
+   set kiosk_weather_place = 'Brno, Jihomoravský',
+       kiosk_weather_lat = 49.19522, kiosk_weather_lon = 16.60796
+ where tenant_id = '00000000-0000-0000-0000-000000081002';
+\ir ../migrations/0081_kiosk_header.sql
+create temp table kiosk_0081_first as
+  select tenant_id, kiosk_header, kiosk_weather_title from schedule_settings;
+\ir ../migrations/0081_kiosk_header.sql
+
+-- An admin of a new alley, who saves the header as authenticated below.
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000081000', 'Kuželna (0081)');
+insert into auth.users (id, email) values
+  ('81000000-0000-0000-0000-000000000001', 'zahlavi-0081@example.com')
+on conflict do nothing;
+insert into profiles (id, tenant_id, display_name, email, role, status)
+values ('81000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000081000', 'Správce 0081',
+        'zahlavi-0081@example.com', 'admin', 'approved');
+
+do $$
+declare
+  v_new constant uuid := '00000000-0000-0000-0000-000000081000';
+  v_default constant jsonb :=
+    '{"modules": [{"id": "weather", "side": "off"},
+                  {"id": "nameday", "side": "off"},
+                  {"id": "duty", "side": "off"},
+                  {"id": "notices", "side": "right"}]}';
+  v_case record;
+  v_label text;
+  v_layout jsonb;
+  v_keys text[];
+begin
+  -- Each alley converted as its old switches showed the header.
+  for v_case in
+    select c.tenant_id, c.header, s.kiosk_header as got
+      from kiosk_0081_case c
+      join schedule_settings s on s.tenant_id = c.tenant_id
+  loop
+    if v_case.got is distinct from v_case.header then
+      raise exception 'FAIL: alley % converted to %, expected % (0081)',
+        v_case.tenant_id, v_case.got, v_case.header;
+    end if;
+  end loop;
+  if (select count(*) from kiosk_0081_case c
+        join schedule_settings s using (tenant_id)) <> 6 then
+    raise exception 'FAIL: the conversion cases are not all there (0081)';
+  end if;
+  -- The order is the array's: the weather, the name day, the duty, the
+  -- notices.
+  if (select array_agg(m ->> 'id' order by o)
+        from schedule_settings s,
+             jsonb_array_elements(s.kiosk_header -> 'modules')
+               with ordinality as e(m, o)
+       where s.tenant_id = '00000000-0000-0000-0000-000000081002')
+     is distinct from array['weather', 'nameday', 'duty', 'notices'] then
+    raise exception 'FAIL: the converted modules are not in the old header''s order (0081)';
+  end if;
+
+  -- The second run skipped the conversion and changed nothing.
+  if exists (select 1 from kiosk_0081_first f
+               join schedule_settings s using (tenant_id)
+              where s.kiosk_header is distinct from f.kiosk_header
+                 or s.kiosk_weather_title is distinct from f.kiosk_weather_title) then
+    raise exception 'FAIL: running 0081 again changed a converted header (0081)';
+  end if;
+
+  -- The old switches are gone, the new checks are there.
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'schedule_settings'
+                and column_name in ('kiosk_weather', 'kiosk_nameday',
+                                    'kiosk_duty_header',
+                                    'kiosk_notices_header')) then
+    raise exception 'FAIL: an old header switch survived 0081';
+  end if;
+  if (select count(*) from pg_constraint
+       where conrelid = 'schedule_settings'::regclass
+         and conname in ('schedule_settings_kiosk_header_check',
+                         'schedule_settings_kiosk_weather_title_check')) <> 2 then
+    raise exception 'FAIL: kiosk_header or kiosk_weather_title has no named check (0081)';
+  end if;
+
+  -- A new alley starts with the notices on the right, the rest off, and
+  -- the weather's default title.
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = v_new and kiosk_header = v_default
+                    and kiosk_weather_title is null) then
+    raise exception 'FAIL: a new alley does not start with the default header (0081)';
+  end if;
+
+  -- Bad layouts are a check violation, nothing else.
+  for v_label, v_layout in
+    select * from (values
+      ('a string', '"weather"'::jsonb),
+      ('an array', '[]'),
+      ('a JSON null', 'null'),
+      ('no modules', '{}'),
+      ('the modules a number', '{"modules": 3}'),
+      ('the modules an object',
+       '{"modules": {"id": "weather", "side": "left"}}'),
+      ('a module that is not an object', '{"modules": ["weather"]}'),
+      ('a module without an id', '{"modules": [{"side": "left"}]}'),
+      ('an empty id', '{"modules": [{"id": "", "side": "left"}]}'),
+      ('a numeric id', '{"modules": [{"id": 1, "side": "left"}]}'),
+      ('a duplicate id',
+       '{"modules": [{"id": "duty", "side": "left"},
+                     {"id": "duty", "side": "right"}]}'),
+      ('a module without a side', '{"modules": [{"id": "duty"}]}'),
+      ('the side middle', '{"modules": [{"id": "duty", "side": "middle"}]}'),
+      ('a boolean side', '{"modules": [{"id": "duty", "side": true}]}')) v
+  loop
+    begin
+      update schedule_settings set kiosk_header = v_layout where tenant_id = v_new;
+      raise exception 'FAIL: kiosk_header took a layout with % (0081): %', v_label, v_layout;
+    exception when check_violation then null;
+    end;
+  end loop;
+  -- Called directly it answers false — not null, not an error — for
+  -- anything that is not a layout.
+  if kiosk_header_valid(null) is distinct from false
+     or kiosk_header_valid('3') is distinct from false
+     or kiosk_header_valid('[]') is distinct from false
+     or kiosk_header_valid('{"modules": [1]}') is distinct from false
+     or kiosk_header_valid('{"modules": "x"}') is distinct from false then
+    raise exception 'FAIL: kiosk_header_valid does not answer false for a non-layout (0081)';
+  end if;
+
+  -- A module this database has never heard of passes, with options of its
+  -- own: the app keeps it and writes it back. So does no module at all.
+  if kiosk_header_valid('{"modules": [{"id": "later", "side": "left"}]}')
+     is distinct from true then
+    raise exception 'FAIL: kiosk_header_valid refuses a module it does not know (0081)';
+  end if;
+  update schedule_settings
+     set kiosk_header =
+       '{"modules": [{"id": "notices", "side": "left"},
+                     {"id": "weather", "side": "right"},
+                     {"id": "later", "side": "left", "size": "big"}]}'
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_header = '{"modules": []}'
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_header = v_default where tenant_id = v_new;
+
+  -- The weather's title: some text of 1–40 characters once trimmed, or
+  -- none for „Počasí“.
+  for v_label in select * from (values (''), ('   '), (repeat('x', 41))) v loop
+    begin
+      update schedule_settings set kiosk_weather_title = v_label
+       where tenant_id = v_new;
+      raise exception 'FAIL: the weather''s title took ''%'' (0081)', v_label;
+    exception when check_violation then null;
+    end;
+  end loop;
+  update schedule_settings set kiosk_weather_title = repeat('x', 40)
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_weather_title = 'Dnes v Brně'
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_weather_title = null
+   where tenant_id = v_new;
+
+  -- The check calls the validator as the admin who saves: authenticated
+  -- may execute it, anon may not.
+  if not has_function_privilege('authenticated', 'public.kiosk_header_valid(jsonb)', 'execute') then
+    raise exception 'FAIL: authenticated cannot execute kiosk_header_valid — no admin could save the header (0081)';
+  end if;
+  if has_function_privilege('anon', 'public.kiosk_header_valid(jsonb)', 'execute') then
+    raise exception 'FAIL: anon may execute kiosk_header_valid (0081)';
+  end if;
+
+  -- None of it reaches the public overview: its six settings, nothing more.
+  v_keys := array(select jsonb_object_keys(
+                           public_week('kuzelna-a', current_date)->'settings')
+                  order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations',
+                      'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s header may be reaching anon (0081): %', v_keys;
+  end if;
+  raise notice 'OK: the old header switches convert into kiosk_header and are gone, a new alley gets the default, bad layouts and titles are check violations, the header stays off the public overview (0081)';
+end $$;
+
+-- The admin saves the header through the API's role: the check runs as
+-- authenticated, and a bad layout is still refused.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"81000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_new constant uuid := '00000000-0000-0000-0000-000000081000';
+begin
+  update schedule_settings
+     set kiosk_header =
+           '{"modules": [{"id": "weather", "side": "left"},
+                         {"id": "duty", "side": "left"},
+                         {"id": "nameday", "side": "off"},
+                         {"id": "notices", "side": "right"}]}',
+         kiosk_weather_title = 'Dnes v Brně'
+   where tenant_id = v_new;
+  if not found then
+    raise exception 'FAIL: the admin could not save the kiosk header (0081)';
+  end if;
+  begin
+    update schedule_settings
+       set kiosk_header = '{"modules": [{"id": "duty", "side": "middle"}]}'
+     where tenant_id = v_new;
+    raise exception 'FAIL: the admin saved a module in the middle (0081)';
+  exception when check_violation then null;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = '00000000-0000-0000-0000-000000081000'
+                    and kiosk_header -> 'modules' -> 1 ->> 'id' = 'duty'
+                    and kiosk_header -> 'modules' -> 1 ->> 'side' = 'left'
+                    and kiosk_weather_title = 'Dnes v Brně') then
+    raise exception 'FAIL: the admin''s header was not saved (0081)';
+  end if;
+  raise notice 'OK: an admin saves the kiosk header through the check as authenticated (0081)';
 end $$;
 
 rollback;

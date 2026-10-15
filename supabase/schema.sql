@@ -2519,6 +2519,42 @@ $$;
 ALTER FUNCTION "public"."is_superadmin"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."kiosk_header_valid"("p" "jsonb") RETURNS boolean
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_module jsonb;
+  v_ids text[] := '{}';
+begin
+  if jsonb_typeof(p) is distinct from 'object'
+     or jsonb_typeof(p -> 'modules') is distinct from 'array' then
+    return false;
+  end if;
+  for v_module in select value from jsonb_array_elements(p -> 'modules') loop
+    if jsonb_typeof(v_module) is distinct from 'object'
+       or jsonb_typeof(v_module -> 'id') is distinct from 'string'
+       or jsonb_typeof(v_module -> 'side') is distinct from 'string' then
+      return false;
+    end if;
+    if v_module ->> 'id' = '' or v_module ->> 'id' = any (v_ids)
+       or v_module ->> 'side' not in ('off', 'left', 'right') then
+      return false;
+    end if;
+    v_ids := v_ids || (v_module ->> 'id');
+  end loop;
+  return true;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."kiosk_header_valid"("p" "jsonb") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."kiosk_header_valid"("p" "jsonb") IS 'Whether a value is a kiosk header layout (0081), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") RETURNS boolean
     LANGUAGE "plpgsql" IMMUTABLE
     SET "search_path" TO 'public'
@@ -5800,26 +5836,24 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_stream" boolean DEFAULT false NOT NULL,
     "kiosk_stream_corner" "text" DEFAULT 'bl'::"text" NOT NULL,
     "kiosk_stream_width" smallint DEFAULT 35 NOT NULL,
-    "kiosk_weather" boolean DEFAULT false NOT NULL,
     "kiosk_weather_place" "text",
     "kiosk_weather_lat" double precision,
     "kiosk_weather_lon" double precision,
-    "kiosk_nameday" boolean DEFAULT false NOT NULL,
     "kiosk_warning" "text",
     "kiosk_band_font_size" smallint DEFAULT 10 NOT NULL,
     "kiosk_picker_note" "text" DEFAULT 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby v kantýně nebo u správce kuželny.'::"text",
     "kiosk_todays_matches" boolean DEFAULT true NOT NULL,
     "kiosk_stream_enabled" boolean DEFAULT true NOT NULL,
     "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,
-    "kiosk_duty_header" boolean DEFAULT false NOT NULL,
     "kiosk_duty_board" boolean DEFAULT false NOT NULL,
     "kiosk_duty_band_position" "text" DEFAULT 'middle'::"text" NOT NULL,
     "kiosk_warning_font_size" smallint DEFAULT 22 NOT NULL,
     "kiosk_day_matches_width" smallint DEFAULT 560 NOT NULL,
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
     "kiosk_panels" "jsonb" DEFAULT '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false}, "modules": [{"id": "duty", "side": "off", "share": 30}, {"id": "notices", "side": "right", "share": 40}, {"id": "matches", "side": "right", "share": 60}, {"id": "guide", "side": "off", "share": 45}, {"id": "week", "side": "off", "share": 55}]}'::"jsonb" NOT NULL,
-    "kiosk_notices_header" boolean DEFAULT true NOT NULL,
     "kiosk_zapis_nav" "text" DEFAULT 'bar'::"text" NOT NULL,
+    "kiosk_header" "jsonb" DEFAULT '{"modules": [{"id": "weather", "side": "off"}, {"id": "nameday", "side": "off"}, {"id": "duty", "side": "off"}, {"id": "notices", "side": "right"}]}'::"jsonb" NOT NULL,
+    "kiosk_weather_title" "text",
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
@@ -5828,6 +5862,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_day_matches_width_check" CHECK ((("kiosk_day_matches_width" >= 340) AND ("kiosk_day_matches_width" <= 1200))),
     CONSTRAINT "schedule_settings_kiosk_duty_band_position_check" CHECK (("kiosk_duty_band_position" = ANY (ARRAY['top'::"text", 'middle'::"text", 'bottom'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_font_size_check" CHECK ((("kiosk_font_size" >= 9) AND ("kiosk_font_size" <= 24))),
+    CONSTRAINT "schedule_settings_kiosk_header_check" CHECK ("public"."kiosk_header_valid"("kiosk_header")),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
@@ -5844,6 +5879,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_warning_check" CHECK ((("kiosk_warning" IS NULL) OR (("char_length"("btrim"("kiosk_warning")) >= 1) AND ("char_length"("btrim"("kiosk_warning")) <= 300)))),
     CONSTRAINT "schedule_settings_kiosk_warning_font_size_check" CHECK ((("kiosk_warning_font_size" >= 14) AND ("kiosk_warning_font_size" <= 40))),
     CONSTRAINT "schedule_settings_kiosk_weather_place_check" CHECK (((("kiosk_weather_lat" IS NULL) = ("kiosk_weather_lon" IS NULL)) AND (("kiosk_weather_lat" IS NULL) OR (("kiosk_weather_lat" >= ('-90'::integer)::double precision) AND ("kiosk_weather_lat" <= (90)::double precision))) AND (("kiosk_weather_lon" IS NULL) OR (("kiosk_weather_lon" >= ('-180'::integer)::double precision) AND ("kiosk_weather_lon" <= (180)::double precision))) AND (("kiosk_weather_place" IS NULL) OR (("char_length"("kiosk_weather_place") >= 1) AND ("char_length"("kiosk_weather_place") <= 200))))),
+    CONSTRAINT "schedule_settings_kiosk_weather_title_check" CHECK ((("kiosk_weather_title" IS NULL) OR (("char_length"("btrim"("kiosk_weather_title")) >= 1) AND ("char_length"("btrim"("kiosk_weather_title")) <= 40)))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_kiosk_zapis_nav_check" CHECK (("kiosk_zapis_nav" = ANY (ARRAY['off'::"text", 'bar'::"text", 'sides'::"text"]))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
@@ -5866,7 +5902,11 @@ COMMENT ON COLUMN "public"."schedule_settings"."kiosk_panels" IS 'The kiosk''s t
 
 
 
-COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_header" IS 'Nástěnka''s line in the kiosk''s status bar, one notice title at a time (0077: the header half of the dropped kiosk_notices_mode). Default on.';
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_header" IS 'The kiosk''s header modules (0081): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_title" IS 'The weather module''s title on the kiosk (0081), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
 
 
 
@@ -7425,6 +7465,12 @@ GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "servic
 
 REVOKE ALL ON FUNCTION "public"."is_on_duty"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."is_on_duty"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."kiosk_header_valid"("p" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."kiosk_header_valid"("p" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."kiosk_header_valid"("p" "jsonb") TO "service_role";
 
 
 
