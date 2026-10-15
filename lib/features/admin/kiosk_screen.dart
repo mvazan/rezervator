@@ -1057,7 +1057,11 @@ class KioskSettingsScreen extends ConsumerWidget {
                       'Čerstvý je do',
                       settings?.kioskNoticesFreshDays ?? 3,
                       'kiosk_notices_fresh_days',
-                      unit: 'dní',
+                      // „do 1 dne“, „do 2 dní“: the stored days, so the
+                      // unit follows the echo of what was written.
+                      unit: (settings?.kioskNoticesFreshDays ?? 3) == 1
+                          ? 'dne'
+                          : 'dní',
                       min: 1,
                       max: 14,
                     ),

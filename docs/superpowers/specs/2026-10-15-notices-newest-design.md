@@ -43,7 +43,7 @@ Re-runnable (`add column if not exists`, checks guarded). `public_week` is an al
 Under „Střídání oznamů“ (shown when the notices are in the header or a panel):
 
 - Dropdown **„Čerstvé oznamy“**: „Nezvýrazňovat“ (off), „Zvýraznit“ (highlight), „Zobrazit déle“ (longer), „Zvýraznit i zobrazit déle“ (both); helper „Oznam vyvěšený před méně než N dny dostane štítek NOVÉ, nebo zůstane na obrazovce dvakrát déle.“ (N = the current days).
-- **„Čerstvý je do“** — `_number`, unit „dní“, 1–14 (shown unless the mode is off).
+- **„Čerstvý je do“** — `_number`, unit „dní“ („dne“ for 1), 1–14 (shown unless the mode is off).
 
 ## App (Klubovna → Nástěnka)
 

@@ -1484,6 +1484,31 @@ void main() {
       expect(find.text(note('1 dnem')), findsOneWidget);
     });
 
+    testWidgets('fresh for one day: „Čerstvý je do 1 dne“ — the unit in its '
+        'own form too', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskNoticesFreshDays: 1,
+            tenantId: 't',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'Čerstvý je do'),
+      );
+      expect(field.controller!.text, '1');
+      expect(field.decoration!.suffixText, 'dne');
+      expect(find.text(note('1 dnem')), findsOneWidget);
+    });
+
     testWidgets('with the notices neither in the header nor in a panel, '
         'neither control', (tester) async {
       tall(tester);
