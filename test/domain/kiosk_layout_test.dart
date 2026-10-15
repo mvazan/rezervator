@@ -23,6 +23,7 @@ void main() {
         'matches',
         'guide',
         'week',
+        'feedback',
       ]);
       expect([for (final s in PanelSide.values) s.name], [
         'off',
@@ -34,7 +35,7 @@ void main() {
     test('every module has its default share', () {
       expect(
         [for (final m in KioskModule.values) kioskModuleDefaultShare(m)],
-        [30, 40, 60, 45, 55],
+        [30, 40, 60, 45, 55, 35],
       );
     });
   });
@@ -50,6 +51,7 @@ void main() {
           {'id': 'matches', 'side': 'right', 'share': 60},
           {'id': 'guide', 'side': 'off', 'share': 45},
           {'id': 'week', 'side': 'off', 'share': 55},
+          {'id': 'feedback', 'side': 'off', 'share': 35},
         ],
       });
       expect(on(KioskPanels.defaults, PanelSide.right), 'notices:40 matches:60');
@@ -67,6 +69,7 @@ void main() {
         {'id': 'duty', 'side': 'right', 'share': 30},
         {'id': 'notices', 'side': 'right', 'share': 25},
         {'id': 'matches', 'side': 'off', 'share': 60},
+        {'id': 'feedback', 'side': 'off', 'share': 35},
       ],
     };
 
@@ -113,12 +116,13 @@ void main() {
         {'id': 'notices', 'side': 'off', 'share': 40},
         {'id': 'guide', 'side': 'off', 'share': 45},
         {'id': 'week', 'side': 'off', 'share': 55},
+        {'id': 'feedback', 'side': 'off', 'share': 35},
       ]);
       // An empty list: every module off.
       final none = KioskPanels.fromJson({'modules': <Object?>[]});
       expect(on(none, PanelSide.left), '');
       expect(on(none, PanelSide.right), '');
-      expect(none.modules, hasLength(5));
+      expect(none.modules, hasLength(KioskModule.values.length));
     });
 
     test('an id this build does not know is kept and written back '
@@ -171,7 +175,7 @@ void main() {
       expect(p.sideOf(KioskModule.notices), PanelSide.left);
       expect(p.shareOf(KioskModule.notices), 30);
       expect(p.modules.where((m) => m.id == 'notices'), hasLength(1));
-      expect(p.modules, hasLength(5));
+      expect(p.modules, hasLength(KioskModule.values.length));
       expect(p.sideOf(KioskModule.matches), PanelSide.off);
     });
 
@@ -311,7 +315,7 @@ void main() {
       // The left panel's guide and the week off keep their places.
       final moved = p.moved(KioskModule.matches, -2);
       expect([for (final m in moved.modules) m.id],
-          ['matches', 'guide', 'duty', 'week', 'notices']);
+          ['matches', 'guide', 'duty', 'week', 'notices', 'feedback']);
       // Alone in its panel, or off: nothing moves.
       expect(p.moved(KioskModule.guide, 1), p);
       expect(p.moved(KioskModule.week, -1), p);
@@ -347,6 +351,7 @@ void main() {
           {'id': 'matches', 'side': 'right', 'share': 60},
           {'id': 'week', 'side': 'left', 'share': 70},
           {'id': 'guide', 'side': 'left', 'share': 45},
+          {'id': 'feedback', 'side': 'off', 'share': 35},
         ],
       });
       expect(KioskPanels.fromJson(p.toJson()), p);
@@ -460,7 +465,8 @@ void main() {
       );
       expect(off.right, const KioskPanel(days: 3, open: true));
       expect(placed(off),
-          'duty:off:30 notices:off:40 matches:off:60 guide:off:45 week:off:55');
+          'duty:off:30 notices:off:40 matches:off:60 guide:off:45 week:off:55 '
+          'feedback:off:35');
     });
 
     test('duty, notices and matches: d, round((100 − d) · n / 100), the rest '
@@ -476,7 +482,7 @@ void main() {
       ]) {
         expect(
           placed(legacy(dutyDrawer: true, dutyShare: d, noticesShare: n)),
-          '$shares guide:off:45 week:off:55',
+          '$shares guide:off:45 week:off:55 feedback:off:35',
           reason: '($d, $n)',
         );
       }
@@ -492,7 +498,7 @@ void main() {
       expect(
         placed(legacy(dutyDrawer: true, noticesMode: 'header')),
         'duty:right:30 notices:off:40 matches:right:70 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
       // Only the notices: no list and no live mode.
       expect(
@@ -503,7 +509,7 @@ void main() {
           liveMode: false,
         )),
         'duty:right:60 notices:right:40 matches:off:60 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
     });
 
@@ -511,12 +517,12 @@ void main() {
       expect(
         placed(legacy(noticesShare: 25)),
         'duty:off:30 notices:right:25 matches:right:75 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
       expect(
         placed(legacy(noticesMode: 'drawer', noticesShare: 90)),
         'duty:off:30 notices:right:90 matches:right:10 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
     });
 
@@ -525,7 +531,7 @@ void main() {
       expect(
         placed(legacy(showMatches: false, liveMode: true)),
         'duty:off:30 notices:right:40 matches:right:60 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
       expect(
         legacy(showMatches: false, liveMode: false)
@@ -557,17 +563,17 @@ void main() {
           liveMode: false,
         )),
         'duty:right:70 notices:off:40 matches:off:60 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
       expect(
         placed(legacy(noticesMode: 'off', noticesShare: 30)),
         'duty:off:30 notices:off:40 matches:right:70 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
       expect(
         placed(legacy(showMatches: false, liveMode: false, noticesShare: 30)),
         'duty:off:30 notices:right:30 matches:off:60 guide:off:45 '
-        'week:off:55',
+        'week:off:55 feedback:off:35',
       );
     });
   });

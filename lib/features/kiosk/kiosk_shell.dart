@@ -29,6 +29,7 @@ import 'kiosk_connection.dart';
 import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
 import 'kiosk_duty.dart';
+import 'kiosk_feedback.dart';
 import 'kiosk_guide.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_warning.dart';
@@ -237,6 +238,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// panel.
   void _openGuide() => unawaited(showKioskGuide(context, wrap: _touchable));
 
+  /// „Napište nám“'s QR code large — a tap on its card in a panel.
+  void _openFeedback() =>
+      unawaited(showKioskFeedback(context, wrap: _touchable));
+
   /// „Hráči týdne“ full screen (0078) — a tap on its card in a panel; a tap
   /// on a line there opens that match's Zápis over it.
   void _openWeek() => unawaited(
@@ -434,6 +439,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
           onOpenMatch: _openMatch,
           onOpenGuide: _openGuide,
           onOpenWeek: _openWeek,
+          onOpenFeedback: _openFeedback,
           onPlay: play,
           resetToken: _resets,
           showLive: !(holdsMatches && _liveHidden),
