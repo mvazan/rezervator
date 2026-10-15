@@ -50,12 +50,34 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '15. 10. 2026', [
+    'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '
+        'Panely správce každému modulu (služba na kantýně, nástěnka, zápasy, '
+        'Jak začít, Hráči týdne) určí panel, podíl na výšce a pořadí; každý '
+        'panel má svou šířku a může začínat rozbalený. Nástěnku v záhlaví '
+        'zapíná přepínač „V záhlaví“, volby seznamu zápasů mají svou sekci '
+        'Zápasy.',
+    'Kiosk: modul „Hráči týdne“ — nejlepší výkony našich hráčů za minulý '
+        'týden v kategoriích muži a ženy na 120 a 100 hodů. Ťuknutí otevře '
+        'celý týden podle kategorií, soutěží nebo oddílů, doma i venku, a '
+        'z řádku zápis zápasu. Pohlaví hráčů je z registru ČKA.',
+    'Kiosk: modul „Jak začít“ — jak si na kiosku zarezervovat trénink a kde '
+        'je Rezervátor dál: aplikace pro Android (QR kód do Google Play) a web '
+        'rezervator.online. Ťuknutí ukáže celý text s velkým QR kódem.',
     'Kiosk: hlavní tlačítko „Rezervace tréninku“ je větší a výraznější. Po '
         'výběru hráče záhlaví ukáže jeho přezdívku (bez rámečku) a postranní '
-        'panel ustoupí tabuli.',
+        'panely ustoupí tabuli.',
     'Kiosk, výběr hráče: správce zvolí, zda začíná písmeny, oddíly (dlaždice '
         'v barvě oddílu, hráči bez oddílu pod „Ostatní“), nebo obojím. '
         'Upozornění při rezervaci je širší a má méně řádků.',
+  ], store: [
+    'Kiosk: dva panely, vlevo i vpravo od tabule; správce do nich rozmístí '
+        'moduly ve Správě → Kiosk → Panely.',
+    'Kiosk: Hráči týdne — nejlepší výkony našich hráčů za minulý týden, '
+        'muži a ženy na 120 a 100 hodů, i podle soutěží a oddílů.',
+    'Kiosk: Jak začít — rezervace na kiosku krok za krokem a QR kód '
+        'aplikace pro Android.',
+    'Kiosk: větší tlačítko „Rezervace tréninku“; výběr hráče začíná '
+        'písmeny, oddíly nebo obojím.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
