@@ -654,6 +654,31 @@ enum KioskDutyBandPosition {
       };
 }
 
+/// How the kiosk's name picker starts (0076, `kiosk_picker_mode`): with the
+/// first letters of the board names ([letters]), with the alley's clubs as
+/// tiles in their colour ([clubs]) — a tap lists that club's players — or
+/// with the club tiles above the letters ([both]). The names are the
+/// column's values — do not rename one.
+enum KioskPickerMode {
+  letters,
+  clubs,
+  both;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [letters], the column's default.
+  static KioskPickerMode parse(String? value) => switch (value) {
+        'clubs' => KioskPickerMode.clubs,
+        'both' => KioskPickerMode.both,
+        _ => KioskPickerMode.letters,
+      };
+
+  /// Whether the first page offers the clubs.
+  bool get showsClubs => this != KioskPickerMode.letters;
+
+  /// Whether the first page offers the letters.
+  bool get showsLetters => this != KioskPickerMode.clubs;
+}
+
 /// How a match is drawn — the kiosk's live match (0064,
 /// `kiosk_live_layout`) and the app's match detail (a device preference per
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
@@ -759,6 +784,7 @@ class ScheduleSettings {
     this.kioskDutyDrawer = false,
     this.kioskDutyShare = 30,
     this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
+    this.kioskPickerMode = KioskPickerMode.letters,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -871,6 +897,9 @@ class ScheduleSettings {
 
   /// Where the band of [kioskDutyBoard] runs in the day headers (0073).
   final KioskDutyBandPosition kioskDutyBandPosition;
+
+  /// How the kiosk's name picker starts (0076).
+  final KioskPickerMode kioskPickerMode;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -1031,6 +1060,9 @@ class ScheduleSettings {
         kioskDutyShare: json['kiosk_duty_share'] as int? ?? 30,
         kioskDutyBandPosition: KioskDutyBandPosition.parse(
           json['kiosk_duty_band_position'] as String?,
+        ),
+        kioskPickerMode: KioskPickerMode.parse(
+          json['kiosk_picker_mode'] as String?,
         ),
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
