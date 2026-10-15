@@ -2,6 +2,8 @@
 /// Pure Dart — no Flutter imports — so all logic on top is unit-testable.
 library;
 
+import 'kiosk_layout.dart';
+
 /// A wall-clock time of day, independent of Flutter's TimeOfDay.
 class HourMinute implements Comparable<HourMinute> {
   const HourMinute(this.hour, this.minute)
@@ -784,6 +786,8 @@ class ScheduleSettings {
     this.kioskDutyDrawer = false,
     this.kioskDutyShare = 30,
     this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
+    this.kioskPanels = KioskPanels.defaults,
+    this.kioskNoticesHeader = true,
     this.kioskPickerMode = KioskPickerMode.letters,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
@@ -897,6 +901,16 @@ class ScheduleSettings {
 
   /// Where the band of [kioskDutyBoard] runs in the day headers (0073).
   final KioskDutyBandPosition kioskDutyBandPosition;
+
+  /// The kiosk's two panels (0077, `kiosk_panels`): how many day columns
+  /// each covers and whether it rests open, and which module goes into
+  /// which panel — with its share of the height, in its order.
+  final KioskPanels kioskPanels;
+
+  /// Nástěnka's line in the status bar, one notice's title at a time
+  /// (0077, `kiosk_notices_header`) — whether the notices are in a panel
+  /// too is [kioskPanels]' business.
+  final bool kioskNoticesHeader;
 
   /// How the kiosk's name picker starts (0076).
   final KioskPickerMode kioskPickerMode;
@@ -1061,6 +1075,8 @@ class ScheduleSettings {
         kioskDutyBandPosition: KioskDutyBandPosition.parse(
           json['kiosk_duty_band_position'] as String?,
         ),
+        kioskPanels: KioskPanels.fromJson(json['kiosk_panels']),
+        kioskNoticesHeader: json['kiosk_notices_header'] as bool? ?? true,
         kioskPickerMode: KioskPickerMode.parse(
           json['kiosk_picker_mode'] as String?,
         ),
