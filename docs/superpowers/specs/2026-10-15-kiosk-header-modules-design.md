@@ -30,13 +30,6 @@ at another height. The admin switches are spread over three sections
   two or more people (the user's wording; plural like the name day). Replaces
   the „Služba: …“ chip under the clock. The side-panel card and the board band
   stay.
-- **„Dnes“ once** (the user, after the first review): only the first module in
-  the bar's order — the left ones after the clock, then the right ones —
-  whose title would say „Dnes“ says it; the later ones leave it out: „Dnes
-  v Brně“, „Svátek mají“, „Službu má“. Without the earlier „Dnes“ the name
-  day reads „Svátek má/mají“, the duty „Službu má/mají“, and the admin's
-  weather title loses a leading „Dnes“ („V Brně“). A module with nothing to
-  say today does not count; „Počasí“ and „Státní svátek“ do not say „Dnes“.
 - **Notices:** a module with the title „Nástěnka“ and the rotating headline as
   its value; it takes the width that is left.
 - **Position:** every module except the clock is off, left or right; left ones

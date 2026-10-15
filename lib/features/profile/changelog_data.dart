@@ -52,9 +52,8 @@ const appChangelog = <Release>[
   Release(null, '15. 10. 2026', [
     'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
         'v jedné řadě — hodiny s datem, počasí (nadpis napíše správce, třeba '
-        '„Dnes v Brně“), svátek, nově služba na kantýně (místo řádku pod '
-        'hodinami) a nástěnka; „Dnes“ jen v prvním nadpisu („Svátek mají“, '
-        '„Službu má“). Ve Správě → Kiosk → Záhlaví '
+        '„Dnes v Brně“), svátek, nově služba na kantýně („Dnes má službu“ '
+        'místo řádku pod hodinami) a nástěnka. Ve Správě → Kiosk → Záhlaví '
         'každému zvolíš, jestli je vlevo, nebo vpravo, a pořadí; dnešní '
         'zápasy jsou uprostřed, domácí nad venkovními.',
     'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '
