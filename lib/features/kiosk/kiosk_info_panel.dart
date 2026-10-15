@@ -35,22 +35,7 @@ import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
-import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
-
-/// The drawer's width for a screen [screenWidth] wide: [columns] of the
-/// board's [visibleDays] day columns (the board sizes them on the whole
-/// screen), at least one and at most one fewer than all — so open or
-/// closed, the board shows whole days only.
-double kioskDrawerWidthFor(
-  double screenWidth, {
-  required int columns,
-  required int visibleDays,
-}) {
-  final days = visibleDays < 2 ? 2 : visibleDays;
-  final column = (screenWidth - calendarRulerWidth) / days;
-  return columns.clamp(1, days - 1) * column;
-}
 
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
