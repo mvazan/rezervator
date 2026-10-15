@@ -57,7 +57,7 @@ const appChangelog = <Release>[
         'v barvě oddílu, hráči bez oddílu pod „Ostatní“), nebo obojím. '
         'Upozornění při rezervaci je širší a má méně řádků.',
     'Kiosk, hraný zápas v panelu: ťuk na „⟳ před … min“ obnoví výsledky; '
-        'ikona se točí, dokud nová data nedorazí.',
+        'ikona se po ťuknutí točí, dokud nová data nedorazí.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
