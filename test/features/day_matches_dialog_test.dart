@@ -185,7 +185,7 @@ void main() {
 
     testWidgets('a federation match: the time with its kuželna, then the '
         'competition and round with the pins at the end, under the points, '
-        'which stand out', (tester) async {
+        'which stand out, centred on the first two lines', (tester) async {
       final finished = PrioritySlot(
         id: 'm1',
         date: date,
@@ -251,13 +251,18 @@ void main() {
         closeTo(tester.getTopRight(points).dx, 0.5),
       );
       expect(top(pins), greaterThan(tester.getBottomLeft(where).dy - 1));
-      // Bolder and larger than the names.
+      // The points stand in the middle of the match's and the time's lines.
+      expect(
+        tester.getCenter(points).dy,
+        closeTo((top(title) + tester.getBottomLeft(where).dy) / 2, 1),
+      );
+      // Bolder and larger than the names, and than the titleMedium it was.
       final pointsStyle = tester.widget<Text>(points).style!;
       expect(pointsStyle.fontWeight, FontWeight.w800);
       expect(
         pointsStyle.fontSize,
         greaterThan(
-          Theme.of(tester.element(points)).textTheme.titleSmall!.fontSize!,
+          Theme.of(tester.element(points)).textTheme.titleMedium!.fontSize!,
         ),
       );
     });
@@ -464,11 +469,11 @@ void main() {
 
         // The score is a single Text(pointsLabel(...), style: ...) — no
         // per-side branching to test; both digits necessarily share the one
-        // style, the emphasised titleMedium, whoever won.
+        // style, the emphasised titleLarge, whoever won.
         final scoreText = tester.widget<Text>(find.text('5 : 3'));
         expect(
           scoreText.style,
-          Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleMedium
+          Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleLarge
               ?.copyWith(fontWeight: FontWeight.w800),
         );
 

@@ -61,8 +61,9 @@ const appChangelog = <Release>[
     'Kalendář a kiosk: zápas v rozvrhu má nahoře pohár a vedle něj čas, '
         'pod volným řádkem domácí, „x“ a hosty pod sebou.',
     'Zápasy dne (ťuk na záhlaví dne): pod zápasem čas a kuželna, kde se '
-        'hraje, pod tím soutěž a kolo. Výsledek vpravo je výraznější '
-        'a kuželky stojí pod ním, na řádku soutěže.',
+        'hraje, pod tím soutěž a kolo. Výsledek vpravo je větší a výraznější, '
+        'uprostřed vedle zápasu a času; kuželky stojí pod ním, na řádku '
+        'soutěže.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',

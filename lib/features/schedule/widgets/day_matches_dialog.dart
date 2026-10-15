@@ -173,31 +173,35 @@ Widget _eventRow(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // The match, its points at the end — bolder and larger than
-            // the names, the day's headline.
+            // The match and the time with the kuželna, the points at the
+            // end, centred on the two — bolder and larger than the names,
+            // the day's headline.
             Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
               children: [
                 Expanded(
-                  child: MatchTitle(
-                    slot: m,
-                    winner: showScore ? winner : null,
-                    style: theme.textTheme.titleSmall,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      MatchTitle(
+                        slot: m,
+                        winner: showScore ? winner : null,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                      Text(_where(m), style: small),
+                    ],
                   ),
                 ),
                 if (showScore) ...[
                   const SizedBox(width: 8),
                   Text(
                     pointsLabel(result!.homePoints, result.awayPoints),
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                 ],
               ],
             ),
-            Text(_where(m), style: small),
             // The competition and the round, the pins at the end — under
             // the points.
             if (league.isNotEmpty || pins.isNotEmpty)
