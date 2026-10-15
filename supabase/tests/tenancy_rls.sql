@@ -13373,10 +13373,13 @@ begin
                     and kiosk_weather_title is null) then
     raise exception 'FAIL: a new alley does not start with the default header (0082)';
   end if;
-  -- Every alley, new or converted, shows the weather as before: the high
-  -- and low and the rain beside the temperature.
+  -- Every alley of the suite, new or converted, shows the weather as
+  -- before: the high and low and the rain beside the temperature. Only
+  -- the suite's: on a local stack an admin may have picked other values.
   if exists (select 1 from schedule_settings
-              where kiosk_weather_items is distinct from '{range,rain}') then
+              where (tenant_id = v_new
+                     or tenant_id in (select tenant_id from kiosk_0082_case))
+                and kiosk_weather_items is distinct from '{range,rain}') then
     raise exception 'FAIL: an alley does not start with the weather''s high and low and rain (0082)';
   end if;
 
