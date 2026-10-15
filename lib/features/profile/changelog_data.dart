@@ -87,6 +87,10 @@ const appChangelog = <Release>[
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
     'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
         'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
+    'Oddíly mají přezdívku: správce ji zadá ve Správě → Oddíly a aplikace '
+        'ji ukáže místo celého názvu — z „TJ Sokol Brno IV B“ je „Sokol IV '
+        'B“ v rozvrhu, zápasech, výsledcích, na kiosku, v připomínkách i '
+        'v Google kalendáři.',
   ], store: [
     'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
         'Hráči týdne a Jak začít s QR kódem aplikace.',
@@ -97,6 +101,7 @@ const appChangelog = <Release>[
         'výraznější výsledek.',
     'Kalendář po dnech: čas bloku pod sebou.',
     'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
+    'Oddíly mají přezdívku místo celého názvu.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
