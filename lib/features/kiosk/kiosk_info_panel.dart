@@ -1,14 +1,15 @@
-/// The kiosk's side drawer: who serves on the canteen and who comes next
-/// (0073, on top), the alley's active notices (they take turns when there
-/// are several; a tap reads one in full), the matches of the last and next
-/// weeks (a tap on a finished one opens its Zápis, ▶ at one with a video
-/// its stream) — and, while a match is
-/// being played, that match across the whole drawer in the Souboje view
+/// The kiosk's two side panels (0077), left and right of the board, each a
+/// stack of the modules the admin placed in it: who serves on the canteen
+/// and who comes next (0073), the alley's active notices (they take turns
+/// when there are several; a tap reads one in full), the matches of the
+/// last and next weeks (a tap on a finished one opens its Zápis, ▶ at one
+/// with a video its stream) — and, while a match is being played, that
+/// match across the whole panel holding the matches, in the Souboje view
 /// (several live matches take turns too). Display only, like the board:
-/// nothing here books or writes. Closed it is gone entirely, leaving only a
-/// button floating at the screen's edge. The admin picks what it lists and
-/// how it looks (Správa → Kiosk); the shell closes or reopens it to its
-/// resting state after a minute without a touch.
+/// nothing here books or writes. Closed a panel is gone entirely, leaving
+/// only a button floating over the board. The admin picks what goes where
+/// and how it looks (Správa → Kiosk); the shell closes or reopens both
+/// panels to their resting state after a minute without a touch.
 library;
 
 import 'dart:async';
@@ -24,6 +25,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/duels.dart';
 import '../../domain/duties.dart' show KioskDutyEntry;
+import '../../domain/kiosk_layout.dart';
 import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
@@ -34,22 +36,9 @@ import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
-import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
-
-/// The drawer's width for a screen [screenWidth] wide: [columns] of the
-/// board's [visibleDays] day columns (the board sizes them on the whole
-/// screen), at least one and at most one fewer than all — so open or
-/// closed, the board shows whole days only.
-double kioskDrawerWidthFor(
-  double screenWidth, {
-  required int columns,
-  required int visibleDays,
-}) {
-  final days = visibleDays < 2 ? 2 : visibleDays;
-  final column = (screenWidth - calendarRulerWidth) / days;
-  return columns.clamp(1, days - 1) * column;
-}
+import 'kiosk_guide.dart' show KioskGuideCard;
+import 'kiosk_week.dart' show KioskWeekCard;
 
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
@@ -80,11 +69,13 @@ const kioskRefreshWait = Duration(seconds: 30);
 const kioskRefreshMinSpin = Duration(milliseconds: 800);
 
 /// The matches being played whose players the site has delivered — empty
-/// with live mode off. A match marked as playing but without data is not
-/// here ([kioskLiveMatches]).
+/// with live mode off, or while the matches are in no panel (0077): the
+/// match being played takes over the panel that holds them. A match marked
+/// as playing but without data is not here ([kioskLiveMatches]).
 final kioskLiveProvider = Provider<List<PrioritySlot>>((ref) {
   final settings = ref.watch(settingsProvider).value;
-  if (!(settings?.kioskPanelEnabled ?? true) ||
+  final panels = settings?.kioskPanels ?? KioskPanels.defaults;
+  if (panels.sideOf(KioskModule.matches) == PanelSide.off ||
       !(settings?.kioskLiveMode ?? true)) {
     return const [];
   }
@@ -106,71 +97,124 @@ final kioskLiveProvider = Provider<List<PrioritySlot>>((ref) {
   );
 });
 
-/// What the drawer would show now, from the providers and the admin's
-/// settings — null when there is nothing (the shell then draws no drawer).
-final kioskPanelContentProvider = Provider<KioskPanelContent?>((ref) {
-  final settings = ref.watch(settingsProvider).value;
-  if (!(settings?.kioskPanelEnabled ?? true)) return null;
-  final now = ref.watch(nowProvider).value ?? DateTime.now();
-  final live = ref.watch(kioskLiveProvider);
-  final notices = (settings?.kioskShowNotices ?? true)
-      ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
-      : const <Message>[];
-  final hasMatches =
-      (settings?.kioskShowMatches ?? true) &&
-      kioskMatchWindow(
-        slots: ref.watch(prioritySlotsProvider),
-        today: Day.fromDateTime(now),
-        weeksBack: settings?.kioskWeeksBack ?? 2,
-        weeksAhead: settings?.kioskWeeksAhead ?? 1,
-        showUpcoming: settings?.kioskShowUpcoming ?? true,
-      ).matches.isNotEmpty;
-  // The canteen duty's card (0073) — the plan is read only with it on. A
-  // plan with nobody now and nobody ahead has nothing to say.
-  final plan = (settings?.kioskDutyDrawer ?? false)
-      ? ref.watch(kioskDutyPlanProvider)
-      : null;
-  final duty = plan != null && (plan.now != null || plan.next.isNotEmpty)
-      ? plan
-      : null;
-  if (live.isEmpty && notices.isEmpty && !hasMatches && duty == null) {
-    return null;
-  }
-  return KioskPanelContent(
-    notices: notices,
-    hasMatches: hasMatches,
-    live: live,
-    duty: duty,
-  );
-});
+/// What the panel on [side] would show now, from the providers and the
+/// admin's layout (0077): the modules placed there that have something to
+/// show, in the admin's order, each with its share — null when none has
+/// (the shell then draws neither that panel nor its button).
+final kioskPanelContentProvider =
+    Provider.family<KioskPanelContent?, PanelSide>((ref, side) {
+      final settings = ref.watch(settingsProvider).value;
+      final placed = (settings?.kioskPanels ?? KioskPanels.defaults)
+          .modulesOn(side);
+      if (placed.isEmpty) return null;
+      bool here(KioskModule module) => placed.any((p) => p.module == module);
+      final now = ref.watch(nowProvider).value ?? DateTime.now();
+      final live = here(KioskModule.matches)
+          ? ref.watch(kioskLiveProvider)
+          : const <PrioritySlot>[];
+      final notices = here(KioskModule.notices)
+          ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
+          : const <Message>[];
+      final hasMatches =
+          here(KioskModule.matches) &&
+          kioskMatchWindow(
+            slots: ref.watch(prioritySlotsProvider),
+            today: Day.fromDateTime(now),
+            weeksBack: settings?.kioskWeeksBack ?? 2,
+            weeksAhead: settings?.kioskWeeksAhead ?? 1,
+            showUpcoming: settings?.kioskShowUpcoming ?? true,
+          ).matches.isNotEmpty;
+      // The canteen duty's plan (0073) is read only with its card here. A
+      // plan with nobody now and nobody ahead has nothing to say.
+      final plan = here(KioskModule.duty)
+          ? ref.watch(kioskDutyPlanProvider)
+          : null;
+      final duty = plan != null && (plan.now != null || plan.next.isNotEmpty)
+          ? plan
+          : null;
+      // The previous week's lines of ours (0078) are read only with their
+      // card here; a week without a line has nothing to rank.
+      final hasWeek =
+          here(KioskModule.week) &&
+          (ref.watch(weekPlayersProvider).value?.lines.isNotEmpty ?? false);
+      final entries = <KioskPanelEntry>[];
+      for (final placement in placed) {
+        final module = placement.module!;
+        final shows = switch (module) {
+          KioskModule.duty => duty != null,
+          KioskModule.notices => notices.isNotEmpty,
+          // The list — or the match being played alone, when the list's
+          // weeks hold no match (Sunday evening's, still live on Monday).
+          KioskModule.matches => hasMatches || live.isNotEmpty,
+          // A fixed text: always something to show.
+          KioskModule.guide => true,
+          KioskModule.week => hasWeek,
+        };
+        if (shows) entries.add(KioskPanelEntry(module, placement.share));
+      }
+      if (entries.isEmpty) return null;
+      return KioskPanelContent(
+        side: side,
+        entries: entries,
+        notices: notices,
+        hasMatches: hasMatches,
+        live: live,
+        duty: duty,
+      );
+    });
 
+/// What one panel shows (0077): [entries] are its modules with something
+/// to show, top to bottom; the rest is what those modules draw.
 class KioskPanelContent {
   const KioskPanelContent({
-    required this.notices,
-    required this.hasMatches,
-    required this.live,
+    required this.side,
+    required this.entries,
+    this.notices = const [],
+    this.hasMatches = false,
+    this.live = const [],
     this.duty,
   });
 
+  final PanelSide side;
+  final List<KioskPanelEntry> entries;
   final List<Message> notices;
+
+  /// The list of matches has a match in its weeks.
   final bool hasMatches;
 
-  /// Matches being played, with data; non-empty = the drawer shows only them.
+  /// Matches being played, with data; non-empty = the panel holding the
+  /// matches shows only them. Empty in the other panel.
   final List<PrioritySlot> live;
 
-  /// The canteen duty's plan for the card on top (0073, „V panelu“); null
-  /// with the card off or nothing planned.
+  /// The canteen duty's plan for its card (0073); null with the card in
+  /// another panel or nothing planned.
   final ({KioskDutyEntry? now, List<KioskDutyEntry> next})? duty;
 }
 
-class KioskDrawer extends ConsumerWidget {
-  const KioskDrawer({
+/// One module of a panel and its share of the panel's height, in percent
+/// (5–95). The shares of a panel are weights: they need not add up to 100.
+class KioskPanelEntry {
+  const KioskPanelEntry(this.module, this.share);
+
+  final KioskModule module;
+  final int share;
+}
+
+/// One side panel: its modules stacked top to bottom, each its share of
+/// the height with 12 px between them — or, while a match is being played,
+/// that match alone in the panel holding the matches.
+class KioskPanelView extends ConsumerWidget {
+  const KioskPanelView({
     super.key,
+    required this.side,
+    required this.width,
     required this.content,
     required this.open,
     this.hidden = false,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    this.onOpenGuide,
+    this.onOpenWeek,
     this.onPlay,
     this.resetToken = 0,
     this.boardDays,
@@ -178,14 +222,24 @@ class KioskDrawer extends ConsumerWidget {
     this.onShowLive,
   });
 
+  /// Left or right of the board: the panel grows from that edge of the
+  /// screen.
+  final PanelSide side;
+
+  /// Open, it is this wide: whole day columns of the board
+  /// ([kioskPanelWidths], worked out once by the shell for both panels).
+  final double width;
+
   /// False after a visitor switched from the match being played to the
   /// list of matches; the idle reset turns it back.
   final bool showLive;
 
-  /// Between the live view and the list: true = the live match.
+  /// Between the live view and the list: true = the live match. Null in
+  /// the panel without the matches.
   final void Function(bool live)? onShowLive;
 
-  /// Bumped by the shell on every idle reset.
+  /// Bumped by the shell on every idle reset: the cards that scroll or page
+  /// start over.
   final int resetToken;
 
   /// The days a visitor scrolled the board to, when the list follows it.
@@ -194,13 +248,21 @@ class KioskDrawer extends ConsumerWidget {
   final KioskPanelContent content;
   final bool open;
 
-  /// Out of the way while a visitor books: shut like a closed drawer, yet
+  /// Out of the way while a visitor books: shut like a closed panel, yet
   /// an [open] one keeps its contents built behind the scenes — the match
   /// being played keeps asking for its score, its pin and its turn, and is
   /// there as it was once the pick is cleared.
   final bool hidden;
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// A tap on „Jak začít“: the whole guide with the large QR code; null =
+  /// a tap does nothing.
+  final VoidCallback? onOpenGuide;
+
+  /// A tap on „Hráči týdne“: the whole week full screen; null = a tap does
+  /// nothing.
+  final VoidCallback? onOpenWeek;
 
   /// ▶ at a match with a video: its stream (0072); null while the admin
   /// has the streams off — no ▶ and no live badge.
@@ -210,58 +272,53 @@ class KioskDrawer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final settings = ref.watch(settingsProvider).value;
-    final width = kioskDrawerWidthFor(
-      MediaQuery.sizeOf(context).width,
-      columns: settings?.kioskDrawerColumns ?? 2,
-      visibleDays: settings?.kioskVisibleDays ?? 7,
-    );
     final noticeTurn = Duration(
       seconds: settings?.kioskNoticesRotationSeconds ?? 12,
     );
     final liveTurn = Duration(
       seconds: settings?.kioskLiveRotationSeconds ?? 12,
     );
-    final share = settings?.kioskNoticesShare ?? 40;
-    final notices = content.notices.isEmpty
-        ? null
-        : _NoticesCard(
-            notices: content.notices,
-            turn: noticeTurn,
-            fill: content.hasMatches,
-            onOpen: onOpenNotice,
-          );
-    final matches = content.hasMatches
-        // A new key after every idle reset: the list starts over (its
-        // weeks and its scroll) like the rest of the kiosk.
-        ? _MatchesCard(
-            key: ValueKey(resetToken),
-            onOpen: onOpenMatch,
-            onPlay: onPlay,
-            boardDays: boardDays,
-            // Back to the match being played, when one is.
-            onShowLive: content.live.isEmpty || onShowLive == null
-                ? null
-                : () => onShowLive!(true),
-          )
-        : null;
-    final plan = content.duty;
-    final duty = plan == null
-        ? null
-        // A new key after every idle reset, as the matches: scrolled down,
-        // the plan starts over at the top.
-        : _DutyCard(key: ValueKey(resetToken), plan: plan);
-    final dutyShare = settings?.kioskDutyShare ?? 30;
-    // The notices and the matches, split between them as the admin set it.
-    final rest = [
-      if (notices != null && matches != null) ...[
-        Expanded(flex: share, child: notices),
-        const SizedBox(height: 12),
-        Expanded(flex: 100 - share, child: matches),
-      ] else if (matches != null)
-        Expanded(child: matches)
-      else if (notices != null)
-        Flexible(child: notices),
-    ];
+    final entries = content.entries;
+    // The notices alone keep their natural height: one short notice is not
+    // stretched over the whole panel. With other modules each takes its
+    // share.
+    final noticesAlone =
+        entries.length == 1 && entries.single.module == KioskModule.notices;
+    Widget card(KioskModule module) => switch (module) {
+      // A new key after every idle reset: scrolled down, the plan starts
+      // over at the top.
+      KioskModule.duty => _DutyCard(
+        key: ValueKey(resetToken),
+        plan: content.duty!,
+      ),
+      KioskModule.notices => _NoticesCard(
+        notices: content.notices,
+        turn: noticeTurn,
+        fill: !noticesAlone,
+        onOpen: onOpenNotice,
+      ),
+      // A new key after every idle reset: the list starts over (its weeks
+      // and its scroll) like the rest of the kiosk.
+      KioskModule.matches => _MatchesCard(
+        key: ValueKey(resetToken),
+        onOpen: onOpenMatch,
+        onPlay: onPlay,
+        boardDays: boardDays,
+        // Back to the match being played, when one is.
+        onShowLive: content.live.isEmpty || onShowLive == null
+            ? null
+            : () => onShowLive!(true),
+      ),
+      KioskModule.guide => KioskGuideCard(onOpen: () => onOpenGuide?.call()),
+      // A new key after every idle reset, as the other cards of the
+      // panel: the card starts over.
+      KioskModule.week => KioskWeekCard(
+        key: ValueKey(resetToken),
+        onOpen: () => onOpenWeek?.call(),
+      ),
+    };
+    final showsLive =
+        content.live.isNotEmpty && (showLive || !content.hasMatches);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
@@ -269,23 +326,26 @@ class KioskDrawer extends ConsumerWidget {
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(color: scheme.surfaceContainer),
       // Laid out at its full width even while it grows or shrinks, so the
-      // text does not reflow during the animation.
+      // text does not reflow during the animation — from its inner edge,
+      // the one beside the board: the left panel slides out of the
+      // screen's left edge as the right one out of its right edge.
       child: OverflowBox(
-        alignment: Alignment.centerLeft,
+        alignment: side == PanelSide.left
+            ? Alignment.centerRight
+            : Alignment.centerLeft,
         minWidth: width,
         maxWidth: width,
         child: !open
             ? const SizedBox.shrink()
             : Offstage(
                 offstage: hidden,
-                child:
-                    content.live.isNotEmpty && (showLive || matches == null)
+                child: showsLive
                     ? _LiveView(
                         matches: content.live,
                         turn: liveTurn,
                         onOpenMatch: onOpenMatch,
                         onPlay: onPlay,
-                        onShowList: matches == null || onShowLive == null
+                        onShowList: !content.hasMatches || onShowLive == null
                             ? null
                             : () => onShowLive!(false),
                       )
@@ -294,23 +354,23 @@ class KioskDrawer extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // The canteen duty on top, its share of the
-                            // height (the rest keeps its own split below);
-                            // alone it fills.
-                            if (duty != null && rest.isNotEmpty) ...[
-                              Expanded(flex: dutyShare, child: duty),
-                              const SizedBox(height: 12),
-                              Expanded(
-                                flex: 100 - dutyShare,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: rest,
+                            // Keyed by the module: a module coming or
+                            // going (a notice expiring) leaves the others
+                            // their state.
+                            for (final (i, entry) in entries.indexed) ...[
+                              if (i > 0) const SizedBox(height: 12),
+                              if (noticesAlone)
+                                Flexible(
+                                  key: ValueKey(entry.module),
+                                  child: card(entry.module),
+                                )
+                              else
+                                Expanded(
+                                  key: ValueKey(entry.module),
+                                  flex: entry.share,
+                                  child: card(entry.module),
                                 ),
-                              ),
-                            ] else if (duty != null)
-                              Expanded(child: duty)
-                            else
-                              ...rest,
+                            ],
                           ],
                         ),
                       ),
@@ -320,19 +380,24 @@ class KioskDrawer extends ConsumerWidget {
   }
 }
 
-/// The button that opens and closes the drawer: a bare double arrow, gray
-/// and half see-through, floating over the board at the drawer's left edge
-/// (or the screen's, while it is closed). Every few seconds it breathes once
-/// — a soft glow and a little more opacity — so a tablet on the wall shows
-/// that there is something to open, without ever moving.
+/// The button that opens and closes a panel: a bare double arrow pointing
+/// the way the panel moves, gray and half see-through, floating over the
+/// board at the panel's inner edge (the right one at the board's right
+/// edge, the left one on the hour ruler — never over today's column).
+/// Every few seconds it breathes once — a soft glow and a little more
+/// opacity — so a tablet on the wall shows that there is something to
+/// open, without ever moving; both buttons breathe together.
 class KioskDrawerButton extends StatefulWidget {
   const KioskDrawerButton({
     super.key,
+    required this.side,
     required this.open,
     required this.onTap,
     this.breathe = true,
-  });
+  }) : assert(side != PanelSide.off);
 
+  /// The panel it opens and closes: left or right.
+  final PanelSide side;
   final bool open;
   final VoidCallback onTap;
 
@@ -346,6 +411,22 @@ class KioskDrawerButton extends StatefulWidget {
   /// One breath, and the rest between two.
   static const pulse = Duration(milliseconds: 2400);
   static const pause = Duration(milliseconds: 1800);
+
+  /// How long from [now] until the next breath. Every button breathes at
+  /// the multiples of [pulse] + [pause] on the wall clock, whenever it
+  /// appeared: the two panels' buttons breathe together, and the screen
+  /// rests between — two breaths out of step would leave it hardly any
+  /// frame without an animation.
+  static Duration untilBreath(DateTime now) {
+    final period = (pulse + pause).inMilliseconds;
+    final into = now.millisecondsSinceEpoch % period;
+    return Duration(milliseconds: into == 0 ? 0 : period - into);
+  }
+
+  /// The wall clock the breaths keep time by; a widget test hands in its
+  /// fake one, which moves with the pumps.
+  @visibleForTesting
+  static DateTime Function() clock = DateTime.now;
 
   @override
   State<KioskDrawerButton> createState() => _KioskDrawerButtonState();
@@ -380,12 +461,18 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
     }
   }
 
-  /// One breath, then a rest on a timer (not a repeating animation, which
-  /// would keep a test's pumpAndSettle from ever settling).
+  /// A rest on a timer until the shared rhythm's next breath
+  /// ([KioskDrawerButton.untilBreath]), then one breath, and again (not a
+  /// repeating animation, which would keep a test's pumpAndSettle from ever
+  /// settling).
   void _breathe() {
-    _controller.forward(from: 0).whenComplete(() {
+    _rest?.cancel();
+    final wait = KioskDrawerButton.untilBreath(KioskDrawerButton.clock());
+    _rest = Timer(wait, () {
       if (!mounted) return;
-      _rest = Timer(KioskDrawerButton.pause, _breathe);
+      _controller.forward(from: 0).whenComplete(() {
+        if (mounted) _breathe();
+      });
     });
   }
 
@@ -399,9 +486,17 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final left = widget.side == PanelSide.left;
+    // The way a tap moves the panel: the right one opens to the left and
+    // closes to the right, the left one the other way round.
+    final towardsRight = left != widget.open;
     return Semantics(
+      // A node of its own: two buttons, each known by its label.
+      container: true,
       button: true,
-      label: widget.open ? 'Skrýt panel' : 'Zobrazit panel',
+      label:
+          '${widget.open ? 'Skrýt' : 'Zobrazit'} '
+          '${left ? 'levý' : 'pravý'} panel',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
@@ -410,7 +505,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
           height: KioskDrawerButton.size,
           child: Center(
             // Its own layer: a breath repaints the icon, not the board and
-            // the drawer under it.
+            // the panel under it.
             child: RepaintBoundary(
               child: AnimatedBuilder(
                 animation: _controller,
@@ -418,7 +513,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
                   // 0 → 1 → 0 over one breath; 0 while the button is still.
                   final glow = math.sin(_controller.value * math.pi);
                   return Icon(
-                    widget.open
+                    towardsRight
                         ? Icons.keyboard_double_arrow_right
                         : Icons.keyboard_double_arrow_left,
                     size: 44,
@@ -463,11 +558,13 @@ class _Swipe extends StatelessWidget {
   );
 }
 
-/// A rounded card with a title; [fill] makes its body take all the height
-/// the card is given (a slot of the drawer), otherwise it is as tall as its
-/// content.
-class _Card extends StatelessWidget {
-  const _Card({
+/// A rounded card with a title, the frame of every module of a panel
+/// (public for the modules that live in files of their own); [fill] makes
+/// its body take all the height the card is given (its slot of the
+/// panel), otherwise it is as tall as its content.
+class KioskCard extends StatelessWidget {
+  const KioskCard({
+    super.key,
     required this.icon,
     required this.title,
     required this.child,
@@ -540,7 +637,7 @@ class _DutyCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = plan.now;
     final muted = TextStyle(fontSize: 15, color: scheme.onSurfaceVariant);
-    return _Card(
+    return KioskCard(
       icon: Icons.local_cafe_outlined,
       title: 'SLUŽBA NA KANTÝNĚ',
       fill: true,
@@ -722,7 +819,7 @@ class _NoticesCardState extends State<_NoticesCard> {
     final notices = widget.notices;
     final scheme = Theme.of(context).colorScheme;
     final m = notices[_index.clamp(0, notices.length - 1)];
-    return _Card(
+    return KioskCard(
       icon: Icons.campaign_outlined,
       title: 'NÁSTĚNKA',
       fill: widget.fill,
@@ -1101,7 +1198,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     );
 
     final showLive = widget.onShowLive;
-    return _Card(
+    return KioskCard(
       icon: Icons.emoji_events_outlined,
       title: 'ZÁPASY',
       // A match is being played: back to it.

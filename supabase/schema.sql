@@ -2519,6 +2519,63 @@ $$;
 ALTER FUNCTION "public"."is_superadmin"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") RETURNS boolean
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_side text;
+  v_panel jsonb;
+  v_module jsonb;
+  v_ids text[] := '{}';
+begin
+  if jsonb_typeof(p) is distinct from 'object' then
+    return false;
+  end if;
+  foreach v_side in array array['left', 'right'] loop
+    v_panel := p -> v_side;
+    if jsonb_typeof(v_panel) is distinct from 'object'
+       or jsonb_typeof(v_panel -> 'days') is distinct from 'number'
+       or jsonb_typeof(v_panel -> 'open') is distinct from 'boolean' then
+      return false;
+    end if;
+    -- A JSON number: its text always casts to numeric.
+    if (v_panel ->> 'days')::numeric <> trunc((v_panel ->> 'days')::numeric)
+       or (v_panel ->> 'days')::numeric not between 1 and 13 then
+      return false;
+    end if;
+  end loop;
+  if jsonb_typeof(p -> 'modules') is distinct from 'array' then
+    return false;
+  end if;
+  for v_module in select value from jsonb_array_elements(p -> 'modules') loop
+    if jsonb_typeof(v_module) is distinct from 'object'
+       or jsonb_typeof(v_module -> 'id') is distinct from 'string'
+       or jsonb_typeof(v_module -> 'side') is distinct from 'string'
+       or jsonb_typeof(v_module -> 'share') is distinct from 'number' then
+      return false;
+    end if;
+    if v_module ->> 'id' = '' or v_module ->> 'id' = any (v_ids)
+       or v_module ->> 'side' not in ('off', 'left', 'right')
+       or (v_module ->> 'share')::numeric
+            <> trunc((v_module ->> 'share')::numeric)
+       or (v_module ->> 'share')::numeric not between 5 and 95 then
+      return false;
+    end if;
+    v_ids := v_ids || (v_module ->> 'id');
+  end loop;
+  return true;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") IS 'Whether a value is a kiosk panel layout (0077), for the check on schedule_settings.kiosk_panels; never raises. authenticated executes it: the check runs as the admin who saves.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2547,6 +2604,61 @@ ALTER FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") OWNER TO "po
 
 COMMENT ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") IS 'Kiosk účtu p_user_id smí správce téže kuželny nastavit nové heslo — vrací jeho id, jinak not_allowed/unknown_kiosk. Volá edge funkce kiosk-password jménem volajícího.';
 
+
+
+CREATE OR REPLACE FUNCTION "public"."kiosk_week_players"("p_monday" "date" DEFAULT NULL::"date") RETURNS TABLE("match_id" "uuid", "date" "date", "player_name" "text", "player_slug" "text", "total" integer, "errors" integer, "throws" integer, "is_away" boolean, "competition" "text", "team_name" "text", "opponent" "text", "club_id" "uuid", "club_name" "text", "club_color" integer, "gender" "text")
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  -- Any day of a week stands for its Monday. Without a day it is the
+  -- previous week in Prague, since the database runs in UTC. The app always
+  -- passes one, so its title and its gender look-ups name the same week.
+  v_monday constant date := coalesce(
+    date_trunc('week', p_monday)::date,
+    date_trunc('week', now() at time zone 'Europe/Prague')::date - 7);
+begin
+  if not is_approved_or_kiosk() then
+    raise exception 'not_allowed';
+  end if;
+  -- Every column is qualified: the output columns are variables here.
+  return query
+  select p.id, p.date, l.player_name, l.player_slug, l.total, l.errors,
+         case
+           when r.discipline = 'T120' then 120
+           when r.discipline = 'T100' then 100
+           -- No discipline stored: the lanes tell (4 × 30 or 2 × 50 throws).
+           when jsonb_typeof(l.lanes) <> 'array' then null
+           when jsonb_array_length(l.lanes) = 4 then 120
+           when jsonb_array_length(l.lanes) = 2 then 100
+         end,
+         -- The alley's home or away, as on the board, not the line's side:
+         -- in a derby at our alley both sides are at home.
+         p.is_away, p.competition, t.name,
+         case l.side when 'home' then p.away_team else p.home_team end,
+         c.id, c.name, coalesce(c.color, -1), g.gender
+    from priority_slots p
+    join match_results r on r.match_id = p.id
+    join match_player_results l on l.match_id = p.id
+    join teams t
+      on t.tenant_id = p.tenant_id
+     and t.site_slug = case l.side when 'home' then p.home_team_slug
+                                   else p.away_team_slug end
+    left join clubs c on c.id = t.club_id
+    left join site_player_regnums g on g.slug = l.player_slug
+   where p.tenant_id = current_tenant_id()
+     and p.import_key like 'cka:%'
+     and p.parent_id is null
+     and p.date between v_monday and v_monday + 6
+     and r.status in ('finished', 'forfeit')
+     and l.sub_name is null
+     and l.total is not null
+   order by p.date, p.starts_at, p.id, l.side, l.position;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."kiosk_week_players"("p_monday" "date") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") RETURNS boolean
@@ -5669,13 +5781,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
     "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
     "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
-    "kiosk_panel_enabled" boolean DEFAULT true NOT NULL,
-    "kiosk_drawer_open" boolean DEFAULT false NOT NULL,
-    "kiosk_drawer_columns" smallint DEFAULT 2 NOT NULL,
-    "kiosk_notices_mode" "text" DEFAULT 'both'::"text" NOT NULL,
     "kiosk_notices_rotation_seconds" smallint DEFAULT 12 NOT NULL,
-    "kiosk_notices_share" smallint DEFAULT 40 NOT NULL,
-    "kiosk_show_matches" boolean DEFAULT true NOT NULL,
     "kiosk_show_upcoming" boolean DEFAULT true NOT NULL,
     "kiosk_weeks_back" smallint DEFAULT 2 NOT NULL,
     "kiosk_weeks_ahead" smallint DEFAULT 1 NOT NULL,
@@ -5707,12 +5813,12 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,
     "kiosk_duty_header" boolean DEFAULT false NOT NULL,
     "kiosk_duty_board" boolean DEFAULT false NOT NULL,
-    "kiosk_duty_drawer" boolean DEFAULT false NOT NULL,
-    "kiosk_duty_share" smallint DEFAULT 30 NOT NULL,
     "kiosk_duty_band_position" "text" DEFAULT 'middle'::"text" NOT NULL,
     "kiosk_warning_font_size" smallint DEFAULT 22 NOT NULL,
     "kiosk_day_matches_width" smallint DEFAULT 560 NOT NULL,
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
+    "kiosk_panels" "jsonb" DEFAULT '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false}, "modules": [{"id": "duty", "side": "off", "share": 30}, {"id": "notices", "side": "right", "share": 40}, {"id": "matches", "side": "right", "share": 60}, {"id": "guide", "side": "off", "share": 45}, {"id": "week", "side": "off", "share": 55}]}'::"jsonb" NOT NULL,
+    "kiosk_notices_header" boolean DEFAULT true NOT NULL,
     "kiosk_zapis_nav" boolean DEFAULT true NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
@@ -5720,20 +5826,17 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_band_font_size_check" CHECK ((("kiosk_band_font_size" >= 8) AND ("kiosk_band_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_day_matches_width_check" CHECK ((("kiosk_day_matches_width" >= 340) AND ("kiosk_day_matches_width" <= 1200))),
-    CONSTRAINT "schedule_settings_kiosk_drawer_columns_check" CHECK ((("kiosk_drawer_columns" >= 1) AND ("kiosk_drawer_columns" <= 13))),
     CONSTRAINT "schedule_settings_kiosk_duty_band_position_check" CHECK (("kiosk_duty_band_position" = ANY (ARRAY['top'::"text", 'middle'::"text", 'bottom'::"text"]))),
-    CONSTRAINT "schedule_settings_kiosk_duty_share_check" CHECK ((("kiosk_duty_share" >= 10) AND ("kiosk_duty_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_font_size_check" CHECK ((("kiosk_font_size" >= 9) AND ("kiosk_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
-    CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_panels_check" CHECK ("public"."kiosk_panels_valid"("kiosk_panels")),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_picker_mode_check" CHECK (("kiosk_picker_mode" = ANY (ARRAY['letters'::"text", 'clubs'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_picker_note_check" CHECK ((("kiosk_picker_note" IS NULL) OR (("char_length"("btrim"("kiosk_picker_note")) >= 1) AND ("char_length"("btrim"("kiosk_picker_note")) <= 300)))),
-    CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_stream_corner_check" CHECK (("kiosk_stream_corner" = ANY (ARRAY['tl'::"text", 'tr'::"text", 'bl'::"text", 'br'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_stream_max_check" CHECK ((("kiosk_stream_max" >= 1) AND ("kiosk_stream_max" <= 4))),
     CONSTRAINT "schedule_settings_kiosk_stream_width_check" CHECK ((("kiosk_stream_width" >= 20) AND ("kiosk_stream_width" <= 60))),
@@ -5758,12 +5861,23 @@ COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_days" IS 'How many
 
 
 
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_panels" IS 'The kiosk''s two panels and the modules in them (0077): left/right {days 1–13, open}, modules [{id, side off|left|right, share 5–95}] in their order. kiosk_panels_valid checks the shape only; the app keeps an id it does not know.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_header" IS 'Nástěnka''s line in the kiosk''s status bar, one notice title at a time (0077: the header half of the dropped kiosk_notices_mode). Default on.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."site_player_regnums" (
     "slug" "text" NOT NULL,
     "regnum" "text",
     "status" "text" NOT NULL,
     "looked_up_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "gender" "text",
+    "gender_checked_at" timestamp with time zone,
     CONSTRAINT "site_player_regnums_check" CHECK ((("status" = 'found'::"text") = ("regnum" IS NOT NULL))),
+    CONSTRAINT "site_player_regnums_gender_check" CHECK (("gender" = ANY (ARRAY['m'::"text", 'f'::"text"]))),
     CONSTRAINT "site_player_regnums_regnum_check" CHECK ((("regnum" IS NULL) OR ("regnum" ~ '^[0-9]{1,8}$'::"text"))),
     CONSTRAINT "site_player_regnums_slug_check" CHECK (("slug" ~ '^[a-z0-9][a-z0-9-]{0,99}$'::"text")),
     CONSTRAINT "site_player_regnums_status_check" CHECK (("status" = ANY (ARRAY['found'::"text", 'none'::"text", 'ambiguous'::"text"])))
@@ -5773,7 +5887,15 @@ CREATE TABLE IF NOT EXISTS "public"."site_player_regnums" (
 ALTER TABLE "public"."site_player_regnums" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."site_player_regnums" IS 'regnum-lookup cache of MATCH players, by results-service player slug (0059): resolved by the service page''s club and age against the register. Service role only.';
+COMMENT ON TABLE "public"."site_player_regnums" IS 'regnum-lookup cache of MATCH players, by results-service player slug (0059): resolved by the service page''s club and age against the register. Since 0078 it also keeps the register''s gender (m / f, null = unknown) and when that was last asked for. Service role only.';
+
+
+
+COMMENT ON COLUMN "public"."site_player_regnums"."gender" IS 'The ČKA register''s gender of the player (0078): m or f, null = unknown. regnum-lookup writes it with the number, or alone for a player found earlier; kiosk_week_players joins it.';
+
+
+
+COMMENT ON COLUMN "public"."site_player_regnums"."gender_checked_at" IS 'When regnum-lookup last asked the register for this player''s gender (0078), null = never. While gender is null it is asked again after a week.';
 
 
 
@@ -7305,9 +7427,21 @@ GRANT ALL ON FUNCTION "public"."is_on_duty"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."kiosk_week_players"("p_monday" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."kiosk_week_players"("p_monday" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."kiosk_week_players"("p_monday" "date") TO "service_role";
 
 
 

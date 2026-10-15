@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
 
 void main() {
@@ -168,8 +170,8 @@ void main() {
       expect(ScheduleSettings.fromJson(base).kioskStreamMax, 1);
     });
 
-    test('fromJson reads the kiosk\'s duty places and the card\'s share '
-        '(0073); off and 30 % when absent', () {
+    test('fromJson reads the kiosk\'s duty places (0073); off when absent',
+        () {
       const base = {
         'lane_count': 4,
         'training_weekdays': [1, 2, 4],
@@ -180,22 +182,34 @@ void main() {
         ...base,
         'kiosk_duty_header': true,
         'kiosk_duty_board': true,
-        'kiosk_duty_drawer': true,
-        'kiosk_duty_share': 55,
       });
       expect(on.kioskDutyHeader, isTrue);
       expect(on.kioskDutyBoard, isTrue);
-      expect(on.kioskDutyDrawer, isTrue);
-      expect(on.kioskDutyShare, 55);
       final old = ScheduleSettings.fromJson(base);
       expect(old.kioskDutyHeader, isFalse);
       expect(old.kioskDutyBoard, isFalse);
-      expect(old.kioskDutyDrawer, isFalse);
-      expect(old.kioskDutyShare, 30);
       expect(ScheduleSettings.defaults.kioskDutyHeader, isFalse);
       expect(ScheduleSettings.defaults.kioskDutyBoard, isFalse);
-      expect(ScheduleSettings.defaults.kioskDutyDrawer, isFalse);
-      expect(ScheduleSettings.defaults.kioskDutyShare, 30);
+    });
+
+    test('a cached row from before 0077, with the dropped drawer columns '
+        'still in it, reads as the default layout', () {
+      final s = ScheduleSettings.fromJson({
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+        'kiosk_panel_enabled': false,
+        'kiosk_drawer_open': true,
+        'kiosk_drawer_columns': 5,
+        'kiosk_notices_mode': 'off',
+        'kiosk_notices_share': 70,
+        'kiosk_show_matches': false,
+        'kiosk_duty_drawer': true,
+        'kiosk_duty_share': 55,
+      });
+      expect(s.kioskPanels, KioskPanels.defaults);
+      expect(s.kioskNoticesHeader, isTrue);
     });
 
     test('fromJson reads where the duty band runs (0073); between the date '
@@ -291,6 +305,56 @@ void main() {
       );
       expect(ScheduleSettings.fromJson(base).kioskStreamEnabled, isTrue);
       expect(ScheduleSettings.defaults.kioskStreamEnabled, isTrue);
+    });
+
+    test('fromJson reads the kiosk panels and the notices\' header line '
+        '(0077); the default layout and on when absent', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      final read = ScheduleSettings.fromJson({
+        ...base,
+        'kiosk_panels': {
+          'left': {'days': 3, 'open': true},
+          'right': {'days': 2, 'open': false},
+          'modules': [
+            {'id': 'guide', 'side': 'left', 'share': 45},
+            {'id': 'week', 'side': 'left', 'share': 55},
+            {'id': 'notices', 'side': 'right', 'share': 40},
+          ],
+        },
+        'kiosk_notices_header': false,
+      });
+      expect(read.kioskPanels.left, const KioskPanel(days: 3, open: true));
+      expect(
+        [for (final m in read.kioskPanels.modulesOn(PanelSide.left)) m.id],
+        ['guide', 'week'],
+      );
+      expect(read.kioskPanels.sideOf(KioskModule.matches), PanelSide.off);
+      expect(read.kioskNoticesHeader, isFalse);
+      final old = ScheduleSettings.fromJson(base);
+      expect(old.kioskPanels, KioskPanels.defaults);
+      expect(old.kioskNoticesHeader, isTrue);
+      expect(ScheduleSettings.defaults.kioskPanels, KioskPanels.defaults);
+      expect(ScheduleSettings.defaults.kioskNoticesHeader, isTrue);
+    });
+
+    test('the default panel layout is the column\'s default, value for value',
+        () {
+      // Every alley without a saved layout gets 0077's default; the app's
+      // fallback must be the same layout.
+      final sql = File(
+        'supabase/migrations/0077_kiosk_panels.sql',
+      ).readAsStringSync();
+      final column = RegExp(
+        r"kiosk_panels\s+jsonb[^;']*?default\s+'(\{[^']*\})'",
+      ).firstMatch(sql)!.group(1)!;
+      final decoded = jsonDecode(column);
+      expect(decoded, KioskPanels.defaults.toJson());
+      expect(KioskPanels.fromJson(decoded), KioskPanels.defaults);
     });
   });
 
