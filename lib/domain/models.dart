@@ -719,8 +719,9 @@ enum KioskCorner {
 
   /// This corner, then the one above or below it, the one beside it, the
   /// one across: where the kiosk's further stream windows appear (0072) —
-  /// the same side first, the drawer's side (the default corner is bottom
-  /// left) last.
+  /// the same side first, the other side last. A window covers the side
+  /// panel on its side (0077); the admin picks a corner on the side without
+  /// a panel (the default is bottom left).
   List<KioskCorner> get fromHere => [
     this,
     _at(top: !top, left: left),

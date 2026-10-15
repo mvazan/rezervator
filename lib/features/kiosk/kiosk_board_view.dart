@@ -89,9 +89,10 @@ class KioskBoardView extends ConsumerStatefulWidget {
   final void Function(PrioritySlot match)? onPlayVideo;
 
   /// The width the day columns are sized for, instead of the board's own.
-  /// The kiosk shell passes the width left beside the OPEN drawer, so the
-  /// columns keep one width while the drawer slides in and out — sized to
-  /// the board's changing width they were re-laid out on every frame.
+  /// The kiosk shell passes the whole screen's width: each side panel is a
+  /// whole number of these columns, and the columns keep one width while a
+  /// panel slides in and out — sized to the board's changing width they
+  /// were re-laid out on every frame.
   final double? columnBasisWidth;
 
   /// A visitor scrolled the board: the first and the last day now in view.
