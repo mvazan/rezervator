@@ -809,7 +809,7 @@ class ScheduleSettings {
   /// other days sees the list turn to their matches (0064).
   final bool kioskFollowBoard;
 
-  /// The kiosk's animations on their own: the drawer button breathes — a
+  /// The kiosk's animations on their own: the panels' buttons breathe — a
   /// glow every few seconds (0065) — and the live-stream badge pulses (the
   /// live view, the day's list). Off for a slow display, where they repaint
   /// the screen for nothing.
@@ -922,7 +922,8 @@ class ScheduleSettings {
   /// cancelled at the kiosk; null = none.
   final String? kioskPickerNote;
 
-  /// How a match being played is drawn in the drawer (0064).
+  /// How a match being played is drawn in the panel holding the match
+  /// list (0064).
   final MatchLayout kioskLiveLayout;
 
   /// The settings row's tenant — the update key since 0005 (one row per
