@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/week_players.dart';
@@ -311,7 +313,7 @@ void main() {
     test('every line with a slug has its gender: one read, no lookup', () async {
       var reads = 0;
       var lookups = 0;
-      final lines = await loadWeekLines(
+      final weeks = await loadWeekLines(
         monday,
         read: (m) async {
           expect(m, monday);
@@ -330,17 +332,18 @@ void main() {
           lookups++;
           return false;
         },
-      );
+      ).toList();
       expect(reads, 1);
       expect(lookups, 0);
-      expect(lines.length, 2);
+      expect(weeks.single.monday, monday);
+      expect(weeks.single.lines.length, 2);
     });
 
-    test('a gender missing: asks while there is more, at most four times, '
-        'then reads again', () async {
+    test('a gender missing: the first read at once, then asks while there '
+        'is more, at most four times, and hands on the second read', () async {
       var reads = 0;
       var lookups = 0;
-      final lines = await loadWeekLines(
+      final weeks = await loadWeekLines(
         monday,
         read: (_) async {
           reads++;
@@ -353,10 +356,49 @@ void main() {
           lookups++;
           return true;
         },
-      );
+      ).toList();
       expect(lookups, weekGenderRounds);
       expect(reads, 2);
-      expect(lines.single.gender, WeekGender.male);
+      expect([for (final w in weeks) w.monday], [monday, monday]);
+      expect([for (final w in weeks) w.lines.single.gender], [
+        null,
+        WeekGender.male,
+      ]);
+    });
+
+    test('the first read reaches the listener while the lookup is still '
+        'pending: a slow register never holds the lines back', () async {
+      final pending = Completer<bool>();
+      var reads = 0;
+      var lookups = 0;
+      final seen = <WeekLines>[];
+      final first = Completer<void>();
+      final done = loadWeekLines(
+        monday,
+        read: (_) async {
+          reads++;
+          return [
+            line('Jan Novák', 500, gender: reads == 1 ? null : WeekGender.male),
+          ];
+        },
+        lookup: (_) {
+          lookups++;
+          return pending.future;
+        },
+      ).listen((week) {
+        seen.add(week);
+        if (!first.isCompleted) first.complete();
+      }).asFuture<void>();
+
+      await first.future;
+      expect(pending.isCompleted, isFalse);
+      expect(seen.single.lines.single.gender, isNull);
+
+      pending.complete(false);
+      await done;
+      expect(lookups, 1);
+      expect(seen.length, 2);
+      expect(seen.last.lines.single.gender, WeekGender.male);
     });
 
     test('the lookup done in one round: no second ask', () async {
@@ -368,7 +410,7 @@ void main() {
           lookups++;
           return false;
         },
-      );
+      ).drain<void>();
       expect(lookups, 1);
     });
 
@@ -382,12 +424,12 @@ void main() {
           reads++;
           return [line('Jan Novák', 500 + reads, gender: null)];
         },
-        lookup: (_) async => throw StateError('offline'),
+        lookup: (_) async => throw TimeoutException('register'),
         onError: errors.add,
-      );
+      ).toList();
       expect(reads, 2);
-      expect(again.single.total, 502);
-      expect(errors.single, isA<StateError>());
+      expect([for (final w in again) w.lines.single.total], [501, 502]);
+      expect(errors.single, isA<TimeoutException>());
 
       errors.clear();
       reads = 0;
@@ -399,19 +441,19 @@ void main() {
         },
         lookup: (_) async => false,
         onError: errors.add,
-      );
-      expect(first.single.total, 500);
+      ).toList();
+      expect(first.single.lines.single.total, 500);
       expect(errors.single, isA<StateError>());
     });
 
-    test('a failed first read is the caller\'s error', () async {
+    test('a failed first read is the stream\'s error', () async {
       await expectLater(
         loadWeekLines(
           monday,
           read: (_) async => throw StateError('offline'),
           lookup: (_) async => false,
         ),
-        throwsStateError,
+        emitsError(isStateError),
       );
     });
   });

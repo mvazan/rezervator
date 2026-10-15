@@ -271,20 +271,28 @@ typedef WeekLines = ({Day monday, List<WeekLine> lines});
 /// a limited number of players (regnum-lookup's budget).
 const weekGenderRounds = 4;
 
-/// The week from [monday] as the kiosk reads it: [read] the lines; while a
-/// line with a slug lacks its gender, [lookup] the genders in rounds while
-/// it says there are more (at most [rounds]), then [read] again. The
-/// genders are best effort: a failed lookup, or a failed second read,
-/// leaves the first read ([onError] hears why). A failed first read throws.
-Future<List<WeekLine>> loadWeekLines(
+/// How long one ask for the week's genders may take: the register can be
+/// slow or down, and a call can run until the Edge Function is killed —
+/// minutes in which the second read would wait.
+const weekGenderTimeout = Duration(seconds: 20);
+
+/// The week from [monday] as the kiosk reads it: [read] the lines and hand
+/// them on at once — the card shows them however long the register takes.
+/// Then, while a line with a slug lacks its gender, [lookup] the genders in
+/// rounds while it says there are more (at most [rounds]) and [read] again,
+/// handing on the refined lines. The genders are best effort: a failed
+/// lookup, or a failed second read, leaves the first read ([onError] hears
+/// why). A failed first read is the stream's error.
+Stream<WeekLines> loadWeekLines(
   Day monday, {
   required Future<List<WeekLine>> Function(Day monday) read,
   required Future<bool> Function(Day monday) lookup,
   int rounds = weekGenderRounds,
   void Function(Object error)? onError,
-}) async {
+}) async* {
   final lines = await read(monday);
-  if (!lines.any((l) => l.needsGender)) return lines;
+  yield (monday: monday, lines: lines);
+  if (!lines.any((l) => l.needsGender)) return;
   try {
     for (var round = 0; round < rounds; round++) {
       if (!await lookup(monday)) break;
@@ -293,10 +301,12 @@ Future<List<WeekLine>> loadWeekLines(
     // A round before the failed one may have found some: read anyway.
     onError?.call(e);
   }
+  final List<WeekLine> refined;
   try {
-    return await read(monday);
+    refined = await read(monday);
   } catch (e) {
     onError?.call(e);
-    return lines;
+    return;
   }
+  yield (monday: monday, lines: refined);
 }

@@ -2168,12 +2168,15 @@ class Api {
   /// Asks the server to find in the ČKA register the genders the lines of
   /// the week from [monday] lack (`regnum-lookup` week mode, 0078) — it
   /// reads the lines as the caller, so the kiosk may ask. True: it ran out
-  /// of budget before every player — ask again.
+  /// of budget before every player — ask again. Gives up after
+  /// [weekGenderTimeout] (a TimeoutException): the register can hang.
   static Future<bool> lookupWeekGenders(Day monday) async {
-    final response = await _db.functions.invoke(
-      'regnum-lookup',
-      body: {'mode': 'week', 'monday': monday.toSql()},
-    );
+    final response = await _db.functions
+        .invoke(
+          'regnum-lookup',
+          body: {'mode': 'week', 'monday': monday.toSql()},
+        )
+        .timeout(weekGenderTimeout);
     final data = response.data;
     return data is Map && data['more'] == true;
   }
@@ -2459,11 +2462,12 @@ final profileRegnumsProvider = FutureProvider.autoDispose<int>(
 /// ([previousWeekMonday] of the app clock). Computed by the server on every
 /// read — a late fetch, a correction within 14 days or a gender found later
 /// all change a past week — and read again every hour, at the week's turn
-/// (Monday 00:00 is an hour's turn too) and when the app wakes. While lines
-/// lack a gender, each read first lets the server look them up
-/// ([loadWeekLines]). A failed read keeps the lines shown before it — with
-/// the Monday they are of ([WeekLines]), which the titles name.
-final weekPlayersProvider = FutureProvider<WeekLines>((ref) async {
+/// (Monday 00:00 is an hour's turn too) and when the app wakes. Each read
+/// shows its lines at once; while some lack a gender, it then lets the
+/// server look them up and reads again ([loadWeekLines]). A failed read
+/// keeps the lines shown before it — with the Monday they are of
+/// ([WeekLines]), which the titles name.
+final weekPlayersProvider = StreamProvider<WeekLines>((ref) {
   // The minute clock reaches this provider only when the hour or the week
   // turns.
   final (monday, _) = ref.watch(
@@ -2473,17 +2477,16 @@ final weekPlayersProvider = FutureProvider<WeekLines>((ref) async {
     }),
   );
   if (ref.watch(_authUidProvider) == null) {
-    return (monday: monday, lines: const <WeekLine>[]);
+    return Stream.value((monday: monday, lines: const <WeekLine>[]));
   }
   final wake = LiveRefresh.stream.listen((_) => ref.invalidateSelf());
   ref.onDispose(wake.cancel);
-  final lines = await loadWeekLines(
+  return loadWeekLines(
     monday,
     read: Api.kioskWeekPlayers,
     lookup: Api.lookupWeekGenders,
     onError: (e) => debugPrint('Hráči týdne $monday: $e'),
   );
-  return (monday: monday, lines: lines);
 });
 
 /// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped

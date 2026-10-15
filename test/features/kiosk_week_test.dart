@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -118,9 +119,34 @@ void main() {
   List<Override> overrides(List<WeekLine> lines, {Day? monday}) => [
     nowProvider.overrideWith((ref) => Stream.value(now)),
     weekPlayersProvider.overrideWith(
-      (ref) async => (monday: monday ?? lastWeek, lines: lines),
+      (ref) => Stream.value((monday: monday ?? lastWeek, lines: lines)),
     ),
   ];
+
+  /// The provider's own read ([loadWeekLines]) with the server stood in
+  /// for: the first read has no gender, the one after the [lookup] has.
+  List<Override> lookingUp(Future<bool> Function(Day monday) lookup) {
+    var reads = 0;
+    return [
+      nowProvider.overrideWith((ref) => Stream.value(now)),
+      weekPlayersProvider.overrideWith(
+        (ref) => loadWeekLines(
+          lastWeek,
+          read: (_) async {
+            reads++;
+            return [
+              line(
+                'Jan Novák',
+                571,
+                gender: reads == 1 ? null : WeekGender.male,
+              ),
+            ];
+          },
+          lookup: lookup,
+        ),
+      ),
+    ];
+  }
 
   Future<void> pumpCard(
     WidgetTester tester,
@@ -128,10 +154,11 @@ void main() {
     List<WeekLine> lines, {
     VoidCallback? onOpen,
     Day? monday,
+    List<Override>? scope,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: overrides(lines, monday: monday),
+        overrides: scope ?? overrides(lines, monday: monday),
         child: MaterialApp(
           theme: buildTheme(Brightness.dark),
           home: Scaffold(
@@ -221,6 +248,30 @@ void main() {
       expect(find.text('1. KLM'), findsOneWidget);
       expect(find.text('Divize AS'), findsOneWidget);
       expect(find.text('1. Petr Malý'), findsOneWidget);
+    });
+
+    testWidgets('the first read shows while the register lookup is still '
+        'pending; the categories once it found the genders', (tester) async {
+      fullHd(tester);
+      final pending = Completer<bool>();
+      await pumpCard(
+        tester,
+        cardSize(days: 2, share: 100),
+        const [],
+        scope: lookingUp((_) => pending.future),
+      );
+      expect(pending.isCompleted, isFalse);
+      expect(find.text('HRÁČI TÝDNE · 5.–11. 10.'), findsOneWidget);
+      // No gender yet: the competition.
+      expect(find.text('Divize AS'), findsOneWidget);
+      expect(find.text('1. Jan Novák'), findsOneWidget);
+
+      pending.complete(false);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(WeekCategory.men120.label), findsOneWidget);
+      expect(find.text('Divize AS'), findsNothing);
+      expect(find.text('1. Jan Novák'), findsOneWidget);
     });
 
     testWidgets('a tap anywhere on the card opens the week', (tester) async {
@@ -494,6 +545,52 @@ void main() {
         [for (final e in full!.entries) (e.module, e.share)],
         [(KioskModule.guide, 45), (KioskModule.week, 55)],
       );
+    });
+
+    test('the first read takes its room at once, the register lookup still '
+        'pending', () async {
+      final pending = Completer<bool>();
+      final container = ProviderContainer(
+        overrides: [
+          ...lookingUp((_) => pending.future),
+          settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        ],
+      );
+      addTearDown(container.dispose);
+      final sub = container.listen(
+        kioskPanelContentProvider(PanelSide.left),
+        (_, _) {},
+      );
+      addTearDown(sub.close);
+      await container.read(settingsProvider.future);
+      await container.read(nowProvider.future);
+      final first = await container.read(weekPlayersProvider.future);
+      expect(pending.isCompleted, isFalse);
+      expect(first.lines.single.gender, isNull);
+      expect(
+        [
+          for (final e
+              in container
+                  .read(kioskPanelContentProvider(PanelSide.left))!
+                  .entries)
+            e.module,
+        ],
+        [KioskModule.guide, KioskModule.week],
+      );
+
+      // Then the lookup ends and the second read refines the week.
+      final refined = Completer<WeekLines>();
+      final watch = container.listen(weekPlayersProvider, (_, next) {
+        final week = next.value;
+        if (week != null &&
+            week.lines.single.gender != null &&
+            !refined.isCompleted) {
+          refined.complete(week);
+        }
+      });
+      addTearDown(watch.close);
+      pending.complete(false);
+      expect((await refined.future).lines.single.gender, WeekGender.male);
     });
 
     testWidgets('KioskPanelView: the card takes its share and opens the '
