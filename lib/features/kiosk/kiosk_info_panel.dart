@@ -450,11 +450,13 @@ class _Swipe extends StatelessWidget {
   );
 }
 
-/// A rounded card with a title; [fill] makes its body take all the height
-/// the card is given (a slot of the drawer), otherwise it is as tall as its
-/// content.
-class _Card extends StatelessWidget {
-  const _Card({
+/// A rounded card with a title, the frame of every module of a panel
+/// (public for the modules that live in files of their own); [fill] makes
+/// its body take all the height the card is given (its slot of the
+/// panel), otherwise it is as tall as its content.
+class KioskCard extends StatelessWidget {
+  const KioskCard({
+    super.key,
     required this.icon,
     required this.title,
     required this.child,
@@ -527,7 +529,7 @@ class _DutyCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = plan.now;
     final muted = TextStyle(fontSize: 15, color: scheme.onSurfaceVariant);
-    return _Card(
+    return KioskCard(
       icon: Icons.local_cafe_outlined,
       title: 'SLUŽBA NA KANTÝNĚ',
       fill: true,
@@ -709,7 +711,7 @@ class _NoticesCardState extends State<_NoticesCard> {
     final notices = widget.notices;
     final scheme = Theme.of(context).colorScheme;
     final m = notices[_index.clamp(0, notices.length - 1)];
-    return _Card(
+    return KioskCard(
       icon: Icons.campaign_outlined,
       title: 'NÁSTĚNKA',
       fill: widget.fill,
@@ -1058,7 +1060,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     );
 
     final showLive = widget.onShowLive;
-    return _Card(
+    return KioskCard(
       icon: Icons.emoji_events_outlined,
       title: 'ZÁPASY',
       // A match is being played: back to it.
