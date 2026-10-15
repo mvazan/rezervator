@@ -176,7 +176,7 @@ void main() {
       expect(ScheduleSettings.fromJson(base).kioskStreamMax, 1);
     });
 
-    test('fromJson reads the kiosk\'s duty places (0073); off when absent',
+    test('fromJson reads the kiosk\'s duty band (0073); off when absent',
         () {
       const base = {
         'lane_count': 4,
@@ -186,15 +186,11 @@ void main() {
       };
       final on = ScheduleSettings.fromJson({
         ...base,
-        'kiosk_duty_header': true,
         'kiosk_duty_board': true,
       });
-      expect(on.kioskDutyHeader, isTrue);
       expect(on.kioskDutyBoard, isTrue);
       final old = ScheduleSettings.fromJson(base);
-      expect(old.kioskDutyHeader, isFalse);
       expect(old.kioskDutyBoard, isFalse);
-      expect(ScheduleSettings.defaults.kioskDutyHeader, isFalse);
       expect(ScheduleSettings.defaults.kioskDutyBoard, isFalse);
     });
 
@@ -215,7 +211,7 @@ void main() {
         'kiosk_duty_share': 55,
       });
       expect(s.kioskPanels, KioskPanels.defaults);
-      expect(s.kioskNoticesHeader, isTrue);
+      expect(s.kioskHeader, KioskHeader.defaults);
     });
 
     test('fromJson reads where the duty band runs (0073); between the date '
@@ -313,8 +309,8 @@ void main() {
       expect(ScheduleSettings.defaults.kioskStreamEnabled, isTrue);
     });
 
-    test('fromJson reads the kiosk panels and the notices\' header line '
-        '(0077); the default layout and on when absent', () {
+    test('fromJson reads the kiosk panels (0077); the default layout when '
+        'absent', () {
       const base = {
         'lane_count': 4,
         'training_weekdays': [1, 2, 4],
@@ -332,7 +328,6 @@ void main() {
             {'id': 'notices', 'side': 'right', 'share': 40},
           ],
         },
-        'kiosk_notices_header': false,
       });
       expect(read.kioskPanels.left, const KioskPanel(days: 3, open: true));
       expect(
@@ -340,12 +335,9 @@ void main() {
         ['guide', 'week'],
       );
       expect(read.kioskPanels.sideOf(KioskModule.matches), PanelSide.off);
-      expect(read.kioskNoticesHeader, isFalse);
       final old = ScheduleSettings.fromJson(base);
       expect(old.kioskPanels, KioskPanels.defaults);
-      expect(old.kioskNoticesHeader, isTrue);
       expect(ScheduleSettings.defaults.kioskPanels, KioskPanels.defaults);
-      expect(ScheduleSettings.defaults.kioskNoticesHeader, isTrue);
     });
 
     test('the default panel layout is the column\'s default, value for value',
