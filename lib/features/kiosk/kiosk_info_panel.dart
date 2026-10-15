@@ -1249,7 +1249,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   /// on screen when asked: their ⟳ turns until that time moves on, the
   /// answer says nothing will come, or [kioskRefreshWait] runs out. The
   /// clock's own asks go unseen.
-  final _asking = <String, DateTime?>{};
+  final _asking = <String, ({DateTime? fetched, Object ask})>{};
   final _askTimeouts = <String, Timer>{};
 
   void _armRefresh(Duration every) {
@@ -1259,7 +1259,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     void askAll() {
       final ask = ref.read(kioskRefreshMatchProvider);
       for (final m in widget.matches) {
-        unawaited(ask(m.id));
+        unawaited(ask(m.id).then<void>((_) {}, onError: (Object _) {}));
       }
     }
 
@@ -1275,24 +1275,31 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   Future<void> _ask(String id) async {
     if (_asking.containsKey(id)) return;
     final asked = ref.read(kioskRefreshMatchProvider);
+    // This ask's own token: an answer that comes after it timed out ends
+    // only itself, never a later tap's.
+    final ask = Object();
     setState(() {
-      _asking[id] = ref.read(matchResultsProvider).value?[id]?.fetchedAt;
+      _asking[id] = (
+        fetched: ref.read(matchResultsProvider).value?[id]?.fetchedAt,
+        ask: ask,
+      );
     });
-    _askTimeouts[id] = Timer(kioskRefreshWait, () => _asked(id));
+    _askTimeouts[id] = Timer(kioskRefreshWait, () => _asked(id, ask));
     final (status, _) = await (
-      asked(id),
+      asked(id).then<String?>((s) => s, onError: (Object _) => null),
       Future<void>.delayed(kioskRefreshMinSpin),
     ).wait;
     // Queued: the fetch's arrival ends the wait (build's listener). Fresh,
     // not live, or failed: nothing more is coming.
-    if (status != 'queued') _asked(id);
+    if (status != 'queued') _asked(id, ask);
   }
 
-  void _asked(String id) {
+  /// [id]'s ask is over — only [ask] when given, the current one if not.
+  void _asked(String id, [Object? ask]) {
+    final current = _asking[id];
+    if (current == null || (ask != null && current.ask != ask)) return;
     _askTimeouts.remove(id)?.cancel();
-    if (mounted && _asking.containsKey(id)) {
-      setState(() => _asking.remove(id));
-    }
+    if (mounted) setState(() => _asking.remove(id));
   }
 
   @override
@@ -1358,7 +1365,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     ref.listen(matchResultsProvider, (_, next) {
       final results = next.value ?? const {};
       for (final MapEntry(key: id, value: asked) in [..._asking.entries]) {
-        if (results[id]?.fetchedAt != asked) _asked(id);
+        if (results[id]?.fetchedAt != asked.fetched) _asked(id);
       }
     });
     // A locked match stays on screen wherever the list puts it.
@@ -1585,7 +1592,9 @@ class _LiveAgeState extends ConsumerState<_LiveAge>
   @override
   void didUpdateWidget(_LiveAge old) {
     super.didUpdateWidget(old);
-    if (widget.refreshing && !_spin.isAnimating) {
+    // Also mid-finish: an ask that starts while the last one's turn runs
+    // out turns again (repeat cancels the finish and its reset).
+    if (widget.refreshing && (!old.refreshing || !_spin.isAnimating)) {
       _spin.repeat();
     } else if (!widget.refreshing && old.refreshing) {
       // Finishes the turn it is in rather than jump back upright.
@@ -1612,6 +1621,8 @@ class _LiveAgeState extends ConsumerState<_LiveAge>
     final age = freshnessLabel(fetched, now);
     return Semantics(
       button: true,
+      enabled: !widget.refreshing,
+      onTap: widget.refreshing ? null : widget.onRefresh,
       label: widget.refreshing
           ? 'Obnovuji výsledky, $age'
           : 'Obnovit výsledky, $age',
@@ -1634,14 +1645,17 @@ class _LiveAgeState extends ConsumerState<_LiveAge>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  RotationTransition(
-                    turns: _spin,
-                    child: Icon(
-                      Icons.refresh,
-                      size: 18,
-                      color: widget.refreshing
-                          ? scheme.primary
-                          : scheme.onSurfaceVariant,
+                  // Its own layer: a turn repaints the icon, not the drawer.
+                  RepaintBoundary(
+                    child: RotationTransition(
+                      turns: _spin,
+                      child: Icon(
+                        Icons.refresh,
+                        size: 18,
+                        color: widget.refreshing
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 4),

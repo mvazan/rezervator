@@ -4593,14 +4593,15 @@ void main() {
         tester,
       ) async {
         fullHd(tester);
-        for (final answer in ['fresh', 'not_live', null]) {
+        for (final answer in ['fresh', 'not_live', null, 'throws']) {
           await tester.pumpWidget(
             app(
               slots: [fed('m', day, 'Hrají')],
               results: {'m': res('m', 'in_progress', 2, 1)},
               lineups: {'m': lineup},
               liveRefresh: 600,
-              refreshAnswer: (_) async => answer,
+              refreshAnswer: (_) async =>
+                  answer == 'throws' ? throw Exception('offline') : answer,
             ),
           );
           await tester.pumpAndSettle();
@@ -4613,6 +4614,124 @@ void main() {
           expect(turning(tester), isFalse, reason: '$answer');
           await finish(tester);
         }
+      });
+
+      testWidgets('a tap while the last turn runs out turns it again', (
+        tester,
+      ) async {
+        fullHd(tester);
+        final asked = <String>[];
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        MatchResult at(String fetched) =>
+            res('m', 'in_progress', 2, 1, fetched: fetched);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            resultsStream: results.stream,
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            onRefresh: asked.add,
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        results.add({'m': at('2026-10-08T09:50:00+00:00')});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 2));
+        // The fetch lands: the ⟳ finishes its turn — and a tap meanwhile
+        // turns it again, for as long as that ask is out.
+        results.add({'m': at('2026-10-08T09:59:00+00:00')});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(seconds: 2));
+        expect(asked, ['m', 'm', 'm']);
+        expect(turning(tester), isTrue);
+        await tester.pump(const Duration(seconds: 5));
+        expect(turning(tester), isTrue);
+        await finish(tester);
+      });
+
+      testWidgets('only the asked match\'s own fetch stops it, not another '
+          'match\'s', (tester) async {
+        fullHd(tester);
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        final other = res('x', 'finished', 6, 2);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            resultsStream: results.stream,
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        final m = res('m', 'in_progress', 2, 1,
+            fetched: '2026-10-08T09:50:00+00:00');
+        results.add({'m': m});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isTrue);
+        results.add({'m': m, 'x': other});
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isTrue);
+        results.add({
+          'm': res('m', 'in_progress', 2, 1,
+              fetched: '2026-10-08T09:59:00+00:00'),
+          'x': other,
+        });
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        await finish(tester);
+      });
+
+      testWidgets('an answer that comes after its ask gave up does not end '
+          'a later tap\'s', (tester) async {
+        fullHd(tester);
+        final answers = <Completer<String?>>[];
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            refreshAnswer: (_) {
+              final answer = Completer<String?>();
+              answers.add(answer);
+              return answer.future;
+            },
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(seconds: 1));
+        answers.single.complete('fresh'); // the ask on opening
+        // A tap whose answer hangs past the 30 s it is given…
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        // …a new tap, queued; then the old answer comes in at last.
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 1));
+        answers.last.complete('queued');
+        answers[1].complete('fresh');
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isTrue);
+        await finish(tester);
       });
 
       testWidgets('the clock\'s ask leaves it still', (tester) async {
