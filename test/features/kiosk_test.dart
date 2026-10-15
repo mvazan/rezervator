@@ -1870,6 +1870,8 @@ void main() {
       // Both panels as the admin lays them out (0077); null = the layout
       // the drawer settings above convert to, as 0077 converts them.
       KioskPanels? panels,
+      // Clubs' nicknames (0080); null = every name in full.
+      NameDisplay? names,
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith((ref) {
@@ -1964,6 +1966,7 @@ void main() {
         dutyAssignmentsProvider.overrideWith(
           (ref) => Stream.value(dutyAssignments),
         ),
+        if (names != null) nameDisplayProvider.overrideWith((ref) => names),
       ],
       child: const MaterialApp(home: KioskShell()),
     );
@@ -4243,6 +4246,71 @@ void main() {
         await tester.tap(button(Icons.close));
         await tester.pumpAndSettle();
         expect(bar('Jiný'), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a club nickname (0080) names the teams in the bar and the '
+          'list; a tap still lists that team\'s matches', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            names: NameDisplay(const [
+              Club(id: 's', name: 'Soupeř', nickname: 'Sok'),
+              Club(id: 'd', name: 'Domácí', nickname: 'Dom'),
+            ]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        expect(bar('Dom'), findsOneWidget);
+        expect(bar('Sok'), findsOneWidget);
+        expect(bar('Soupeř'), findsNothing);
+
+        await tester.tap(bar('Sok'));
+        await tester.pumpAndSettle();
+        final rows = inList(find.byType(ListTile));
+        expect(rows, findsNWidgets(3));
+        expect([
+          for (final t in tester.widgetList<ListTile>(rows))
+            (t.title! as Text).data,
+        ], ['Dom', 'Jiný', 'Dom']);
+
+        await finish(tester);
+      });
+
+      testWidgets('beside the modal, a tap on the sheet\'s nickname lists the '
+          'team it stands for (0080)', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            zapisNav: KioskZapisNav.sides,
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            names: NameDisplay(const [
+              Club(id: 's', name: 'Soupeř', nickname: 'Sok'),
+            ]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(LegacyScoreSheetPage),
+            matching: find.textContaining('Sok', findRichText: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inList(find.byType(ListTile)), findsNWidgets(3));
 
         await finish(tester);
       });
