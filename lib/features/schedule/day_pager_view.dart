@@ -461,11 +461,23 @@ class _DayPage extends StatelessWidget {
   static const _laneLabelWidth = 56.0;
   static const _laneTileSpacing = 6.0;
 
-  /// The block's time label.
-  Widget _blockLabel(TimeBlock block) => Text(
-        block.label,
+  /// The block's time label: the start with its dash over the end, always
+  /// on two lines. Left to wrap on its own in the narrow column, the label
+  /// broke wherever the width ran out — at 130 % „17:00– / 18:00“ in one
+  /// row and „18:00 / – / 19:00“ in the next (18:00– is a pixel wider). A
+  /// line too wide for the column shrinks the label instead.
+  Widget _blockLabel(TimeBlock block) {
+    final [start, end] = block.label.split('–');
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        '$start–\n$end',
+        softWrap: false,
         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-      );
+      ),
+    );
+  }
 
   /// Block rows interleaved with off-block event banners and empty-gap rows,
   /// in time order (see [dayGridItems]).

@@ -58,6 +58,12 @@ const appChangelog = <Release>[
         'Upozornění při rezervaci je širší a má méně řádků.',
     'Kiosk, hraný zápas v panelu: ťuk na „⟳ před … min“ obnoví výsledky; '
         'ikona se po ťuknutí točí, dokud nová data nedorazí.',
+    'Kalendář po dnech: čas bloku je vždy začátek s pomlčkou nad koncem — '
+        'i při větším písmu se už pomlčka neodtrhne na vlastní řádek.',
+  ], store: [
+    'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
+        'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
+    'Kalendář po dnech: čas bloku vždy na dvou řádcích.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

@@ -1205,6 +1205,38 @@ void main() {
     }
   });
 
+  testWidgets('day view: every time label is the start with its dash over the '
+      'end — two lines at any text size, never the dash alone', (
+    tester,
+  ) async {
+    // At 130 % the labels used to wrap wherever the width ran out:
+    // „17:00– / 18:00“ in one row, „18:00 / – / 19:00“ in the next.
+    for (final scale in [1.0, 1.15, 1.3]) {
+      portraitSurface(tester);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      final chips = find.descendant(
+        of: find.byType(DayChipStrip),
+        matching: find.byType(InkWell),
+      );
+      await tester.tap(chips.at(t.weekday));
+      await tester.pumpAndSettle();
+
+      final labels = find.textContaining(RegExp(r'^\d{2}:\d{2}–\n\d{2}:\d{2}$'));
+      expect(labels, findsWidgets, reason: 'at ${scale}x');
+      // Two lines each, the same height in every row.
+      final heights = {
+        for (var i = 0; i < tester.widgetList(labels).length; i++)
+          tester.getSize(labels.at(i)).height,
+      };
+      expect(heights, hasLength(1), reason: 'at ${scale}x: $heights');
+      final line = tester.getSize(labels.first).height / 2;
+      expect(line, closeTo(13 * scale * 1.43, 2), reason: 'at ${scale}x');
+    }
+  });
+
   testWidgets('booking dialog opens from a large free tile in day view', (
     tester,
   ) async {
