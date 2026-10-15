@@ -13286,6 +13286,10 @@ update schedule_settings
        kiosk_weather_lat = 49.19522, kiosk_weather_lon = 16.60796
  where tenant_id = '00000000-0000-0000-0000-000000082002';
 \ir ../migrations/0082_kiosk_header.sql
+-- An admin's choice between the runs: the second run must leave it.
+update schedule_settings
+   set kiosk_weather_items = '{feels,wind}', kiosk_weather_title = 'Brno'
+ where tenant_id = '00000000-0000-0000-0000-000000082002';
 create temp table kiosk_0082_first as
   select tenant_id, kiosk_header, kiosk_weather_title, kiosk_weather_items
     from schedule_settings;
@@ -13341,7 +13345,8 @@ begin
     raise exception 'FAIL: the converted modules are not in the old header''s order (0082)';
   end if;
 
-  -- The second run skipped the conversion and changed nothing.
+  -- The second run skipped the conversion and changed nothing — the
+  -- weather's title and values an admin picked between the runs too.
   if exists (select 1 from kiosk_0082_first f
                join schedule_settings s using (tenant_id)
               where s.kiosk_header is distinct from f.kiosk_header
@@ -13375,10 +13380,12 @@ begin
   end if;
   -- Every alley of the suite, new or converted, shows the weather as
   -- before: the high and low and the rain beside the temperature. Only
-  -- the suite's: on a local stack an admin may have picked other values.
+  -- the suite's: on a local stack an admin may have picked other values,
+  -- as one did above between the runs.
   if exists (select 1 from schedule_settings
               where (tenant_id = v_new
                      or tenant_id in (select tenant_id from kiosk_0082_case))
+                and tenant_id <> '00000000-0000-0000-0000-000000082002'
                 and kiosk_weather_items is distinct from '{range,rain}') then
     raise exception 'FAIL: an alley does not start with the weather''s high and low and rain (0082)';
   end if;
