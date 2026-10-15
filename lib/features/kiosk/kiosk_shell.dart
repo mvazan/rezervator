@@ -240,7 +240,11 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// „Hráči týdne“ full screen (0078) — a tap on its card in a panel; a tap
   /// on a line there opens that match's Zápis over it.
   void _openWeek() => unawaited(
-    showKioskWeekPlayers(context, wrap: _touchable, onOpenMatch: _openMatch),
+    showKioskWeekPlayers(
+      context,
+      wrap: _touchable,
+      onOpenMatch: (match) => _openMatch(match, overWeek: true),
+    ),
   );
 
   /// The ▶ handed to everything that has one — the drawer's matches, the
@@ -254,7 +258,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
     return on ? _openStream : null;
   }
 
-  void _openMatch(PrioritySlot match) {
+  /// [match]'s Zápis. [overWeek]: opened from the week's full-screen page,
+  /// which covers the board — the stream window lives on the board, so the
+  /// ▶ in that Zápis first closes the week too.
+  void _openMatch(PrioritySlot match, {bool overWeek = false}) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
     final play = _play;
     unawaited(
@@ -274,7 +281,17 @@ class _KioskShellState extends ConsumerState<KioskShell>
                   ref.read(matchResultsProvider).value?[match.id],
                   now,
                 ),
-                onPlay: () => play(match),
+                onPlay: () {
+                  // Behind the week's page the player would run unseen,
+                  // sound and all: back to the board first.
+                  if (overWeek) {
+                    Navigator.of(
+                      context,
+                      rootNavigator: true,
+                    ).popUntil((r) => r.isFirst);
+                  }
+                  play(match);
+                },
               )
             : null,
       ),

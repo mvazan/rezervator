@@ -13,7 +13,9 @@ import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/week_players.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
+import 'package:rezervator/features/clubhouse/widgets/zapis_page.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 import 'package:rezervator/features/kiosk/kiosk_week.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart'
     show calendarRulerWidth;
@@ -506,7 +508,12 @@ void main() {
       expect(opened, 1);
     });
 
-    Future<void> pumpShell(WidgetTester tester, List<WeekLine> lines) async {
+    Future<void> pumpShell(
+      WidgetTester tester,
+      List<WeekLine> lines, {
+      List<PrioritySlot> slots = const [],
+      Map<String, MatchResult> results = const {},
+    }) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -530,7 +537,7 @@ void main() {
             ),
             timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            prioritySlotsProvider.overrideWithValue(const []),
+            prioritySlotsProvider.overrideWithValue(slots),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -538,9 +545,18 @@ void main() {
             playersProvider.overrideWith((ref) async => const []),
             messagesProvider.overrideWith((ref) => Stream.value(const [])),
             kioskSocketOpenProvider.overrideWithValue(() => true),
-            matchResultsProvider.overrideWith((ref) => Stream.value(const {})),
+            matchResultsProvider.overrideWith((ref) => Stream.value(results)),
             matchPlayerResultsProvider.overrideWith(
               (ref, id) => Stream.value(const []),
+            ),
+            matchRegnumsProvider.overrideWith((ref, key) async => const {}),
+            // The stream's player stands in as text: a platform view does
+            // not run under flutter_test.
+            kioskStreamContentProvider.overrideWithValue(
+              (videoId, {required interactive, onEnded}) => Text(
+                'player $videoId ${interactive ? 'on' : 'off'}',
+                key: const ValueKey('player'),
+              ),
             ),
             dutyPeriodsProvider.overrideWith((ref) => Stream.value(const [])),
             dutyAssignmentsProvider.overrideWith(
@@ -588,6 +604,59 @@ void main() {
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
       expect(page, findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('the shell: week → line → Zápis → „Přehrát záznam“ leaves '
+        'the week and plays the stream on the board, not behind the '
+        'week', (tester) async {
+      fullHd(tester);
+      await pumpShell(
+        tester,
+        week,
+        slots: [
+          PrioritySlot(
+            id: 'm1',
+            date: Day(2026, 10, 10),
+            startsAt: const HourMinute(14, 0),
+            endsAt: const HourMinute(17, 0),
+            type: PrioritySlot.fallbackMatchType,
+            homeTeam: 'Termínátor A',
+            awayTeam: 'KK Slavoj',
+            importKey: 'cka:m1',
+            videoUrl: 'https://www.youtube.com/watch?v=wOq9EODb8w8',
+          ),
+        ],
+        results: {
+          'm1': MatchResult.fromJson(const {
+            'match_id': 'm1',
+            'status': 'finished',
+            'home_points': 6,
+            'away_points': 2,
+            'fetched_at': '2026-10-10T18:00:00+00:00',
+          }),
+        },
+      );
+      final page = find.byType(KioskWeekPlayersPage);
+      final player = find.byKey(const ValueKey('player'));
+      await tester.tap(find.byType(KioskWeekCard));
+      await tester.pumpAndSettle();
+      expect(page, findsOneWidget);
+      expect(player, findsNothing);
+
+      await tester.tap(
+        find.descendant(of: page, matching: find.text('Hráč M0')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ZapisPage), findsOneWidget);
+
+      await tester.tap(find.text('Přehrát záznam'));
+      await tester.pumpAndSettle();
+      // Both routes are gone: the player runs on the board, where the
+      // visitor sees it and can touch it.
+      expect(find.byType(ZapisPage), findsNothing);
+      expect(page, findsNothing);
+      expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   });
