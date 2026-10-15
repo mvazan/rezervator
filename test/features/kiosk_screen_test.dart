@@ -1126,7 +1126,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(
-        find.text('Žádné. Upozornění pod písmeny při výběru jména na kiosku.'),
+        find.text('Žádné. Upozornění na první stránce výběru hráče na kiosku.'),
         findsOneWidget,
       );
       expect(find.byTooltip('Odstranit upozornění při rezervaci'), findsNothing);

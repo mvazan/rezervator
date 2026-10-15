@@ -210,7 +210,7 @@ Od téhle fáze appka umí i sdílený dotykový tablet zavěšený na kuželně
 schválený si na něm najde svoje jméno a rezervuje si termín bez přihlašování
 vlastním účtem. Kiosek nikdy nic neruší (na to slouží appka na mobilu) a nikdy
 neukazuje seznam hráčů ani rozvrh správy — jen svůj vlastní rozvrh a tlačítko
-„Rezervovat".
+„Rezervace tréninku“.
 
 ### 7.1 Kioskový účet
 

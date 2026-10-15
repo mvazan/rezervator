@@ -267,7 +267,8 @@ class KioskSettingsScreen extends ConsumerWidget {
       kioskUrlFrom(kIsWeb ? Uri.base : Uri.parse(UpdateScreen.webUrl));
 
   /// The note on the name picker's first page (0070: under its first
-  /// letters, or its names on a small alley), typed in a dialog — a new
+  /// letters, or its names on a small alley — or its club tiles, 0076),
+  /// typed in a dialog — a new
   /// one starts from the default text; saved trimmed.
   Future<void> _editPickerNote(
     BuildContext context,
@@ -365,7 +366,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   title: const Text('Upozornění při rezervaci'),
                   subtitle: Text(
                     settings?.kioskPickerNote ??
-                        'Žádné. Upozornění pod písmeny při výběru jména na '
+                        'Žádné. Upozornění na první stránce výběru hráče na '
                             'kiosku.',
                     // The whole text is one tap away, under „Upravit…“.
                     maxLines: 3,
@@ -408,7 +409,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                           'Podle oddílu: dlaždice oddílů v jejich barvě, ťuk '
                           'ukáže hráče oddílu; hráči bez oddílu jsou pod '
                           '„Ostatní“. Jen když je z čeho vybírat — aspoň dva '
-                          'oddíly, nebo oddíl a hráči bez něj.',
+                          'oddíly s hráči, nebo oddíl a hráči bez oddílu; '
+                          'jinak kiosk ukáže písmena.',
                       helperMaxLines: 4,
                       border: OutlineInputBorder(),
                     ),

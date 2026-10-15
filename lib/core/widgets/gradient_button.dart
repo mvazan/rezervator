@@ -1,5 +1,5 @@
 /// Primary call-to-action button: indigo → cyan gradient fill with a ripple,
-/// used for the app's main actions (e.g. kiosk "Rezervovat").
+/// used for the app's main actions (the kiosk's „Rezervace tréninku“).
 library;
 
 import 'package:flutter/material.dart';
