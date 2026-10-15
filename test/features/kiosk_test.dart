@@ -5302,6 +5302,13 @@ void main() {
         expect(width(tester, PanelSide.right), closeTo(oneDay, 0.5));
         expect(width(tester, PanelSide.left), 0);
 
+        // Hiding the one shown must not let the other one (resting open
+        // too, only held back by the shared room) slide in instead.
+        await tester.tap(button('Skrýt pravý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.right), 0);
+        expect(width(tester, PanelSide.left), 0);
+
         await tester.tap(button('Zobrazit levý panel'));
         await tester.pumpAndSettle();
         expect(width(tester, PanelSide.left), closeTo(oneDay, 0.5));
@@ -5311,6 +5318,37 @@ void main() {
         await tester.pumpAndSettle();
         expect(width(tester, PanelSide.right), closeTo(oneDay, 0.5));
         expect(width(tester, PanelSide.left), 0);
+        await finish(tester);
+      });
+
+      testWidgets('two days on the screen leave room for one panel: closing '
+          'the panel held open by a live match does not open the other', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            visibleDays: 2,
+            // The matches left, the notices right resting open.
+            panels: KioskPanels.defaults
+                .withSide(KioskModule.matches, PanelSide.left)
+                .withPanel(PanelSide.right, open: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Both open, the one with the match being played stays.
+        const oneDay = (1920 - 46) / 2;
+        expect(width(tester, PanelSide.left), closeTo(oneDay, 0.5));
+        expect(width(tester, PanelSide.right), 0);
+
+        await tester.tap(button('Skrýt levý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), 0);
+        expect(width(tester, PanelSide.right), 0);
         await finish(tester);
       });
     });

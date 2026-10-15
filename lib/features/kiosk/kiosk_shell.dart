@@ -362,9 +362,12 @@ class _KioskShellState extends ConsumerState<KioskShell>
     }
     void toggle(PanelSide side, bool open) => setState(() {
       _drawerOverride[side] = !open;
-      // Opened where only one fits: the other one closes.
+      // Where only one fits, at most one panel is shown open and a tap
+      // always leaves the other one shut: opening one closes the other, and
+      // hiding the one shown must not let the other (resting open too, only
+      // held back by the shared room) slide in instead.
       final other = side == PanelSide.left ? PanelSide.right : PanelSide.left;
-      if (!open && exclusive) _drawerOverride[other] = false;
+      if (exclusive) _drawerOverride[other] = false;
     });
     // A visitor picked their name: the board is what they came for — both
     // panels and their buttons step aside until the pick is cleared (or the
