@@ -10742,13 +10742,19 @@ begin
 end $$;
 
 \ir ../migrations/0073_kiosk_duty.sql
+-- 0073 brought back the duty card's two columns, and 0064 (above) the old
+-- drawer's six: 0077 sees all eight again, converts them into kiosk_panels
+-- and drops them, so everything below sees the schema as it is (0077's own
+-- checks are at the end of the file).
+\ir ../migrations/0077_kiosk_panels.sql
 
--- 0073: the canteen duty on the kiosk — all three places off for a new
--- alley (its settings row comes from seed_tenant_defaults), the band
--- between the date and the matches, the card's share of the drawer 10–90,
--- the band at the top, in the middle or at the bottom and nowhere else,
--- and with all of it on the public overview still hands out its six
--- settings, nothing more. The file just ran a second time: the migration
+-- 0073: the canteen duty on the kiosk — the header, the board and the
+-- duty card off for a new alley (its settings row comes from
+-- seed_tenant_defaults), the band between the date and the matches, the
+-- band at the top, in the middle or at the bottom and nowhere else, and
+-- with all of it on the public overview still hands out its six settings,
+-- nothing more. The card's place and share are the duty module's in
+-- kiosk_panels since 0077. The file just ran a second time: the migration
 -- is re-runnable.
 do $$
 declare
@@ -10760,14 +10766,9 @@ begin
   if not exists (select 1 from schedule_settings
                   where tenant_id = v_new
                     and not kiosk_duty_header and not kiosk_duty_board
-                    and not kiosk_duty_drawer and kiosk_duty_share = 30
+                    and kiosk_panels @> '{"modules": [{"id": "duty", "side": "off"}]}'
                     and kiosk_duty_band_position = 'middle') then
-    raise exception 'FAIL: a new alley''s kiosk does not start with the duty off, a 30 percent card and the band in the middle (0073)';
-  end if;
-  if not exists (select 1 from pg_constraint
-                  where conrelid = 'schedule_settings'::regclass
-                    and conname = 'schedule_settings_kiosk_duty_share_check') then
-    raise exception 'FAIL: the duty card''s share has no named check (0073)';
+    raise exception 'FAIL: a new alley''s kiosk does not start with the duty off and the band in the middle (0073)';
   end if;
   if not exists (select 1 from pg_constraint
                   where conrelid = 'schedule_settings'::regclass
@@ -10781,23 +10782,12 @@ begin
     raise exception 'FAIL: a duty band position other than top, middle or bottom was accepted (0073)';
   exception when check_violation then null;
   end;
-  begin
-    update schedule_settings set kiosk_duty_share = 9 where tenant_id = v_a;
-    raise exception 'FAIL: a duty card under 10 percent of the drawer was accepted (0073)';
-  exception when check_violation then null;
-  end;
-  begin
-    update schedule_settings set kiosk_duty_share = 91 where tenant_id = v_a;
-    raise exception 'FAIL: a duty card over 90 percent of the drawer was accepted (0073)';
-  exception when check_violation then null;
-  end;
   update schedule_settings
      set kiosk_duty_header = true, kiosk_duty_board = true,
-         kiosk_duty_drawer = true, kiosk_duty_share = 10,
          kiosk_duty_band_position = 'top'
    where tenant_id = v_a;
   update schedule_settings
-     set kiosk_duty_share = 90, kiosk_duty_band_position = 'bottom'
+     set kiosk_duty_band_position = 'bottom'
    where tenant_id = v_a;
   v_keys := array(select jsonb_object_keys(
                            public_week('kuzelna-a', current_date)->'settings')
@@ -10809,10 +10799,9 @@ begin
   end if;
   update schedule_settings
      set kiosk_duty_header = false, kiosk_duty_board = false,
-         kiosk_duty_drawer = false, kiosk_duty_share = 30,
          kiosk_duty_band_position = 'middle'
    where tenant_id = v_a;
-  raise notice 'OK: the kiosk''s duty is off for a new alley, its card 10–90 percent, its band top, middle or bottom, and stays off the public overview (0073)';
+  raise notice 'OK: the kiosk''s duty is off for a new alley, its band top, middle or bottom, and stays off the public overview (0073)';
 end $$;
 
 -- 0052 One device token, one profile ----------------------------------------
@@ -12228,6 +12217,391 @@ begin
   end if;
   update schedule_settings set kiosk_picker_mode = 'letters' where tenant_id = v_a;
   raise notice 'OK: the name picker starts with letters, takes one of three modes, off the public overview (0076)';
+end $$;
+
+-- 0077: the kiosk's two panels. Alleys with the old drawer's settings in
+-- every combination that matters, set through the old columns — 0064 and
+-- 0073 bring them back — and then 0077 twice: the first run converts them
+-- into kiosk_panels and drops the eight columns, the second finds them gone
+-- and skips the conversion (it would fail on a missing column otherwise)
+-- and changes nothing.
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000077001', 'Kuželna (0077) 30/40'),
+  ('00000000-0000-0000-0000-000000077002', 'Kuželna (0077) 90/10'),
+  ('00000000-0000-0000-0000-000000077003', 'Kuželna (0077) 90/90'),
+  ('00000000-0000-0000-0000-000000077004', 'Kuželna (0077) 60/10'),
+  ('00000000-0000-0000-0000-000000077005', 'Kuželna (0077) 55/10'),
+  ('00000000-0000-0000-0000-000000077006', 'Kuželna (0077) služba a zápasy'),
+  ('00000000-0000-0000-0000-000000077007', 'Kuželna (0077) služba a nástěnka'),
+  ('00000000-0000-0000-0000-000000077008', 'Kuželna (0077) bez služby'),
+  ('00000000-0000-0000-0000-000000077009', 'Kuželna (0077) jen hraný zápas'),
+  ('00000000-0000-0000-0000-000000077010', 'Kuželna (0077) panel vypnutý'),
+  ('00000000-0000-0000-0000-000000077011', 'Kuželna (0077) jen služba'),
+  ('00000000-0000-0000-0000-000000077012', 'Kuželna (0077) jen nástěnka');
+\ir ../migrations/0064_kiosk_panel.sql
+\ir ../migrations/0073_kiosk_duty.sql
+-- Each alley's old settings and what 0077 must make of them. d = the duty
+-- card's share of the drawer, n = the notices' share of the rest.
+create temp table kiosk_0077_case (
+  tenant_id uuid primary key,
+  enabled boolean, open boolean, columns smallint, mode text, n smallint,
+  matches boolean, live boolean, duty boolean, d smallint,
+  header boolean, panels jsonb);
+insert into kiosk_0077_case values
+  -- The suite's alley A at the old defaults: the new default.
+  ('00000000-0000-0000-0000-00000000000a',
+   true, false, 2, 'both', 40, true, true, false, 30, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "off", "share": 30},
+                 {"id": "notices", "side": "right", "share": 40},
+                 {"id": "matches", "side": "right", "share": 60},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- All three, (d, n) = (30, 40): 30, round(70 · 0.4) = 28, the rest 42.
+  ('00000000-0000-0000-0000-000000077001',
+   true, true, 3, 'both', 40, true, true, true, 30, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 3, "open": true},
+     "modules": [{"id": "duty", "side": "right", "share": 30},
+                 {"id": "notices", "side": "right", "share": 28},
+                 {"id": "matches", "side": "right", "share": 42},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- (90, 10): the notices' 1 is clamped to 5, the matches keep 100 − 90 − 1.
+  ('00000000-0000-0000-0000-000000077002',
+   true, false, 13, 'drawer', 10, true, true, true, 90, false,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 13, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 90},
+                 {"id": "notices", "side": "right", "share": 5},
+                 {"id": "matches", "side": "right", "share": 9},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- (90, 90): the notices 9, the matches' 1 clamped to 5.
+  ('00000000-0000-0000-0000-000000077003',
+   true, false, 2, 'both', 90, true, true, true, 90, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 90},
+                 {"id": "notices", "side": "right", "share": 9},
+                 {"id": "matches", "side": "right", "share": 5},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- (60, 10): the notices' 4 clamped to 5, the matches 100 − 60 − 4.
+  ('00000000-0000-0000-0000-000000077004',
+   true, false, 2, 'both', 10, true, true, true, 60, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 60},
+                 {"id": "notices", "side": "right", "share": 5},
+                 {"id": "matches", "side": "right", "share": 36},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- (55, 10): 45 · 0.1 = 4.5 rounds half away from zero to 5, so the
+  -- matches get 40 (integer division or round-half-even would give 41).
+  ('00000000-0000-0000-0000-000000077005',
+   true, false, 2, 'both', 10, true, true, true, 55, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 55},
+                 {"id": "notices", "side": "right", "share": 5},
+                 {"id": "matches", "side": "right", "share": 40},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- The duty and the matches only (notices in the header): d and 100 − d.
+  ('00000000-0000-0000-0000-000000077006',
+   true, false, 2, 'header', 40, true, true, true, 70, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 70},
+                 {"id": "notices", "side": "off", "share": 40},
+                 {"id": "matches", "side": "right", "share": 30},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- The duty and the notices only (the list and the live match off).
+  ('00000000-0000-0000-0000-000000077007',
+   true, false, 2, 'drawer', 40, false, false, true, 25, false,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 25},
+                 {"id": "notices", "side": "right", "share": 75},
+                 {"id": "matches", "side": "off", "share": 60},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- No duty: the notices n, the matches 100 − n.
+  ('00000000-0000-0000-0000-000000077008',
+   true, false, 2, 'both', 75, true, true, false, 30, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "off", "share": 30},
+                 {"id": "notices", "side": "right", "share": 75},
+                 {"id": "matches", "side": "right", "share": 25},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- The list off, the live match on: the matches are placed all the same.
+  ('00000000-0000-0000-0000-000000077009',
+   true, false, 2, 'off', 35, false, true, false, 30, false,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "off", "share": 30},
+                 {"id": "notices", "side": "off", "share": 40},
+                 {"id": "matches", "side": "right", "share": 65},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- The drawer off: every module off with its default share; the right
+  -- panel keeps the drawer's width and rest, the notices their header.
+  ('00000000-0000-0000-0000-000000077010',
+   false, true, 5, 'both', 40, true, true, true, 30, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 5, "open": true},
+     "modules": [{"id": "duty", "side": "off", "share": 30},
+                 {"id": "notices", "side": "off", "share": 40},
+                 {"id": "matches", "side": "off", "share": 60},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- The duty alone.
+  ('00000000-0000-0000-0000-000000077011',
+   true, false, 2, 'header', 40, false, false, true, 80, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "right", "share": 80},
+                 {"id": "notices", "side": "off", "share": 40},
+                 {"id": "matches", "side": "off", "share": 60},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}'),
+  -- The notices alone.
+  ('00000000-0000-0000-0000-000000077012',
+   true, false, 2, 'both', 30, false, false, false, 30, true,
+   '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+     "modules": [{"id": "duty", "side": "off", "share": 30},
+                 {"id": "notices", "side": "right", "share": 30},
+                 {"id": "matches", "side": "off", "share": 60},
+                 {"id": "guide", "side": "off", "share": 45},
+                 {"id": "week", "side": "off", "share": 55}]}');
+update schedule_settings s
+   set kiosk_panel_enabled = c.enabled, kiosk_drawer_open = c.open,
+       kiosk_drawer_columns = c.columns, kiosk_notices_mode = c.mode,
+       kiosk_notices_share = c.n, kiosk_show_matches = c.matches,
+       kiosk_live_mode = c.live, kiosk_duty_drawer = c.duty,
+       kiosk_duty_share = c.d
+  from kiosk_0077_case c
+ where c.tenant_id = s.tenant_id;
+\ir ../migrations/0077_kiosk_panels.sql
+create temp table kiosk_0077_first as
+  select tenant_id, kiosk_panels, kiosk_notices_header from schedule_settings;
+\ir ../migrations/0077_kiosk_panels.sql
+
+-- An admin of a new alley, who saves the layout as authenticated below.
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000077000', 'Kuželna (0077)');
+insert into auth.users (id, email) values
+  ('77000000-0000-0000-0000-000000000001', 'panely-0077@example.com')
+on conflict do nothing;
+insert into profiles (id, tenant_id, display_name, email, role, status)
+values ('77000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000077000', 'Správce 0077',
+        'panely-0077@example.com', 'admin', 'approved');
+
+do $$
+declare
+  v_new constant uuid := '00000000-0000-0000-0000-000000077000';
+  v_default constant jsonb :=
+    '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+      "modules": [{"id": "duty", "side": "off", "share": 30},
+                  {"id": "notices", "side": "right", "share": 40},
+                  {"id": "matches", "side": "right", "share": 60},
+                  {"id": "guide", "side": "off", "share": 45},
+                  {"id": "week", "side": "off", "share": 55}]}';
+  v_case record;
+  v_label text;
+  v_layout jsonb;
+  v_keys text[];
+begin
+  -- Each alley converted as its old drawer showed it.
+  for v_case in
+    select c.tenant_id, c.header, c.panels,
+           s.kiosk_panels as got, s.kiosk_notices_header as got_header
+      from kiosk_0077_case c
+      join schedule_settings s on s.tenant_id = c.tenant_id
+  loop
+    if v_case.got is distinct from v_case.panels then
+      raise exception 'FAIL: alley % converted to %, expected % (0077)',
+        v_case.tenant_id, v_case.got, v_case.panels;
+    end if;
+    if v_case.got_header is distinct from v_case.header then
+      raise exception 'FAIL: alley % has kiosk_notices_header %, expected % (0077)',
+        v_case.tenant_id, v_case.got_header, v_case.header;
+    end if;
+  end loop;
+  if (select count(*) from kiosk_0077_case) <> 13 then
+    raise exception 'FAIL: the conversion cases are not all there (0077)';
+  end if;
+
+  -- The second run skipped the conversion and changed nothing.
+  if exists (select 1 from kiosk_0077_first f
+               join schedule_settings s using (tenant_id)
+              where s.kiosk_panels is distinct from f.kiosk_panels
+                 or s.kiosk_notices_header is distinct from f.kiosk_notices_header) then
+    raise exception 'FAIL: running 0077 again changed a converted layout (0077)';
+  end if;
+
+  -- The old columns and their checks are gone, the new check is there.
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'schedule_settings'
+                and column_name in ('kiosk_panel_enabled', 'kiosk_drawer_open',
+                                    'kiosk_drawer_columns', 'kiosk_notices_mode',
+                                    'kiosk_notices_share', 'kiosk_show_matches',
+                                    'kiosk_duty_drawer', 'kiosk_duty_share')) then
+    raise exception 'FAIL: an old drawer column survived 0077';
+  end if;
+  if exists (select 1 from pg_constraint
+              where conrelid = 'schedule_settings'::regclass
+                and conname in ('schedule_settings_kiosk_drawer_columns_check',
+                                'schedule_settings_kiosk_notices_mode_check',
+                                'schedule_settings_kiosk_share_check',
+                                'schedule_settings_kiosk_duty_share_check')) then
+    raise exception 'FAIL: an old drawer column''s check survived 0077';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'schedule_settings'::regclass
+                    and conname = 'schedule_settings_kiosk_panels_check') then
+    raise exception 'FAIL: kiosk_panels has no named check (0077)';
+  end if;
+
+  -- A new alley starts with the default layout and the notices' line.
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = v_new and kiosk_panels = v_default
+                    and kiosk_notices_header) then
+    raise exception 'FAIL: a new alley does not start with the default panels and the notices in the header (0077)';
+  end if;
+
+  -- Bad layouts are a check violation, nothing else.
+  for v_label, v_layout in
+    select * from (values
+      ('a duplicate id',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "duty", "side": "off", "share": 30},
+                     {"id": "duty", "side": "right", "share": 30}]}'::jsonb),
+      ('an unknown side',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "duty", "side": "top", "share": 30}]}'),
+      ('a share of 4',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "duty", "side": "right", "share": 4}]}'),
+      ('a share of 96',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "duty", "side": "right", "share": 96}]}'),
+      ('a share of 50.5',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "duty", "side": "right", "share": 50.5}]}'),
+      ('a share as a string',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "duty", "side": "right", "share": "50"}]}'),
+      ('a panel 0 days wide',
+       '{"left": {"days": 0, "open": false}, "right": {"days": 2, "open": false},
+         "modules": []}'),
+      ('a panel 14 days wide',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 14, "open": false},
+         "modules": []}'),
+      ('a panel 2.5 days wide',
+       '{"left": {"days": 2.5, "open": false}, "right": {"days": 2, "open": false},
+         "modules": []}'),
+      ('open as a string',
+       '{"left": {"days": 2, "open": "true"}, "right": {"days": 2, "open": false},
+         "modules": []}'),
+      ('no left panel',
+       '{"right": {"days": 2, "open": false}, "modules": []}'),
+      ('a null right panel',
+       '{"left": {"days": 2, "open": false}, "right": null, "modules": []}'),
+      ('the modules an object',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": {"id": "duty", "side": "off", "share": 30}}'),
+      ('a module that is not an object',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": ["duty"]}'),
+      ('an empty id',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": "", "side": "off", "share": 30}]}'),
+      ('a numeric id',
+       '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false},
+         "modules": [{"id": 1, "side": "off", "share": 30}]}'),
+      ('an array', '[]'),
+      ('a JSON null', 'null')) v
+  loop
+    begin
+      update schedule_settings set kiosk_panels = v_layout where tenant_id = v_new;
+      raise exception 'FAIL: kiosk_panels took a layout with % (0077): %', v_label, v_layout;
+    exception when check_violation then null;
+    end;
+  end loop;
+  -- Called directly it answers false — not null, not an error — for
+  -- anything that is not a layout.
+  if kiosk_panels_valid(null) is distinct from false
+     or kiosk_panels_valid('"panels"') is distinct from false
+     or kiosk_panels_valid('7') is distinct from false
+     or kiosk_panels_valid('{"left": [], "right": 1, "modules": "x"}') is distinct from false then
+    raise exception 'FAIL: kiosk_panels_valid does not answer false for a non-layout (0077)';
+  end if;
+
+  -- The bounds pass, and so does a module this database has never heard
+  -- of, with options of its own: the app keeps it and writes it back.
+  update schedule_settings
+     set kiosk_panels =
+       '{"left": {"days": 1, "open": true}, "right": {"days": 13, "open": false},
+         "modules": [{"id": "duty", "side": "left", "share": 5},
+                     {"id": "notices", "side": "right", "share": 95},
+                     {"id": "future", "side": "left", "share": 50, "size": "big"}]}'
+   where tenant_id = v_new;
+  update schedule_settings
+     set kiosk_panels = '{"left": {"days": 2, "open": false},
+                          "right": {"days": 2, "open": false}, "modules": []}'
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_panels = v_default where tenant_id = v_new;
+
+  -- The check calls the validator as the admin who saves: authenticated
+  -- may execute it, anon may not.
+  if not has_function_privilege('authenticated', 'public.kiosk_panels_valid(jsonb)', 'execute') then
+    raise exception 'FAIL: authenticated cannot execute kiosk_panels_valid — no admin could save the panels (0077)';
+  end if;
+  if has_function_privilege('anon', 'public.kiosk_panels_valid(jsonb)', 'execute') then
+    raise exception 'FAIL: anon may execute kiosk_panels_valid (0077)';
+  end if;
+
+  -- None of it reaches the public overview: its six settings, nothing more.
+  v_keys := array(select jsonb_object_keys(
+                           public_week('kuzelna-a', current_date)->'settings')
+                  order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations',
+                      'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s panels may be reaching anon (0077): %', v_keys;
+  end if;
+  raise notice 'OK: the old drawer converts into kiosk_panels and its columns are gone, a new alley gets the default, bad layouts are check violations, the panels stay off the public overview (0077)';
+end $$;
+
+-- The admin saves the layout through the API's role: the check runs as
+-- authenticated, and a bad layout is still refused.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"77000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_new constant uuid := '00000000-0000-0000-0000-000000077000';
+begin
+  update schedule_settings
+     set kiosk_panels = jsonb_set(kiosk_panels, '{left,days}', '3'),
+         kiosk_notices_header = false
+   where tenant_id = v_new;
+  if not found then
+    raise exception 'FAIL: the admin could not save the kiosk panels (0077)';
+  end if;
+  begin
+    update schedule_settings
+       set kiosk_panels = jsonb_set(kiosk_panels, '{right,days}', '0')
+     where tenant_id = v_new;
+    raise exception 'FAIL: the admin saved a panel 0 days wide (0077)';
+  exception when check_violation then null;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = '00000000-0000-0000-0000-000000077000'
+                    and (kiosk_panels #>> '{left,days}') = '3'
+                    and not kiosk_notices_header) then
+    raise exception 'FAIL: the admin''s layout was not saved (0077)';
+  end if;
+  raise notice 'OK: an admin saves the kiosk panels through the check as authenticated (0077)';
 end $$;
 
 rollback;

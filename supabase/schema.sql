@@ -2519,6 +2519,63 @@ $$;
 ALTER FUNCTION "public"."is_superadmin"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") RETURNS boolean
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_side text;
+  v_panel jsonb;
+  v_module jsonb;
+  v_ids text[] := '{}';
+begin
+  if jsonb_typeof(p) is distinct from 'object' then
+    return false;
+  end if;
+  foreach v_side in array array['left', 'right'] loop
+    v_panel := p -> v_side;
+    if jsonb_typeof(v_panel) is distinct from 'object'
+       or jsonb_typeof(v_panel -> 'days') is distinct from 'number'
+       or jsonb_typeof(v_panel -> 'open') is distinct from 'boolean' then
+      return false;
+    end if;
+    -- A JSON number: its text always casts to numeric.
+    if (v_panel ->> 'days')::numeric <> trunc((v_panel ->> 'days')::numeric)
+       or (v_panel ->> 'days')::numeric not between 1 and 13 then
+      return false;
+    end if;
+  end loop;
+  if jsonb_typeof(p -> 'modules') is distinct from 'array' then
+    return false;
+  end if;
+  for v_module in select value from jsonb_array_elements(p -> 'modules') loop
+    if jsonb_typeof(v_module) is distinct from 'object'
+       or jsonb_typeof(v_module -> 'id') is distinct from 'string'
+       or jsonb_typeof(v_module -> 'side') is distinct from 'string'
+       or jsonb_typeof(v_module -> 'share') is distinct from 'number' then
+      return false;
+    end if;
+    if v_module ->> 'id' = '' or v_module ->> 'id' = any (v_ids)
+       or v_module ->> 'side' not in ('off', 'left', 'right')
+       or (v_module ->> 'share')::numeric
+            <> trunc((v_module ->> 'share')::numeric)
+       or (v_module ->> 'share')::numeric not between 5 and 95 then
+      return false;
+    end if;
+    v_ids := v_ids || (v_module ->> 'id');
+  end loop;
+  return true;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") IS 'Whether a value is a kiosk panel layout (0077), for the check on schedule_settings.kiosk_panels; never raises. authenticated executes it: the check runs as the admin who saves.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -5669,13 +5726,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
     "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
     "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
-    "kiosk_panel_enabled" boolean DEFAULT true NOT NULL,
-    "kiosk_drawer_open" boolean DEFAULT false NOT NULL,
-    "kiosk_drawer_columns" smallint DEFAULT 2 NOT NULL,
-    "kiosk_notices_mode" "text" DEFAULT 'both'::"text" NOT NULL,
     "kiosk_notices_rotation_seconds" smallint DEFAULT 12 NOT NULL,
-    "kiosk_notices_share" smallint DEFAULT 40 NOT NULL,
-    "kiosk_show_matches" boolean DEFAULT true NOT NULL,
     "kiosk_show_upcoming" boolean DEFAULT true NOT NULL,
     "kiosk_weeks_back" smallint DEFAULT 2 NOT NULL,
     "kiosk_weeks_ahead" smallint DEFAULT 1 NOT NULL,
@@ -5707,32 +5758,29 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,
     "kiosk_duty_header" boolean DEFAULT false NOT NULL,
     "kiosk_duty_board" boolean DEFAULT false NOT NULL,
-    "kiosk_duty_drawer" boolean DEFAULT false NOT NULL,
-    "kiosk_duty_share" smallint DEFAULT 30 NOT NULL,
     "kiosk_duty_band_position" "text" DEFAULT 'middle'::"text" NOT NULL,
     "kiosk_warning_font_size" smallint DEFAULT 22 NOT NULL,
     "kiosk_day_matches_width" smallint DEFAULT 560 NOT NULL,
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
+    "kiosk_panels" "jsonb" DEFAULT '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false}, "modules": [{"id": "duty", "side": "off", "share": 30}, {"id": "notices", "side": "right", "share": 40}, {"id": "matches", "side": "right", "share": 60}, {"id": "guide", "side": "off", "share": 45}, {"id": "week", "side": "off", "share": 55}]}'::"jsonb" NOT NULL,
+    "kiosk_notices_header" boolean DEFAULT true NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_band_font_size_check" CHECK ((("kiosk_band_font_size" >= 8) AND ("kiosk_band_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_day_matches_width_check" CHECK ((("kiosk_day_matches_width" >= 340) AND ("kiosk_day_matches_width" <= 1200))),
-    CONSTRAINT "schedule_settings_kiosk_drawer_columns_check" CHECK ((("kiosk_drawer_columns" >= 1) AND ("kiosk_drawer_columns" <= 13))),
     CONSTRAINT "schedule_settings_kiosk_duty_band_position_check" CHECK (("kiosk_duty_band_position" = ANY (ARRAY['top'::"text", 'middle'::"text", 'bottom'::"text"]))),
-    CONSTRAINT "schedule_settings_kiosk_duty_share_check" CHECK ((("kiosk_duty_share" >= 10) AND ("kiosk_duty_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_font_size_check" CHECK ((("kiosk_font_size" >= 9) AND ("kiosk_font_size" <= 24))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
-    CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_panels_check" CHECK ("public"."kiosk_panels_valid"("kiosk_panels")),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_picker_mode_check" CHECK (("kiosk_picker_mode" = ANY (ARRAY['letters'::"text", 'clubs'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_picker_note_check" CHECK ((("kiosk_picker_note" IS NULL) OR (("char_length"("btrim"("kiosk_picker_note")) >= 1) AND ("char_length"("btrim"("kiosk_picker_note")) <= 300)))),
-    CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_stream_corner_check" CHECK (("kiosk_stream_corner" = ANY (ARRAY['tl'::"text", 'tr'::"text", 'bl'::"text", 'br'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_stream_max_check" CHECK ((("kiosk_stream_max" >= 1) AND ("kiosk_stream_max" <= 4))),
     CONSTRAINT "schedule_settings_kiosk_stream_width_check" CHECK ((("kiosk_stream_width" >= 20) AND ("kiosk_stream_width" <= 60))),
@@ -5754,6 +5802,14 @@ COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_enabled" IS 'Wheth
 
 
 COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_days" IS 'How many days before a canteen duty the reminder goes out, at 18:00 Prague (0050), 1–14.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_panels" IS 'The kiosk''s two panels and the modules in them (0077): left/right {days 1–13, open}, modules [{id, side off|left|right, share 5–95}] in their order. kiosk_panels_valid checks the shape only; the app keeps an id it does not know.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_header" IS 'Nástěnka''s line in the kiosk''s status bar, one notice title at a time (0077: the header half of the dropped kiosk_notices_mode). Default on.';
 
 
 
@@ -7301,6 +7357,12 @@ GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "servic
 
 REVOKE ALL ON FUNCTION "public"."is_on_duty"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."is_on_duty"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") TO "service_role";
 
 
 
