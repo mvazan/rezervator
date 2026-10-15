@@ -11,7 +11,12 @@
 -- id it does not know and writes it back unchanged, so a later module
 -- needs no migration. kiosk_weather_title is the weather's title on the
 -- kiosk, the place the admin types („Brno“; the kiosk adds the colon all
--- its titles have); null shows „Počasí“.
+-- its titles have); null shows „Počasí“. kiosk_weather_items is what the
+-- weather shows beside the temperature now, which it always shows: today's
+-- high and low (range), the feels-like temperature (feels), the wind
+-- (wind), today's rain or snow (rain). The default is what the kiosk
+-- showed before — the high and low and the umbrella — so nothing changes
+-- for an alley until its admin picks.
 --
 -- The four switches the column replaces (kiosk_weather and kiosk_nameday
 -- from 0067, kiosk_duty_header from 0073, kiosk_notices_header from 0077)
@@ -59,7 +64,8 @@ comment on function kiosk_header_valid(jsonb) is
   'Whether a value is a kiosk header layout (0082), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
 
 -- A new alley: the notices on the right, the rest off — what the old
--- switches' defaults convert to.
+-- switches' defaults convert to —, and the weather as it was: the
+-- temperature, the high and low, the umbrella.
 alter table schedule_settings
   add column if not exists kiosk_header jsonb not null default
     '{"modules": [{"id": "weather", "side": "off"},
@@ -71,11 +77,18 @@ alter table schedule_settings
   add column if not exists kiosk_weather_title text
     constraint schedule_settings_kiosk_weather_title_check
     check (kiosk_weather_title is null
-           or char_length(btrim(kiosk_weather_title)) between 1 and 40);
+           or char_length(btrim(kiosk_weather_title)) between 1 and 40),
+  add column if not exists kiosk_weather_items text[] not null
+    default '{range,rain}'
+    constraint schedule_settings_kiosk_weather_items_check
+    check (kiosk_weather_items
+           <@ array['range', 'feels', 'wind', 'rain']::text[]);
 comment on column schedule_settings.kiosk_header is
   'The kiosk''s header modules (0082): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
 comment on column schedule_settings.kiosk_weather_title is
   'The weather module''s title on the kiosk (0082), typed by the admin („Brno“, shown „Brno:“); null shows „Počasí:“.';
+comment on column schedule_settings.kiosk_weather_items is
+  'What the weather module shows beside the temperature now, which it always shows (0082): range (today''s high and low), feels (the feels-like temperature now), wind (the wind now in km/h, with its gusts), rain (today''s rain or snow); the kiosk keeps its own order. Empty = the temperature alone.';
 
 -- The old switches, converted: one on goes left — the weather, the name
 -- day and the duty stood beside or under the clock — and the notices

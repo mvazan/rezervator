@@ -5944,6 +5944,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_notices_fresh_days" smallint DEFAULT 3 NOT NULL,
     "kiosk_header" "jsonb" DEFAULT '{"modules": [{"id": "weather", "side": "off"}, {"id": "nameday", "side": "off"}, {"id": "duty", "side": "off"}, {"id": "notices", "side": "right"}]}'::"jsonb" NOT NULL,
     "kiosk_weather_title" "text",
+    "kiosk_weather_items" "text"[] DEFAULT '{range,rain}'::"text"[] NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
@@ -5970,6 +5971,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 2) AND ("kiosk_visible_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_warning_check" CHECK ((("kiosk_warning" IS NULL) OR (("char_length"("btrim"("kiosk_warning")) >= 1) AND ("char_length"("btrim"("kiosk_warning")) <= 300)))),
     CONSTRAINT "schedule_settings_kiosk_warning_font_size_check" CHECK ((("kiosk_warning_font_size" >= 14) AND ("kiosk_warning_font_size" <= 40))),
+    CONSTRAINT "schedule_settings_kiosk_weather_items_check" CHECK (("kiosk_weather_items" <@ ARRAY['range'::"text", 'feels'::"text", 'wind'::"text", 'rain'::"text"])),
     CONSTRAINT "schedule_settings_kiosk_weather_place_check" CHECK (((("kiosk_weather_lat" IS NULL) = ("kiosk_weather_lon" IS NULL)) AND (("kiosk_weather_lat" IS NULL) OR (("kiosk_weather_lat" >= ('-90'::integer)::double precision) AND ("kiosk_weather_lat" <= (90)::double precision))) AND (("kiosk_weather_lon" IS NULL) OR (("kiosk_weather_lon" >= ('-180'::integer)::double precision) AND ("kiosk_weather_lon" <= (180)::double precision))) AND (("kiosk_weather_place" IS NULL) OR (("char_length"("kiosk_weather_place") >= 1) AND ("char_length"("kiosk_weather_place") <= 200))))),
     CONSTRAINT "schedule_settings_kiosk_weather_title_check" CHECK ((("kiosk_weather_title" IS NULL) OR (("char_length"("btrim"("kiosk_weather_title")) >= 1) AND ("char_length"("btrim"("kiosk_weather_title")) <= 40)))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
@@ -6007,6 +6009,10 @@ COMMENT ON COLUMN "public"."schedule_settings"."kiosk_header" IS 'The kiosk''s h
 
 
 COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_title" IS 'The weather module''s title on the kiosk (0082), typed by the admin („Brno“, shown „Brno:“); null shows „Počasí:“.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_items" IS 'What the weather module shows beside the temperature now, which it always shows (0082): range (today''s high and low), feels (the feels-like temperature now), wind (the wind now in km/h, with its gusts), rain (today''s rain or snow); the kiosk keeps its own order. Empty = the temperature alone.';
 
 
 

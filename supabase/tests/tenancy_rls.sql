@@ -13287,7 +13287,8 @@ update schedule_settings
  where tenant_id = '00000000-0000-0000-0000-000000082002';
 \ir ../migrations/0082_kiosk_header.sql
 create temp table kiosk_0082_first as
-  select tenant_id, kiosk_header, kiosk_weather_title from schedule_settings;
+  select tenant_id, kiosk_header, kiosk_weather_title, kiosk_weather_items
+    from schedule_settings;
 \ir ../migrations/0082_kiosk_header.sql
 
 -- An admin of a new alley, who saves the header as authenticated below.
@@ -13344,7 +13345,8 @@ begin
   if exists (select 1 from kiosk_0082_first f
                join schedule_settings s using (tenant_id)
               where s.kiosk_header is distinct from f.kiosk_header
-                 or s.kiosk_weather_title is distinct from f.kiosk_weather_title) then
+                 or s.kiosk_weather_title is distinct from f.kiosk_weather_title
+                 or s.kiosk_weather_items is distinct from f.kiosk_weather_items) then
     raise exception 'FAIL: running 0082 again changed a converted header (0082)';
   end if;
 
@@ -13359,8 +13361,9 @@ begin
   if (select count(*) from pg_constraint
        where conrelid = 'schedule_settings'::regclass
          and conname in ('schedule_settings_kiosk_header_check',
-                         'schedule_settings_kiosk_weather_title_check')) <> 2 then
-    raise exception 'FAIL: kiosk_header or kiosk_weather_title has no named check (0082)';
+                         'schedule_settings_kiosk_weather_title_check',
+                         'schedule_settings_kiosk_weather_items_check')) <> 3 then
+    raise exception 'FAIL: kiosk_header, kiosk_weather_title or kiosk_weather_items has no named check (0082)';
   end if;
 
   -- A new alley starts with the notices on the right, the rest off, and
@@ -13369,6 +13372,12 @@ begin
                   where tenant_id = v_new and kiosk_header = v_default
                     and kiosk_weather_title is null) then
     raise exception 'FAIL: a new alley does not start with the default header (0082)';
+  end if;
+  -- Every alley, new or converted, shows the weather as before: the high
+  -- and low and the rain beside the temperature.
+  if exists (select 1 from schedule_settings
+              where kiosk_weather_items is distinct from '{range,rain}') then
+    raise exception 'FAIL: an alley does not start with the weather''s high and low and rain (0082)';
   end if;
 
   -- Bad layouts are a check violation, nothing else.
@@ -13441,6 +13450,25 @@ begin
   update schedule_settings set kiosk_weather_title = null
    where tenant_id = v_new;
 
+  -- The weather's values: the four the app knows, in any order, or none
+  -- (the temperature alone); anything else is a check violation.
+  for v_label in select * from (values
+      ('{range,snow}'), ('{Range}'), ('{wind,NULL}'), ('{sun}')) v
+  loop
+    begin
+      update schedule_settings set kiosk_weather_items = v_label::text[]
+       where tenant_id = v_new;
+      raise exception 'FAIL: the weather''s values took % (0082)', v_label;
+    exception when check_violation then null;
+    end;
+  end loop;
+  update schedule_settings set kiosk_weather_items = '{rain,wind,feels,range}'
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_weather_items = '{}'
+   where tenant_id = v_new;
+  update schedule_settings set kiosk_weather_items = '{range,rain}'
+   where tenant_id = v_new;
+
   -- The check calls the validator as the admin who saves: authenticated
   -- may execute it, anon may not.
   if not has_function_privilege('authenticated', 'public.kiosk_header_valid(jsonb)', 'execute') then
@@ -13459,7 +13487,7 @@ begin
                       'training_weekdays'] then
     raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s header may be reaching anon (0082): %', v_keys;
   end if;
-  raise notice 'OK: the old header switches convert into kiosk_header and are gone, a new alley gets the default, bad layouts and titles are check violations, the header stays off the public overview (0082)';
+  raise notice 'OK: the old header switches convert into kiosk_header and are gone, a new alley gets the default, bad layouts, titles and weather values are check violations, the header stays off the public overview (0082)';
 end $$;
 
 -- The admin saves the header through the API's role: the check runs as
@@ -13477,7 +13505,8 @@ begin
                          {"id": "duty", "side": "left"},
                          {"id": "nameday", "side": "off"},
                          {"id": "notices", "side": "right"}]}',
-         kiosk_weather_title = 'Dnes v Brně'
+         kiosk_weather_title = 'Dnes v Brně',
+         kiosk_weather_items = '{feels,wind}'
    where tenant_id = v_new;
   if not found then
     raise exception 'FAIL: the admin could not save the kiosk header (0082)';
@@ -13489,6 +13518,12 @@ begin
     raise exception 'FAIL: the admin saved a module in the middle (0082)';
   exception when check_violation then null;
   end;
+  begin
+    update schedule_settings set kiosk_weather_items = '{feels,sun}'
+     where tenant_id = v_new;
+    raise exception 'FAIL: the admin saved a weather value the kiosk does not know (0082)';
+  exception when check_violation then null;
+  end;
 end $$;
 reset role;
 do $$
@@ -13497,10 +13532,11 @@ begin
                   where tenant_id = '00000000-0000-0000-0000-000000082000'
                     and kiosk_header -> 'modules' -> 1 ->> 'id' = 'duty'
                     and kiosk_header -> 'modules' -> 1 ->> 'side' = 'left'
-                    and kiosk_weather_title = 'Dnes v Brně') then
+                    and kiosk_weather_title = 'Dnes v Brně'
+                    and kiosk_weather_items = '{feels,wind}') then
     raise exception 'FAIL: the admin''s header was not saved (0082)';
   end if;
-  raise notice 'OK: an admin saves the kiosk header through the check as authenticated (0082)';
+  raise notice 'OK: an admin saves the kiosk header and the weather''s values through the checks as authenticated (0082)';
 end $$;
 
 rollback;
