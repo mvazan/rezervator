@@ -1,0 +1,410 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
+import 'package:rezervator/data/clock.dart';
+import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/week_players.dart';
+import 'package:rezervator/features/kiosk/kiosk_week.dart';
+import 'package:rezervator/features/schedule/widgets/calendar_board.dart'
+    show calendarRulerWidth;
+
+/// The app's own font: the test font's glyphs are wider than Manrope's, so
+/// a fit measured against it would not be the kiosk's.
+Future<void> _loadManrope() async {
+  final loader = FontLoader(appFontFamily);
+  for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
+    final bytes = File('assets/fonts/Manrope-$weight.ttf').readAsBytesSync();
+    loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+  }
+  await loader.load();
+}
+
+/// „Hráči týdne“ (module `week`, 0078): the card's fit on a Full HD kiosk
+/// (the categories that fit, each its best three, „Více“ for the rest), the
+/// full-screen detail (chips, segments, columns, the tap to the Zápis), and
+/// the module in a panel and in the shell — no line in the week, no room.
+void main() {
+  setUpAll(_loadManrope);
+
+  // Thursday 15 October: the week shown is 5.–11. 10.
+  final now = DateTime(2026, 10, 15, 12);
+
+  // One day column of a Full HD kiosk with 8 days on the screen; a panel
+  // is whole columns of it (kioskPanelWidths).
+  const column = (1920 - calendarRulerWidth) / 8;
+  // The shell's panel at 1080: the status bar and the idle bar take the
+  // rest.
+  const panelHeight = 981.0;
+  // A panel's padding (12 around) and the gap between two modules.
+  const pad = 12.0;
+
+  Size cardSize({required int days, required int share}) => Size(
+    days * column - 2 * pad,
+    share == 100
+        ? panelHeight - 2 * pad
+        : (panelHeight - 2 * pad - pad) * share / 100,
+  );
+
+  void fullHd(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+  }
+
+  WeekLine line(
+    String name,
+    int total, {
+    WeekGender? gender = WeekGender.male,
+    int? throws = 120,
+    bool away = false,
+    String match = 'm1',
+    String competition = 'Divize AS',
+    String team = 'Termínátor A',
+    String? clubId = 'c1',
+    String? clubName = 'Termínátor',
+    int clubColor = 4,
+  }) => WeekLine(
+    matchId: match,
+    date: Day(2026, 10, 10),
+    playerName: name,
+    playerSlug: name.toLowerCase().replaceAll(' ', '-'),
+    total: total,
+    throws: throws,
+    isAway: away,
+    competition: competition,
+    teamName: team,
+    opponent: 'KK Slavoj',
+    clubId: clubId,
+    clubName: clubName,
+    clubColor: clubColor,
+    gender: gender,
+  );
+
+  // Four players in each of the four categories.
+  final week = [
+    for (final (category, gender, throws) in const [
+      ('M', WeekGender.male, 120),
+      ('Z', WeekGender.female, 120),
+      ('N', WeekGender.male, 100),
+      ('R', WeekGender.female, 100),
+    ])
+      for (var i = 0; i < 4; i++)
+        line(
+          'Hráč $category$i',
+          600 - 10 * i,
+          gender: gender,
+          throws: throws,
+          away: i.isOdd,
+        ),
+  ];
+
+  List<Override> overrides(List<WeekLine> lines) => [
+    nowProvider.overrideWith((ref) => Stream.value(now)),
+    weekPlayersProvider.overrideWith((ref) async => lines),
+  ];
+
+  Future<void> pumpCard(
+    WidgetTester tester,
+    Size size,
+    List<WeekLine> lines, {
+    VoidCallback? onOpen,
+  }) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: overrides(lines),
+        child: MaterialApp(
+          theme: buildTheme(Brightness.dark),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox.fromSize(
+                size: size,
+                child: KioskWeekCard(onOpen: onOpen ?? () {}),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+  }
+
+  final more = find.text('Více');
+
+  group('KioskWeekCard', () {
+    testWidgets('the title names the week; alone in a panel every category '
+        'fits, each its best three', (tester) async {
+      fullHd(tester);
+      await pumpCard(tester, cardSize(days: 2, share: 100), week);
+      expect(find.text('HRÁČI TÝDNE · 5.–11. 10.'), findsOneWidget);
+      for (final category in WeekCategory.values) {
+        expect(find.text(category.label), findsOneWidget);
+      }
+      expect(find.text('1. Hráč M0'), findsOneWidget);
+      expect(find.text('600'), findsNWidgets(4));
+      expect(find.text('3. Hráč M2'), findsOneWidget);
+      // The fourth is in the detail only.
+      expect(find.text('4. Hráč M3'), findsNothing);
+      expect(find.text('Termínátor A · doma'), findsNWidgets(8));
+      expect(find.text('Termínátor A · venku'), findsNWidgets(4));
+      expect(more, findsNothing);
+    });
+
+    testWidgets('at 30 % only the categories that fit whole, „Více“ for '
+        'the rest', (tester) async {
+      fullHd(tester);
+      await pumpCard(tester, cardSize(days: 2, share: 30), week);
+      expect(find.text(WeekCategory.men120.label), findsOneWidget);
+      expect(find.text(WeekCategory.women100.label), findsNothing);
+      expect(more, findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('one entry per player: two matches in the week, his best '
+        'line once', (tester) async {
+      fullHd(tester);
+      await pumpCard(tester, cardSize(days: 2, share: 100), [
+        line('Jan Novák', 571, match: 'm1'),
+        line('Jan Novák', 590, match: 'm2', away: true),
+        line('Petr Malý', 580),
+      ]);
+      expect(find.text('1. Jan Novák'), findsOneWidget);
+      expect(find.text('2. Petr Malý'), findsOneWidget);
+      expect(find.textContaining('Jan Novák'), findsOneWidget);
+      expect(find.text('590'), findsOneWidget);
+      expect(find.text('571'), findsNothing);
+    });
+
+    testWidgets('no gender known yet: the competitions instead of the '
+        'categories', (tester) async {
+      fullHd(tester);
+      await pumpCard(tester, cardSize(days: 2, share: 55), [
+        line('Jan Novák', 571, gender: null),
+        line('Petr Malý', 580, gender: null, competition: '1. KLM'),
+      ]);
+      expect(find.text('1. KLM'), findsOneWidget);
+      expect(find.text('Divize AS'), findsOneWidget);
+      expect(find.text('1. Petr Malý'), findsOneWidget);
+    });
+
+    testWidgets('a tap anywhere on the card opens the week', (tester) async {
+      fullHd(tester);
+      var opened = 0;
+      await pumpCard(
+        tester,
+        cardSize(days: 2, share: 30),
+        week,
+        onOpen: () => opened++,
+      );
+      await tester.tap(find.text('HRÁČI TÝDNE · 5.–11. 10.'));
+      await tester.tap(more);
+      await tester.tap(find.text('1. Hráč M0'));
+      expect(opened, 3);
+    });
+  });
+
+  group('showKioskWeekPlayers', () {
+    PrioritySlot slot(String id) => PrioritySlot(
+      id: id,
+      date: Day(2026, 10, 10),
+      startsAt: const HourMinute(14, 0),
+      endsAt: const HourMinute(17, 0),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'Termínátor A',
+      awayTeam: 'KK Slavoj',
+      importKey: 'cka:$id',
+    );
+
+    Future<List<PrioritySlot>> pumpDetail(
+      WidgetTester tester,
+      List<WeekLine> lines, {
+      List<PrioritySlot>? slots,
+    }) async {
+      final opened = <PrioritySlot>[];
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ...overrides(lines),
+            prioritySlotsProvider.overrideWithValue(
+              slots ?? [slot('m1'), slot('m2')],
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildTheme(Brightness.light),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => showKioskWeekPlayers(
+                    context,
+                    wrap: (child) =>
+                        Theme(data: buildTheme(Brightness.dark), child: child),
+                    onOpenMatch: opened.add,
+                  ),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return opened;
+    }
+
+    final page = find.byType(KioskWeekPlayersPage);
+    Finder inPage(Finder f) => find.descendant(of: page, matching: f);
+
+    testWidgets('full screen in the theme [wrap] gives it: the title, one '
+        'column per category, each a full ranking; „Zavřít“ closes it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await pumpDetail(tester, week);
+      expect(tester.getSize(page).width, 1920);
+      expect(tester.getSize(page).height, 1080);
+      expect(Theme.of(tester.element(page)).brightness, Brightness.dark);
+      expect(find.text('Hráči týdne 5.–11. 10.'), findsOneWidget);
+      for (final category in WeekCategory.values) {
+        expect(inPage(find.text(category.label)), findsOneWidget);
+      }
+      // All four of a category, the fourth too.
+      expect(inPage(find.text('Hráč M3')), findsOneWidget);
+      expect(
+        inPage(find.text('Termínátor A – KK Slavoj · venku')),
+        findsNWidgets(8),
+      );
+      // Side by side: men's 120 left of women's.
+      expect(
+        tester.getCenter(find.text(WeekCategory.men120.label)).dx,
+        lessThan(tester.getCenter(find.text(WeekCategory.women120.label)).dx),
+      );
+
+      await tester.tap(find.byTooltip('Zavřít'));
+      await tester.pumpAndSettle();
+      expect(page, findsNothing);
+    });
+
+    testWidgets('Doma / Venku keep the lines played there; Vše all', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await pumpDetail(tester, week);
+      await tester.tap(find.text('Venku'));
+      await tester.pumpAndSettle();
+      expect(inPage(find.text('Hráč M1')), findsOneWidget);
+      expect(inPage(find.text('Hráč M0')), findsNothing);
+      // Ranked among themselves: first of its column.
+      expect(
+        find.descendant(
+          of: find
+              .ancestor(of: find.text('Hráč M1'), matching: find.byType(Row))
+              .first,
+          matching: find.text('1.'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Doma'));
+      await tester.pumpAndSettle();
+      expect(inPage(find.text('Hráč M0')), findsOneWidget);
+      expect(inPage(find.text('Hráč M1')), findsNothing);
+
+      await tester.tap(find.text('Vše'));
+      await tester.pumpAndSettle();
+      expect(inPage(find.text('Hráč M0')), findsOneWidget);
+      expect(inPage(find.text('Hráč M1')), findsOneWidget);
+    });
+
+    testWidgets('Soutěže and Oddíly: a column per competition and per club, '
+        'Czech order, the ones without one last; unknown gender there too', (
+      tester,
+    ) async {
+      fullHd(tester);
+      final lines = [
+        line('Jan Novák', 571),
+        line('Eva Malá', 520, competition: 'Česká liga', gender: null),
+        line(
+          'Petr Malý',
+          580,
+          competition: 'Celostátní liga',
+          clubId: null,
+          clubName: null,
+          clubColor: -1,
+        ),
+        line(
+          'Ota Bílý',
+          560,
+          clubId: 'c2',
+          clubName: 'Čechie',
+          clubColor: 2,
+        ),
+      ];
+      await pumpDetail(tester, lines);
+      // Eva's gender is unknown: in no category.
+      expect(inPage(find.text('Eva Malá')), findsNothing);
+
+      await tester.tap(find.text('Soutěže'));
+      await tester.pumpAndSettle();
+      final competitions = [
+        for (final name in ['Celostátní liga', 'Česká liga', 'Divize AS'])
+          tester.getCenter(inPage(find.text(name))).dx,
+      ];
+      expect(competitions, orderedEquals([...competitions]..sort()));
+      expect(inPage(find.text('Eva Malá')), findsOneWidget);
+
+      await tester.tap(find.text('Oddíly'));
+      await tester.pumpAndSettle();
+      final clubs = [
+        for (final name in ['Čechie', 'Termínátor', weekOtherGroup])
+          tester.getCenter(inPage(find.text(name))).dx,
+      ];
+      expect(clubs, orderedEquals([...clubs]..sort()));
+    });
+
+    testWidgets('columns that do not fit scroll sideways', (tester) async {
+      fullHd(tester);
+      await pumpDetail(tester, [
+        for (var i = 0; i < 8; i++)
+          line('Hráč $i', 500 + i, competition: 'Soutěž $i'),
+      ]);
+      await tester.tap(find.text('Soutěže'));
+      await tester.pumpAndSettle();
+      expect(inPage(find.text('Soutěž 0')), findsOneWidget);
+      expect(inPage(find.text('Soutěž 7')), findsNothing);
+      await tester.drag(find.text('Soutěž 0'), const Offset(-2000, 0));
+      await tester.pumpAndSettle();
+      expect(inPage(find.text('Soutěž 7')), findsOneWidget);
+    });
+
+    testWidgets('a tap on a line opens that match\'s Zápis; a match the '
+        'slots do not hold opens nothing', (tester) async {
+      fullHd(tester);
+      final opened = await pumpDetail(
+        tester,
+        [
+          line('Jan Novák', 571, match: 'm2'),
+          line('Petr Malý', 560, match: 'gone'),
+        ],
+      );
+      await tester.tap(inPage(find.text('Jan Novák')));
+      await tester.tap(inPage(find.text('Petr Malý')));
+      expect([for (final s in opened) s.id], ['m2']);
+    });
+
+    testWidgets('nothing for the filter: says so', (tester) async {
+      fullHd(tester);
+      await pumpDetail(tester, [line('Jan Novák', 571)]);
+      await tester.tap(find.text('Venku'));
+      await tester.pumpAndSettle();
+      expect(find.text('Žádné výsledky pro tento výběr.'), findsOneWidget);
+    });
+  });
+}
