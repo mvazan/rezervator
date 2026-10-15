@@ -62,6 +62,19 @@ class _DisplayRecorder extends KioskDisplay {
 }
 
 void main() {
+  // The panel buttons breathe on the wall clock's beat
+  // (KioskDrawerButton.untilBreath): on the real clock a test's breath
+  // would start at another moment every run, and a pumpAndSettle that
+  // catches one runs seconds longer — a turn or a timer measured across it
+  // passed or failed by the time of day. A clock that stands still gives
+  // every test the same beat; the breathing tests hand in a moving one.
+  setUp(
+    () => KioskDrawerButton.clock = () =>
+        DateTime.fromMillisecondsSinceEpoch(4200 * 400000000 + 100,
+            isUtc: true),
+  );
+  tearDown(() => KioskDrawerButton.clock = DateTime.now);
+
   const settings = ScheduleSettings(
     laneCount: 2,
     trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
@@ -4595,12 +4608,21 @@ void main() {
       expect(inDrawer('Prvníci'), isTrue);
       expect(inDrawer('Druzí'), isFalse);
 
-      // Settling already ran the clock a few seconds; turn is 6 s.
-      await tester.pump(const Duration(seconds: 2));
+      // A touch in the view starts the turn over: from here on the clock
+      // is the test's alone. (Settling ran it for however long the panel
+      // buttons' breath took — they keep the wall clock's beat — and a
+      // settle after the turn could even run past the next one.)
+      final touch = await tester.startGesture(
+        tester.getCenter(find.byType(KioskPanelView)),
+      );
+      await touch.cancel();
+      await tester.pump(const Duration(milliseconds: 5900));
       expect(inDrawer('Druzí'), isFalse);
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+      // The turn (6 s), then the 380 ms swap.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(inDrawer('Druzí'), isTrue);
+      expect(inDrawer('Prvníci'), isFalse);
 
       await finish(tester);
     });
