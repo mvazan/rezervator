@@ -16,6 +16,7 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../domain/kiosk_layout.dart';
 import '../../domain/kiosk_panel.dart'
     show hasKioskVideo, kioskNotices, kioskStreamLabel;
 import '../../domain/models.dart';
@@ -372,6 +373,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
             right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
             child: Center(
               child: KioskDrawerButton(
+                side: PanelSide.right,
                 open: open,
                 onTap: toggle,
                 breathe: settings?.kioskAnimations ?? true,

@@ -3203,6 +3203,23 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('the drawer button says which panel it opens or closes, its '
+        'arrow pointing the way the panel goes', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('Zobrazit pravý panel'), findsOneWidget);
+      expect(find.bySemanticsLabel('Zobrazit levý panel'), findsNothing);
+      expect(openButton, findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel('Zobrazit pravý panel'));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+      expect(find.bySemanticsLabel('Skrýt pravý panel'), findsOneWidget);
+      expect(closeButton, findsOneWidget);
+      await finish(tester);
+    });
+
     testWidgets('the admin\'s number of days on the screen sets the column '
         'width, on the whole screen', (tester) async {
       fullHd(tester);

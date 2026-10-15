@@ -23,6 +23,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/duels.dart';
 import '../../domain/duties.dart' show KioskDutyEntry;
+import '../../domain/kiosk_layout.dart';
 import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
@@ -307,19 +308,24 @@ class KioskDrawer extends ConsumerWidget {
   }
 }
 
-/// The button that opens and closes the drawer: a bare double arrow, gray
-/// and half see-through, floating over the board at the drawer's left edge
-/// (or the screen's, while it is closed). Every few seconds it breathes once
-/// — a soft glow and a little more opacity — so a tablet on the wall shows
-/// that there is something to open, without ever moving.
+/// The button that opens and closes a panel: a bare double arrow pointing
+/// the way the panel moves, gray and half see-through, floating over the
+/// board at the panel's inner edge (the right one at the board's right
+/// edge, the left one on the hour ruler — never over today's column).
+/// Every few seconds it breathes once — a soft glow and a little more
+/// opacity — so a tablet on the wall shows that there is something to
+/// open, without ever moving.
 class KioskDrawerButton extends StatefulWidget {
   const KioskDrawerButton({
     super.key,
+    required this.side,
     required this.open,
     required this.onTap,
     this.breathe = true,
-  });
+  }) : assert(side != PanelSide.off);
 
+  /// The panel it opens and closes: left or right.
+  final PanelSide side;
   final bool open;
   final VoidCallback onTap;
 
@@ -386,9 +392,17 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final left = widget.side == PanelSide.left;
+    // The way a tap moves the panel: the right one opens to the left and
+    // closes to the right, the left one the other way round.
+    final towardsRight = left != widget.open;
     return Semantics(
+      // A node of its own: two buttons, each known by its label.
+      container: true,
       button: true,
-      label: widget.open ? 'Skrýt panel' : 'Zobrazit panel',
+      label:
+          '${widget.open ? 'Skrýt' : 'Zobrazit'} '
+          '${left ? 'levý' : 'pravý'} panel',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
@@ -397,7 +411,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
           height: KioskDrawerButton.size,
           child: Center(
             // Its own layer: a breath repaints the icon, not the board and
-            // the drawer under it.
+            // the panel under it.
             child: RepaintBoundary(
               child: AnimatedBuilder(
                 animation: _controller,
@@ -405,7 +419,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
                   // 0 → 1 → 0 over one breath; 0 while the button is still.
                   final glow = math.sin(_controller.value * math.pi);
                   return Icon(
-                    widget.open
+                    towardsRight
                         ? Icons.keyboard_double_arrow_right
                         : Icons.keyboard_double_arrow_left,
                     size: 44,
