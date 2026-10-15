@@ -15,6 +15,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
@@ -912,23 +913,38 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
   void didUpdateWidget(_MatchesCard old) {
     super.didUpdateWidget(old);
     final days = widget.boardDays;
-    if (days != null && days != old.boardDays) _follow(days);
+    if (days != null && days != old.boardDays) _follow(old.boardDays, days);
   }
 
-  /// Turns the list to the first match the board now shows — widening the
-  /// list by whole weeks when that match lies outside it.
-  void _follow(({Day first, Day last}) days) {
+  /// Brings into view the matches of the days the board just brought into
+  /// view ([kioskNewlyShownDays]) — and scrolls no further than that: a
+  /// day back usually shows a day whose matches are on the list already,
+  /// and the list stays; day by day the list follows, a match at a time.
+  /// (It used to turn the first match of the board's days to the top on
+  /// every scroll, so the list jumped even for a day it already showed.)
+  /// The list widens by whole weeks when those matches lie outside it.
+  void _follow(
+    ({Day first, Day last})? previous,
+    ({Day first, Day last}) days,
+  ) {
+    final now = ref.read(nowProvider).value ?? DateTime.now();
+    final shown = kioskNewlyShownDays(
+      previous,
+      days,
+      today: Day.fromDateTime(now),
+    );
+    if (shown == null) return;
     bool inDays(PrioritySlot s) =>
-        !s.date.isBefore(days.first) && !s.date.isAfter(days.last);
+        !s.date.isBefore(shown.first) && !s.date.isAfter(shown.last);
     var back = _extraBack;
     var ahead = _extraAhead;
-    PrioritySlot? target;
+    var found = const <PrioritySlot>[];
     for (var i = 0; i < 60; i++) {
       final w = _window(back, ahead, watch: false);
-      target = w.matches.where(inDays).firstOrNull;
-      if (target != null) break;
+      found = w.matches.where(inDays).toList();
+      if (found.isNotEmpty) break;
       final earlier =
-          w.matches.isEmpty || days.first.isBefore(w.matches.first.date);
+          w.matches.isEmpty || shown.first.isBefore(w.matches.first.date);
       if (earlier && w.moreBefore) {
         back++;
       } else if (!earlier && w.moreAfter) {
@@ -937,19 +953,34 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
         break;
       }
     }
-    final found = target;
-    if (found == null) return;
+    if (found.isEmpty) return;
     if (back != _extraBack || ahead != _extraAhead) {
       setState(() {
         _extraBack = back;
         _extraAhead = ahead;
       });
     }
+    final firstId = found.first.id;
+    final lastId = found.last.id;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final row = _rowKeys[found.id]?.currentContext;
-      if (row == null || !row.mounted) return;
-      Scrollable.ensureVisible(
-        row,
+      if (!mounted || !_controller.hasClients) return;
+      final first = _rowKeys[firstId]?.currentContext?.findRenderObject();
+      final last = _rowKeys[lastId]?.currentContext?.findRenderObject();
+      if (first == null || last == null) return;
+      final viewport = RenderAbstractViewport.of(first);
+      final p = _controller.position;
+      // The least scroll that shows them all: down until the last one's
+      // bottom edge is in, then up until the first one's top edge is —
+      // the first wins when they do not all fit.
+      var target = p.pixels;
+      final lastAtBottom = viewport.getOffsetToReveal(last, 1).offset;
+      if (target < lastAtBottom) target = lastAtBottom;
+      final firstAtTop = viewport.getOffsetToReveal(first, 0).offset;
+      if (target > firstAtTop) target = firstAtTop;
+      target = target.clamp(p.minScrollExtent, p.maxScrollExtent);
+      if ((target - p.pixels).abs() < 0.5) return;
+      _controller.animateTo(
+        target,
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeInOutCubic,
       );
