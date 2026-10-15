@@ -247,7 +247,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
           for (final (i, c) in competitions.indexed) ...[
             if (i > 0) const SizedBox(width: 8),
             ChoiceChip(
-              label: Text(c.name),
+              label: Text(competitionChipLabel(c.name)),
+              tooltip: c.name,
               selected: c.slug == selected,
               onSelected: (_) => _selectCompetition(c.slug),
             ),

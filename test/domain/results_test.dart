@@ -980,4 +980,13 @@ void main() {
       expect(mostRecentDecidedInOrder(ordered, results, Day(2026, 10, 1)), isNull);
     });
   });
+
+  test('competitionChipLabel shortens Krajský přebor to KP, nothing else', () {
+    expect(
+      competitionChipLabel('Krajský přebor Jmk 1. třídy Sever'),
+      'KP Jmk 1. třídy Sever',
+    );
+    expect(competitionChipLabel('Jihomoravská divize'), 'Jihomoravská divize');
+    expect(competitionChipLabel('3. KLM D'), '3. KLM D');
+  });
 }

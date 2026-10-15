@@ -69,6 +69,7 @@ const appChangelog = <Release>[
         'písmo.',
     'Kalendář po dnech: čas bloku je začátek, pomlčka a konec pod sebou — '
         'v každém řádku stejně, i při větším písmu.',
+    'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',

@@ -1048,6 +1048,22 @@ void main() {
   });
 
   // The saved mode and competition arrive a moment after the first frame.
+  testWidgets('a Krajský přebor chip reads KP, its full name on long press', (
+    tester,
+  ) async {
+    const kp = 'Krajský přebor Jmk 1. třídy Sever';
+    await tester.pumpWidget(app(
+      competitions: const [(slug: 'kp', name: kp), (slug: 'jmd', name: 'Jihomoravská divize')],
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Soutěže'));
+    await tester.pumpAndSettle();
+    final chip = find.widgetWithText(ChoiceChip, 'KP Jmk 1. třídy Sever');
+    expect(chip, findsOneWidget);
+    expect(tester.widget<ChoiceChip>(chip).tooltip, kp);
+    expect(find.widgetWithText(ChoiceChip, 'Jihomoravská divize'), findsOneWidget);
+  });
+
   group('competition view, saved choice', () {
     // A season long enough to scroll: 20 rounds of finished foreign matches
     // (one a week, ending three weeks ago), then a live one being played now.

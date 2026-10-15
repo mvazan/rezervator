@@ -222,6 +222,11 @@ List<({Day day, List<PrioritySlot> matches})> resultsTimeline({
   ];
 }
 
+/// A competition's name on a chip: „Krajský přebor“ as KP — „KP Jmk 1.
+/// třídy Sever“; anything else as it is.
+String competitionChipLabel(String name) =>
+    name.replaceFirst(RegExp(r'^Krajský přebor(?=\s|$)'), 'KP');
+
 /// Which day of [days] (as [resultsTimeline] returns them, ascending) the
 /// list should open on: the first at or after [today], else the last one
 /// (the season is over), else -1 (nothing to show).
