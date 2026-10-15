@@ -4,71 +4,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/features/auth/update_screen.dart';
+import 'package:rezervator/features/feedback/feedback_screen.dart';
 import 'package:rezervator/features/kiosk/kiosk_qr.dart';
 
-/// The kiosk's Google Play QR code (kiosk_qr.dart): a bundled matrix — no
-/// decoder runs here, so its structure is checked against the standard
-/// (version 4: finder, timing and alignment patterns, the dark module) —
-/// and the tile that draws it, whole device pixels a module.
+/// The kiosk's QR codes (kiosk_qr.dart), Google Play's and Napište nám's:
+/// bundled matrices — no decoder runs here, so their structure is checked
+/// against the standard (finder, timing and alignment patterns, the dark
+/// module) — and the tile that draws them, whole device pixels a module.
 void main() {
+  // Google Play's code, the one the tile tests draw: version 4.
   const n = 33;
-  bool dark(int r, int c) => kioskPlayQr[r][c] == '#';
 
   group('kioskPlayQr', () {
     test('leads to the app\'s Google Play page, as the update screen', () {
       expect(kioskPlayUrl, UpdateScreen.playUrl);
     });
 
-    test('is a square of version 4: 33 rows of 33 modules, # or .', () {
-      expect(kioskPlayQr, hasLength(4 * 4 + 17));
-      for (final row in kioskPlayQr) {
-        expect(row, hasLength(n));
-        expect(RegExp(r'^[#.]+$').hasMatch(row), isTrue, reason: row);
-      }
+    _structure(kioskPlayQr, version: 4, alignment: 26);
+  });
+
+  group('kioskFeedbackQr', () {
+    test('leads to the web\'s Napište nám form, marked as the kiosk\'s', () {
+      final route = Uri.parse(Uri.parse(kioskFeedbackUrl).fragment);
+      expect(Uri.parse(kioskFeedbackUrl).host, 'rezervator.online');
+      expect(route.path, '/napiste-nam');
+      expect(
+        feedbackSourceFromQuery(route.queryParameters['z']),
+        FeedbackSource.kiosk,
+      );
     });
 
-    test('has the three 7 × 7 finder patterns, each with its light '
-        'separator', () {
-      for (final (top, left) in [(0, 0), (0, n - 7), (n - 7, 0)]) {
-        for (var i = 0; i < 7; i++) {
-          for (var j = 0; j < 7; j++) {
-            final ring = i == 0 || i == 6 || j == 0 || j == 6;
-            final core = i >= 2 && i <= 4 && j >= 2 && j <= 4;
-            expect(
-              dark(top + i, left + j),
-              ring || core,
-              reason: 'finder at ($top, $left), module ($i, $j)',
-            );
-          }
-        }
-        // The separator: the light row and column on its inner sides.
-        final sepRow = top == 0 ? 7 : n - 8;
-        final sepCol = left == 0 ? 7 : n - 8;
-        for (var k = 0; k < 8; k++) {
-          expect(dark(sepRow, left == 0 ? k : n - 8 + k), isFalse);
-          expect(dark(top == 0 ? k : n - 8 + k, sepCol), isFalse);
-        }
-      }
-    });
-
-    test('has the timing row and column between the finders: dark and '
-        'light in turn, dark on the even modules', () {
-      for (var k = 8; k < n - 8; k++) {
-        expect(dark(6, k), k.isEven, reason: 'timing row, column $k');
-        expect(dark(k, 6), k.isEven, reason: 'timing column, row $k');
-      }
-    });
-
-    test('has version 4\'s alignment pattern at (26, 26) and the dark '
-        'module at (25, 8)', () {
-      for (var i = -2; i <= 2; i++) {
-        for (var j = -2; j <= 2; j++) {
-          final ring = i.abs() == 2 || j.abs() == 2;
-          expect(dark(26 + i, 26 + j), ring || (i == 0 && j == 0));
-        }
-      }
-      expect(dark(4 * 4 + 9, 8), isTrue);
-    });
+    _structure(kioskFeedbackQr, version: 3, alignment: 22);
   });
 
   group('kioskQrTile', () {
@@ -178,11 +144,74 @@ void main() {
           if (corner) continue;
           expect(
             luma(x, y),
-            inCode && dark(r, c) ? 0 : 255,
+            inCode && kioskPlayQr[r][c] == '#' ? 0 : 255,
             reason: 'pixel ($x, $y)',
           );
         }
       }
     });
+  });
+}
+
+/// [qr]'s structure against the standard for its [version]: its size, the
+/// finder and timing patterns, the one alignment pattern centred at
+/// ([alignment], [alignment]) and the dark module.
+void _structure(
+  List<String> qr, {
+  required int version,
+  required int alignment,
+}) {
+  final n = 4 * version + 17;
+  bool dark(int r, int c) => qr[r][c] == '#';
+
+  test('is a square of version $version: $n rows of $n modules, # or .', () {
+    expect(qr, hasLength(n));
+    for (final row in qr) {
+      expect(row, hasLength(n));
+      expect(RegExp(r'^[#.]+$').hasMatch(row), isTrue, reason: row);
+    }
+  });
+
+  test('has the three 7 × 7 finder patterns, each with its light '
+      'separator', () {
+    for (final (top, left) in [(0, 0), (0, n - 7), (n - 7, 0)]) {
+      for (var i = 0; i < 7; i++) {
+        for (var j = 0; j < 7; j++) {
+          final ring = i == 0 || i == 6 || j == 0 || j == 6;
+          final core = i >= 2 && i <= 4 && j >= 2 && j <= 4;
+          expect(
+            dark(top + i, left + j),
+            ring || core,
+            reason: 'finder at ($top, $left), module ($i, $j)',
+          );
+        }
+      }
+      // The separator: the light row and column on its inner sides.
+      final sepRow = top == 0 ? 7 : n - 8;
+      final sepCol = left == 0 ? 7 : n - 8;
+      for (var k = 0; k < 8; k++) {
+        expect(dark(sepRow, left == 0 ? k : n - 8 + k), isFalse);
+        expect(dark(top == 0 ? k : n - 8 + k, sepCol), isFalse);
+      }
+    }
+  });
+
+  test('has the timing row and column between the finders: dark and '
+      'light in turn, dark on the even modules', () {
+    for (var k = 8; k < n - 8; k++) {
+      expect(dark(6, k), k.isEven, reason: 'timing row, column $k');
+      expect(dark(k, 6), k.isEven, reason: 'timing column, row $k');
+    }
+  });
+
+  test('has version $version\'s alignment pattern at ($alignment, '
+      '$alignment) and the dark module at (${4 * version + 9}, 8)', () {
+    for (var i = -2; i <= 2; i++) {
+      for (var j = -2; j <= 2; j++) {
+        final ring = i.abs() == 2 || j.abs() == 2;
+        expect(dark(alignment + i, alignment + j), ring || (i == 0 && j == 0));
+      }
+    }
+    expect(dark(4 * version + 9, 8), isTrue);
   });
 }

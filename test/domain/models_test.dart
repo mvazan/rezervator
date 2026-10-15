@@ -350,15 +350,22 @@ void main() {
     test('the default panel layout is the column\'s default, value for value',
         () {
       // Every alley without a saved layout gets 0077's default; the app's
-      // fallback must be the same layout.
+      // fallback must be the same layout — the modules added since at its
+      // end, off, as the app reads that default.
       final sql = File(
         'supabase/migrations/0077_kiosk_panels.sql',
       ).readAsStringSync();
       final column = RegExp(
         r"kiosk_panels\s+jsonb[^;']*?default\s+'(\{[^']*\})'",
       ).firstMatch(sql)!.group(1)!;
-      final decoded = jsonDecode(column);
-      expect(decoded, KioskPanels.defaults.toJson());
+      final decoded = jsonDecode(column) as Map<String, Object?>;
+      final app = KioskPanels.defaults.toJson();
+      final ours = (decoded['modules']! as List).length;
+      final appModules = app['modules']! as List;
+      expect(decoded, {...app, 'modules': appModules.take(ours).toList()});
+      for (final later in appModules.skip(ours)) {
+        expect((later as Map)['side'], 'off', reason: '$later');
+      }
       expect(KioskPanels.fromJson(decoded), KioskPanels.defaults);
     });
   });

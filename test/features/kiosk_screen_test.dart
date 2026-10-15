@@ -766,6 +766,7 @@ void main() {
         (KioskModule.matches, 'Zápasy', 'Vpravo'),
         (KioskModule.guide, 'Jak začít', 'Vypnuto'),
         (KioskModule.week, 'Hráči týdne', 'Vypnuto'),
+        (KioskModule.feedback, 'Napište nám', 'Vypnuto'),
       ]) {
         final row = moduleRow(module);
         expect(inSection('Panely', row), findsOneWidget, reason: name);
@@ -802,7 +803,12 @@ void main() {
       expect(shown(tester, share(KioskModule.notices)), '40');
       expect(shown(tester, share(KioskModule.matches)), '60');
       // An unplaced module has no share and no arrows.
-      for (final m in [KioskModule.duty, KioskModule.guide, KioskModule.week]) {
+      for (final m in [
+        KioskModule.duty,
+        KioskModule.guide,
+        KioskModule.week,
+        KioskModule.feedback,
+      ]) {
         expect(inRow(moduleRow(m), find.byType(TextField)), findsNothing,
             reason: m.name);
         expect(inRow(moduleRow(m), find.byType(IconButton)), findsNothing,
@@ -892,7 +898,7 @@ void main() {
           {'days': 2, 'open': false});
       expect((lastPatch()['kiosk_panels'] as Map)['right'],
           {'days': 2, 'open': false});
-      expect(patchedModules(), hasLength(5));
+      expect(patchedModules(), hasLength(KioskModule.values.length));
       expect(
         patchedModules(),
         contains(equals({'id': 'guide', 'side': 'left', 'share': 45})),
@@ -1142,7 +1148,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.byType(DropdownButtonFormField<PanelSide>), findsNWidgets(5));
+      expect(find.byType(DropdownButtonFormField<PanelSide>),
+          findsNWidgets(KioskModule.values.length));
       // Nothing this app shows is on the left: no row for that panel.
       expect(panelRow(PanelSide.left), findsNothing);
 
@@ -1850,6 +1857,7 @@ void main() {
           {'id': 'matches', 'side': 'right', 'share': 60},
           {'id': 'guide', 'side': 'off', 'share': 45},
           {'id': 'week', 'side': 'off', 'share': 55},
+          {'id': 'feedback', 'side': 'off', 'share': 35},
         ],
       },
     });
