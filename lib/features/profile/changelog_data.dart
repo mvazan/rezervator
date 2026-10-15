@@ -85,8 +85,8 @@ const appChangelog = <Release>[
     'Kiosk: seznam zápasů při posunu tabule neskáče — ukáže jen zápasy dnů, '
         'které na tabuli přibyly, a posune se jen o tolik, aby byly vidět.',
   ], store: [
-    'Kiosk: dva panely vlevo i vpravo od tabule, v nich Hráči týdne (nejlepší '
-        'výkony minulého týdne) a Jak začít s QR kódem aplikace.',
+    'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
+        'Hráči týdne a Jak začít s QR kódem aplikace.',
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
     'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
