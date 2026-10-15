@@ -13,7 +13,8 @@ List<(String? clubName, List<Profile> members)> playersByClub(
   List<Profile> approved,
   List<Club> clubs,
 ) {
-  final sortedClubs = [...clubs]..sort((a, b) => compareCzech(a.name, b.name));
+  final sortedClubs = [...clubs]
+    ..sort((a, b) => compareCzech(a.shown, b.shown));
   List<Profile> membersOf(String? clubId) =>
       approved
           .where(
@@ -26,7 +27,7 @@ List<(String? clubName, List<Profile> members)> playersByClub(
   return [
     for (final club in sortedClubs)
       if (membersOf(club.id) case final members when members.isNotEmpty)
-        (club.name, members),
+        (club.shown, members),
     if (membersOf(null) case final members when members.isNotEmpty)
       (null, members),
   ];

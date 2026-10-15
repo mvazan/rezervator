@@ -424,7 +424,8 @@ final clubsProvider = StreamProvider<List<Club>>((ref) {
           uid, 'clubs', () => _db.from('clubs').stream(primaryKey: ['id']))
       .map((rows) =>
       rows.map(Club.fromJson).toList()
-        ..sort((a, b) => compareCzech(a.name, b.name)));
+        // By what the app shows: the nickname where there is one (0080).
+        ..sort((a, b) => compareCzech(a.shown, b.shown)));
 });
 
 /// What the app shows for club and team names (0080): the clubs'
