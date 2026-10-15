@@ -408,6 +408,37 @@ void main() {
       expect(ScheduleSettings.defaults.kioskWeatherTitle, isNull);
     });
 
+    test('fromJson reads the weather\'s values (0082): the known names, '
+        'an empty list the temperature alone, the high and low and the rain '
+        'when absent', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      Set<KioskWeatherItem> items(Object? json) => ScheduleSettings.fromJson({
+        ...base,
+        'kiosk_weather_items': json,
+      }).kioskWeatherItems;
+      expect(items(['wind', 'feels']), {
+        KioskWeatherItem.feels,
+        KioskWeatherItem.wind,
+      });
+      expect(
+        items(['range', 'feels', 'wind', 'rain']),
+        KioskWeatherItem.values.toSet(),
+      );
+      // A value a newer app knows, or no string at all, is skipped.
+      expect(items(['rain', 'uv', 3, null]), {KioskWeatherItem.rain});
+      expect(items(<Object?>[]), isEmpty);
+      const before = {KioskWeatherItem.range, KioskWeatherItem.rain};
+      expect(items(null), before);
+      expect(items('range'), before);
+      expect(ScheduleSettings.fromJson(base).kioskWeatherItems, before);
+      expect(ScheduleSettings.defaults.kioskWeatherItems, before);
+    });
+
     test('a cached row from before 0082, with the dropped header switches '
         'still in it, reads as the default header', () {
       // No conversion in the app: the old switches are 0082's business.

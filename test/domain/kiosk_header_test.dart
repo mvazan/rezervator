@@ -79,6 +79,50 @@ void main() {
     });
   });
 
+  group('KioskWeatherItem', () {
+    test('the names are the column\'s values, in the kiosk\'s order', () {
+      expect([for (final i in KioskWeatherItem.values) i.name], [
+        'range',
+        'feels',
+        'wind',
+        'rain',
+      ]);
+    });
+
+    test('the default is 0082\'s column default', () {
+      final sql = File(
+        'supabase/migrations/0082_kiosk_header.sql',
+      ).readAsStringSync();
+      final column = RegExp(
+        r"kiosk_weather_items\s+text\[\][^;']*?default\s+'\{([^']*)\}'",
+      ).firstMatch(sql)!.group(1)!;
+      expect(
+        column.split(','),
+        kioskWeatherItemsToJson(kioskWeatherItemsDefault),
+      );
+      // And the check lists every item, nothing more.
+      final check = RegExp(
+        r"kiosk_weather_items\s+<@\s+array\[([^\]]*)\]",
+      ).firstMatch(sql)!.group(1)!;
+      expect(
+        [for (final v in check.split(',')) v.trim().replaceAll("'", '')],
+        [for (final i in KioskWeatherItem.values) i.name],
+      );
+    });
+
+    test('written whole, in the enum\'s order whatever the set\'s', () {
+      expect(
+        kioskWeatherItemsToJson({
+          KioskWeatherItem.rain,
+          KioskWeatherItem.feels,
+          KioskWeatherItem.range,
+        }),
+        ['range', 'feels', 'rain'],
+      );
+      expect(kioskWeatherItemsToJson({}), isEmpty);
+    });
+  });
+
   group('KioskHeader.fromJson', () {
     const full = {
       'modules': [

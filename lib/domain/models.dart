@@ -895,6 +895,7 @@ class ScheduleSettings {
     this.kioskPanels = KioskPanels.defaults,
     this.kioskHeader = KioskHeader.defaults,
     this.kioskWeatherTitle,
+    this.kioskWeatherItems = kioskWeatherItemsDefault,
     this.kioskNoticesFresh = KioskNoticesFresh.highlight,
     this.kioskNoticesFreshDays = 3,
     this.kioskPickerMode = KioskPickerMode.letters,
@@ -1007,6 +1008,10 @@ class ScheduleSettings {
   /// The weather module's title (0082), the place the admin types
   /// („Brno“, shown „Brno:“); null shows [kioskWeatherDefaultTitle].
   final String? kioskWeatherTitle;
+
+  /// What the weather module shows beside the temperature now (0082,
+  /// `kiosk_weather_items`); empty = the temperature alone.
+  final Set<KioskWeatherItem> kioskWeatherItems;
 
   /// What a fresh notice gets on the kiosk — the „NOVÉ“ label, twice the
   /// turn, both or nothing (0081, `kiosk_notices_fresh_mode`) — and for how
@@ -1158,6 +1163,9 @@ class ScheduleSettings {
           final String t when t.trim().isNotEmpty => t.trim(),
           _ => null,
         },
+        kioskWeatherItems: kioskWeatherItemsFromJson(
+          json['kiosk_weather_items'],
+        ),
         kioskNoticesFresh: KioskNoticesFresh.parse(
           json['kiosk_notices_fresh_mode'] as String?,
         ),

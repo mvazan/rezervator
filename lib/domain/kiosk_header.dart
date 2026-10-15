@@ -28,6 +28,37 @@ String kioskWeatherTitleOf(String? typed) {
   return title.endsWith(':') ? title : '$title:';
 }
 
+/// What the weather module shows beside the temperature now, which it
+/// always shows (0082, `kiosk_weather_items`): today's high and low, the
+/// feels-like temperature, the wind, today's rain or snow. The name is its
+/// value in the column — do not rename one; the kiosk shows them in this
+/// order.
+enum KioskWeatherItem { range, feels, wind, rain }
+
+/// 0082's column default, what the kiosk showed before the admin could
+/// pick: the high and low and the umbrella (a test compares the two).
+const kioskWeatherItemsDefault = {
+  KioskWeatherItem.range,
+  KioskWeatherItem.rain,
+};
+
+/// Reads `kiosk_weather_items`: the names this build knows (a newer
+/// app's is skipped); not a list — a row from before 0082 — is
+/// [kioskWeatherItemsDefault], an empty list the temperature alone.
+Set<KioskWeatherItem> kioskWeatherItemsFromJson(Object? json) {
+  if (json is! List) return kioskWeatherItemsDefault;
+  return {
+    for (final item in KioskWeatherItem.values)
+      if (json.contains(item.name)) item,
+  };
+}
+
+/// [items] as the column takes them: the whole set, in the enum's order.
+List<String> kioskWeatherItemsToJson(Set<KioskWeatherItem> items) => [
+  for (final item in KioskWeatherItem.values)
+    if (items.contains(item)) item.name,
+];
+
 final _headerModulesById = {
   for (final m in KioskHeaderModule.values) m.name: m,
 };
