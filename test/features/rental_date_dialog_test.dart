@@ -160,6 +160,26 @@ void main() {
         reason: 'the row keeps its group; the update must not touch it');
   });
 
+  testWidgets('the note takes several lines and saves them as typed', (
+    tester,
+  ) async {
+    await open(tester,
+        RentalDateDialog(anchor: anchor, existing: existing, laneCount: 3));
+    final field = find.widgetWithText(TextField, 'Poznámka');
+    final input = tester.widget<TextField>(field);
+    expect(input.maxLines, greaterThan(1));
+    expect(input.keyboardType, TextInputType.multiline);
+    expect(input.textInputAction, TextInputAction.newline);
+
+    const note = 'dráhy 1-2:\nÁčko × Béčko\n888:777\n\ndráhy 3-4:\nCečko×Déčko';
+    await tester.enterText(field, '  $note\n');
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+    final body = bodyOf(requests.singleWhere((r) => r.method == 'PATCH'));
+    // Its lines kept; only the ends trimmed.
+    expect(body['note'], note);
+  });
+
   testWidgets('refuses a missing date', (tester) async {
     await open(tester, RentalDateDialog(anchor: anchor, laneCount: 3));
     await tester.tap(find.text('Uložit'));

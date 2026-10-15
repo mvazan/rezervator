@@ -308,6 +308,7 @@ class CalendarEventBand extends StatelessWidget {
     required this.text,
     this.bold = false,
     this.lines,
+    this.note,
     this.fontSize = 10,
   });
 
@@ -325,6 +326,12 @@ class CalendarEventBand extends StatelessWidget {
   /// the band has to spare, rather than the pair breaking in the middle of
   /// one.
   final List<BandLine>? lines;
+
+  /// A note under [lines], after a blank line — a rental's, its own line
+  /// breaks kept: as many of its lines as the band has room for once every
+  /// line of [lines] has what it needs (measured, not shared out), the last
+  /// cut with „…“. No room for a line of it: the band as without it.
+  final String? note;
 
   /// The text's size in px — the app's 10, the kiosk admin's choice on the
   /// kiosk board (0069).
@@ -354,6 +361,29 @@ class CalendarEventBand extends StatelessWidget {
     return height;
   }
 
+  /// How many lines [text] takes [width] wide, laid out as [_lineHeight]
+  /// lays out one.
+  static int _linesOf(
+    BuildContext context,
+    String text,
+    TextStyle style,
+    double width,
+  ) {
+    final inherited = DefaultTextStyle.of(context);
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: inherited.style.merge(style)),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      textHeightBehavior:
+          DefaultTextHeightBehavior.maybeOf(context) ??
+          inherited.textHeightBehavior,
+      locale: Localizations.maybeLocaleOf(context),
+    )..layout(maxWidth: width);
+    final lines = painter.computeLineMetrics().length;
+    painter.dispose();
+    return lines < 1 ? 1 : lines;
+  }
+
   @override
   Widget build(BuildContext context) {
     final style = TextStyle(
@@ -362,6 +392,22 @@ class CalendarEventBand extends StatelessWidget {
       color: foreground,
     );
     final lineHeight = _lineHeight(context, style);
+    // Each row held to the lines it was given, so the stack is never taller
+    // than the band whatever a row draws: the cup's image sets its line a
+    // pixel taller than the text's at some sizes (12 px: 18 against 17) —
+    // that pixel goes, empty under the image, which stays whole.
+    Widget row(BandLine row, int maxLines) => row == bandGap
+        ? SizedBox(height: lineHeight)
+        : ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxLines * lineHeight),
+            child: EmojiText(
+              row.text,
+              textAlign: TextAlign.center,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
+          );
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
@@ -374,6 +420,37 @@ class CalendarEventBand extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final fit = (constraints.maxHeight / lineHeight).floor();
+          final noteText = note?.trim() ?? '';
+          if (lines case final stack? when noteText.isNotEmpty) {
+            int need(BandLine r) => r.wraps
+                ? _linesOf(context, r.text, style, constraints.maxWidth)
+                : 1;
+            final taken = stack.fold(0, (sum, r) => sum + need(r));
+            // What is left after the stack and a blank line.
+            final room = fit - taken - 1;
+            if (room >= 1) {
+              final noteStyle = style.copyWith(fontWeight: FontWeight.w500);
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final r in stack) row(r, need(r)),
+                  SizedBox(height: lineHeight),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: room * lineHeight,
+                    ),
+                    child: EmojiText(
+                      noteText,
+                      textAlign: TextAlign.center,
+                      maxLines: room,
+                      overflow: TextOverflow.ellipsis,
+                      style: noteStyle,
+                    ),
+                  ),
+                ],
+              );
+            }
+          }
           var rows = lines;
           // A line short: the blank lines go before the stack does.
           if (rows != null && fit < rows.length) {
@@ -401,27 +478,7 @@ class CalendarEventBand extends StatelessWidget {
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (final row in rows)
-                if (row == bandGap)
-                  SizedBox(height: lineHeight)
-                else
-                  // Each row held to the lines it was given, so the stack
-                  // is never taller than the band whatever a row draws: the
-                  // cup's image sets its line a pixel taller than the
-                  // text's at some sizes (12 px: 18 against 17) — that pixel
-                  // goes, empty under the image, which stays whole.
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: (row.wraps ? wrapLines : 1) * lineHeight,
-                    ),
-                    child: EmojiText(
-                      row.text,
-                      textAlign: TextAlign.center,
-                      maxLines: row.wraps ? wrapLines : 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: style,
-                    ),
-                  ),
+              for (final r in rows) row(r, r.wraps ? wrapLines : 1),
             ],
           );
         },

@@ -48,7 +48,7 @@ void main() {
   ]) {
     testWidgets('$where: no band height overflows its stack', (tester) async {
       final overflows = <double>[];
-      for (var height = 40.0; height <= 400; height++) {
+      for (var height = 80.0; height <= 800; height += 2) {
         await tester.pumpWidget(
           MaterialApp(
             theme: buildTheme(Brightness.light),
@@ -70,13 +70,36 @@ void main() {
                   key: ValueKey(height),
                   width: width,
                   height: height,
-                  child: CalendarEventBand(
-                    background: Colors.red,
-                    foreground: Colors.white,
-                    text: '🏆 $home – $away\n$time',
-                    lines: lines,
-                    bold: true,
-                    fontSize: fontSize,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: CalendarEventBand(
+                          background: Colors.red,
+                          foreground: Colors.white,
+                          text: '🏆 $home – $away\n$time',
+                          lines: lines,
+                          bold: true,
+                          fontSize: fontSize,
+                        ),
+                      ),
+                      // A rental with a note, as tall: its stack, a blank
+                      // line and what fits of the note never run past it
+                      // either.
+                      Expanded(
+                        child: CalendarEventBand(
+                          background: Colors.teal,
+                          foreground: Colors.white,
+                          text: '🔒 $home\n$time',
+                          lines: const [
+                            (text: '🔒 $home', wraps: true),
+                            (text: time, wraps: false),
+                          ],
+                          note: 'dráhy 1-2:\n$home × $away\n888:777\n\n'
+                              'dráhy 3-4:\n$away × $home\n666:555',
+                          fontSize: fontSize,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

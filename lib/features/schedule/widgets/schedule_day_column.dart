@@ -334,11 +334,17 @@ class ScheduleDayColumn extends StatelessWidget {
         final (bg, fg) = clubTint(r.color, scheme.brightness,
             fallbackBg: rentalFallbackBg, fallbackFg: rentalFallbackFg);
         Widget band() {
+          final time = '${r.startsAt.display()}–${r.endsAt.display()}';
           Widget w = CalendarEventBand(
             background: bg,
             foreground: fg,
-            text: '${rentalLabel(r)}\n'
-                '${r.startsAt.display()}–${r.endsAt.display()}',
+            text: '${rentalLabel(r)}\n$time',
+            // The renter, the time, then the note where there is room.
+            lines: [
+              (text: rentalLabel(r), wraps: true),
+              (text: time, wraps: false),
+            ],
+            note: r.note,
             fontSize: bandFontSize,
           );
           // Click = edit that day's occurrence (a weekly rental's "jen

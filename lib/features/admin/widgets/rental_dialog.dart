@@ -234,10 +234,7 @@ class _RentalDialogState extends State<RentalDialog> {
           onChanged: (lanes) => setState(() => _lanes = lanes),
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _note,
-          decoration: const InputDecoration(labelText: 'Poznámka'),
-        ),
+        RentalNoteField(controller: _note),
         const SizedBox(height: 16),
         Text('Barva', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),

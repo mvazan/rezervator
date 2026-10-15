@@ -3,9 +3,10 @@
 /// `KioskInfoPanel` only renders it.
 library;
 
+import 'collation.dart' show compareCzech;
 import 'messages.dart' show splitNotices;
 import 'models.dart';
-import 'results.dart' show isLive;
+import 'results.dart' show hasScoreData, isLive;
 import 'youtube.dart' show youtubeVideoId;
 
 /// The notices on the wall right now: kind notice, not expired, not hidden
@@ -104,6 +105,34 @@ int kioskFirstUpcomingIndex(
   }
   return matches.length;
 }
+
+/// The matches the kiosk's Zápis pages through (0079): the alley's
+/// federation matches with a score sheet's data ([hasScoreData]) — played,
+/// or being played — chronological: by day, start, then title.
+List<PrioritySlot> kioskZapisMatches(
+  List<PrioritySlot> slots,
+  Map<String, MatchResult> results,
+) => [
+  for (final s in slots)
+    if (s.type.isMatch &&
+        s.parentId == null &&
+        s.fromFederation &&
+        hasScoreData(results[s.id]))
+      s,
+]..sort((a, b) {
+    final byDay = a.date.compareTo(b.date);
+    if (byDay != 0) return byDay;
+    final byStart = a.startsAt.compareTo(b.startsAt);
+    return byStart != 0 ? byStart : compareCzech(a.title, b.title);
+  });
+
+/// [team]'s matches among [matches] ([kioskZapisMatches]), home or away,
+/// in the same order.
+List<PrioritySlot> kioskTeamMatches(List<PrioritySlot> matches, String team) =>
+    [
+      for (final m in matches)
+        if (m.homeTeam == team || m.awayTeam == team) m,
+    ];
 
 /// The days a visitor's scroll of the board brought into view: those of
 /// [next] that [previous] did not show — before it when the board went

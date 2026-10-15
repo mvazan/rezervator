@@ -12862,6 +12862,34 @@ begin
 end $$;
 reset role;
 
+-- 0079: paging through the kiosk's Zápis — a bar for a new alley, one of
+-- three ways, and off the public overview. Run again first: the migration
+-- is re-runnable.
+\ir ../migrations/0079_kiosk_zapis_nav.sql
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_new constant uuid := '00000000-0000-0000-0000-000000000079';
+begin
+  insert into tenants (id, name) values (v_new, 'Kuželna (0079)');
+  if (select kiosk_zapis_nav from schedule_settings
+       where tenant_id = v_new) is distinct from 'bar' then
+    raise exception 'FAIL: a new alley''s kiosk Zápis does not page with the bar (0079)';
+  end if;
+  update schedule_settings set kiosk_zapis_nav = 'sides' where tenant_id = v_a;
+  update schedule_settings set kiosk_zapis_nav = 'off' where tenant_id = v_a;
+  begin
+    update schedule_settings set kiosk_zapis_nav = 'arrows' where tenant_id = v_a;
+    raise exception 'FAIL: an unknown Zápis paging was accepted (0079)';
+  exception when check_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_zapis_nav' then
+    raise exception 'FAIL: the public overview hands out the Zápis paging (0079)';
+  end if;
+  update schedule_settings set kiosk_zapis_nav = 'bar' where tenant_id = v_a;
+  raise notice 'OK: the Zápis pages with the bar for a new alley, one of three ways, off the public overview (0079)';
+end $$;
+
 -- 0080: a club's nickname — 1–30 characters, not blank, or none. Run
 -- again first: the migration is re-runnable.
 \ir ../migrations/0080_club_nickname.sql

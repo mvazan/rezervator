@@ -87,19 +87,26 @@ const appChangelog = <Release>[
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
     'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
         'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
+    'Pronájmy: poznámka má víc řádků a kalendář ji ukáže pod nájemcem '
+        'a časem, řádek po řádku (třeba které dráhy hrají který zápas). '
+        'V seznamu termínů je pod časem a drahami.',
+    'Kiosk, zápis zápasu: listování mezi odehranými zápasy — šipkami (v '
+        'liště nad zápisem, nebo po stranách) i přejetím prstem; ťuk na '
+        'družstvo ukáže jeho zápasy. Správce volí ve Správa → Kiosk → '
+        'Listování v zápisu.',
     'Oddíly mají přezdívku: správce ji zadá ve Správě → Oddíly a aplikace '
         'ji ukáže místo celého názvu — z „TJ Sokol Brno IV B“ je „Sokol IV '
         'B“ v rozvrhu, zápasech, výsledcích, na kiosku, v připomínkách i '
         'v Google kalendáři.',
   ], store: [
-    'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
-        'Hráči týdne a Jak začít s QR kódem aplikace.',
-    'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
-        'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
-    'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
+    'Kiosk: dva panely u tabule (Hráči týdne, Jak začít s QR kódem).',
+    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
+        'výsledky hraného zápasu.',
+    'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče, '
+        'v zápisu listování.',
     'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
         'výraznější výsledek.',
-    'Kalendář po dnech: čas bloku pod sebou.',
+    'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
     'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
     'Oddíly mají přezdívku místo celého názvu.',
   ]),
