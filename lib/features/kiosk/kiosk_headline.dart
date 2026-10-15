@@ -7,13 +7,12 @@
 /// fresh one (0080) wears „NOVÉ“ or stays longer, as the admin chose.
 library;
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
-import '../../domain/kiosk_panel.dart' show isFreshNotice, kioskNoticeTurn;
+import '../../domain/kiosk_panel.dart' show isFreshNotice;
 import '../../domain/models.dart';
 import 'kiosk_new_chip.dart';
+import 'kiosk_notice_turns.dart';
 
 class KioskHeadline extends StatefulWidget {
   const KioskHeadline({
@@ -42,76 +41,29 @@ class KioskHeadline extends StatefulWidget {
   State<KioskHeadline> createState() => _KioskHeadlineState();
 }
 
-class _KioskHeadlineState extends State<KioskHeadline> {
-  Timer? _timer;
-  int _index = 0;
+class _KioskHeadlineState extends State<KioskHeadline>
+    with KioskNoticeTurns<KioskHeadline> {
+  @override
+  List<Message> get notices => widget.notices;
 
   @override
-  void initState() {
-    super.initState();
-    _start();
-  }
+  Duration get turn => widget.turn;
 
   @override
-  void didUpdateWidget(KioskHeadline old) {
-    super.didUpdateWidget(old);
-    final notices = widget.notices;
-    if (notices.firstOrNull?.id != old.notices.firstOrNull?.id) {
-      // A new notice on top (or the order changed): the newest at once,
-      // for a whole turn of its own.
-      _index = 0;
-      _start();
-    } else if (_index >= notices.length) {
-      // Fewer notices: the last one, so the counter stays within them.
-      _index = notices.isEmpty ? 0 : notices.length - 1;
-      _start();
-    } else if (old.turn != widget.turn ||
-        old.fresh != widget.fresh ||
-        old.freshDays != widget.freshDays) {
-      _start();
-    }
-  }
-
-  /// A turn for the notice shown: one-shot, re-armed after every step, so
-  /// each notice gets its own — twice the admin's for a fresh one when the
-  /// admin wants fresh ones shown longer.
-  void _start() {
-    _timer?.cancel();
-    final notices = widget.notices;
-    if (notices.isEmpty) return;
-    _timer = Timer(
-      kioskNoticeTurn(
-        notices[_index % notices.length],
-        now: widget.now,
-        turn: widget.turn,
-        fresh: widget.fresh,
-        days: widget.freshDays,
-      ),
-      _next,
-    );
-  }
-
-  void _next() {
-    if (!mounted) return;
-    final n = widget.notices.length;
-    if (n > 1) setState(() => _index = (_index + 1) % n);
-    _start();
-  }
+  KioskNoticesFresh get fresh => widget.fresh;
 
   @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
+  int get freshDays => widget.freshDays;
+
+  @override
+  DateTime get now => widget.now;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final notices = widget.notices;
-    final m = notices[_index % notices.length];
-    final isNew =
-        widget.fresh.highlights &&
-        isFreshNotice(m, widget.now, widget.freshDays);
+    final shown = noticeIndex;
+    final m = notices[shown];
+    final isNew = fresh.highlights && isFreshNotice(m, now, freshDays);
     return InkWell(
       onTap: () => widget.onOpen(m),
       borderRadius: BorderRadius.circular(8),
@@ -157,7 +109,7 @@ class _KioskHeadlineState extends State<KioskHeadline> {
                 if (notices.length > 1) ...[
                   const SizedBox(width: 12),
                   Text(
-                    '${_index % notices.length + 1}/${notices.length}',
+                    '${shown + 1}/${notices.length}',
                     style: TextStyle(
                       fontSize: 13,
                       color: scheme.onSurfaceVariant,

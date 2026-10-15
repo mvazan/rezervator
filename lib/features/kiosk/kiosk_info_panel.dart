@@ -39,6 +39,7 @@ import '../clubhouse/widgets/team_totals_card.dart';
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
 import 'kiosk_guide.dart' show KioskGuideCard;
 import 'kiosk_new_chip.dart';
+import 'kiosk_notice_turns.dart';
 import 'kiosk_week.dart' show KioskWeekCard;
 
 const _resultRowHeight = 64.0;
@@ -808,78 +809,31 @@ class _NoticesCard extends ConsumerStatefulWidget {
   ConsumerState<_NoticesCard> createState() => _NoticesCardState();
 }
 
-class _NoticesCardState extends ConsumerState<_NoticesCard> {
-  Timer? _timer;
-  int _index = 0;
+class _NoticesCardState extends ConsumerState<_NoticesCard>
+    with KioskNoticeTurns<_NoticesCard> {
+  @override
+  List<Message> get notices => widget.notices;
 
   @override
-  void initState() {
-    super.initState();
-    _start();
-  }
+  Duration get turn => widget.turn;
 
   @override
-  void didUpdateWidget(_NoticesCard old) {
-    super.didUpdateWidget(old);
-    final notices = widget.notices;
-    if (notices.firstOrNull?.id != old.notices.firstOrNull?.id) {
-      // A new notice on top (or the order changed): the newest at once,
-      // for a whole turn of its own.
-      _index = 0;
-      _start();
-    } else if (_index >= notices.length) {
-      // Fewer notices: the last one, so a dot is always lit.
-      _index = notices.isEmpty ? 0 : notices.length - 1;
-      _start();
-    } else if (old.turn != widget.turn ||
-        old.fresh != widget.fresh ||
-        old.freshDays != widget.freshDays) {
-      _start();
-    }
-  }
-
-  /// A turn for the notice shown: one-shot, re-armed after every step —
-  /// the timer's or a swipe's — so each notice gets its own.
-  void _start() {
-    _timer?.cancel();
-    final notices = widget.notices;
-    if (notices.isEmpty) return;
-    _timer = Timer(
-      kioskNoticeTurn(
-        notices[_index.clamp(0, notices.length - 1)],
-        now: ref.read(nowProvider).value ?? DateTime.now(),
-        turn: widget.turn,
-        fresh: widget.fresh,
-        days: widget.freshDays,
-      ),
-      () => _step(1),
-    );
-  }
-
-  /// To the next ([direction] 1) or previous (-1) notice — on the timer or
-  /// by a swipe; either way the next turn is a whole one away.
-  void _step(int direction) {
-    if (!mounted) return;
-    final n = widget.notices.length;
-    if (n > 1) setState(() => _index = (_index + direction) % n);
-    _start();
-  }
+  KioskNoticesFresh get fresh => widget.fresh;
 
   @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
+  int get freshDays => widget.freshDays;
+
+  @override
+  DateTime get now => ref.read(nowProvider).value ?? DateTime.now();
 
   @override
   Widget build(BuildContext context) {
-    final notices = widget.notices;
     final scheme = Theme.of(context).colorScheme;
     // Watched: a notice stops being fresh as the minutes go by.
-    final now = ref.watch(nowProvider).value ?? DateTime.now();
+    final clock = ref.watch(nowProvider).value ?? DateTime.now();
     bool isNew(Message m) =>
-        widget.fresh.highlights && isFreshNotice(m, now, widget.freshDays);
-    final shown = _index.clamp(0, notices.length - 1);
+        fresh.highlights && isFreshNotice(m, clock, freshDays);
+    final shown = noticeIndex;
     final m = notices[shown];
     final highlighted = isNew(m);
     return KioskCard(
@@ -890,7 +844,7 @@ class _NoticesCardState extends ConsumerState<_NoticesCard> {
       // its build from one notice to the next, and the notices their fade.
       stripe: highlighted ? scheme.primary : Colors.transparent,
       child: _Swipe(
-        onSwipe: _step,
+        onSwipe: step,
         child: LayoutBuilder(
           builder: (context, box) {
             final fit = _fitNotice(context, m, box, chip: highlighted);
