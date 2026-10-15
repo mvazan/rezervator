@@ -5824,6 +5824,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
     "kiosk_panels" "jsonb" DEFAULT '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false}, "modules": [{"id": "duty", "side": "off", "share": 30}, {"id": "notices", "side": "right", "share": 40}, {"id": "matches", "side": "right", "share": 60}, {"id": "guide", "side": "off", "share": 45}, {"id": "week", "side": "off", "share": 55}]}'::"jsonb" NOT NULL,
     "kiosk_notices_header" boolean DEFAULT true NOT NULL,
+    "kiosk_zapis_nav" "text" DEFAULT 'bar'::"text" NOT NULL,
     "kiosk_notices_fresh_mode" "text" DEFAULT 'highlight'::"text" NOT NULL,
     "kiosk_notices_fresh_days" smallint DEFAULT 3 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
@@ -5853,6 +5854,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_warning_font_size_check" CHECK ((("kiosk_warning_font_size" >= 14) AND ("kiosk_warning_font_size" <= 40))),
     CONSTRAINT "schedule_settings_kiosk_weather_place_check" CHECK (((("kiosk_weather_lat" IS NULL) = ("kiosk_weather_lon" IS NULL)) AND (("kiosk_weather_lat" IS NULL) OR (("kiosk_weather_lat" >= ('-90'::integer)::double precision) AND ("kiosk_weather_lat" <= (90)::double precision))) AND (("kiosk_weather_lon" IS NULL) OR (("kiosk_weather_lon" >= ('-180'::integer)::double precision) AND ("kiosk_weather_lon" <= (180)::double precision))) AND (("kiosk_weather_place" IS NULL) OR (("char_length"("kiosk_weather_place") >= 1) AND ("char_length"("kiosk_weather_place") <= 200))))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
+    CONSTRAINT "schedule_settings_kiosk_zapis_nav_check" CHECK (("kiosk_zapis_nav" = ANY (ARRAY['off'::"text", 'bar'::"text", 'sides'::"text"]))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))
 );

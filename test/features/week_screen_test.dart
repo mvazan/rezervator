@@ -1294,7 +1294,13 @@ void main() {
     );
     await tester.pumpWidget(app(rentals: [rental]));
     await tester.pumpAndSettle();
-    expect(findEmojiText('🔒 Firma X\n12:00–14:00'), findsOneWidget);
+    // The renter, then the time, each on its own line.
+    expect(findEmojiText('🔒 Firma X'), findsOneWidget);
+    expect(find.text('12:00–14:00'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('12:00–14:00')).dy,
+      greaterThan(tester.getTopLeft(findEmojiText('🔒 Firma X')).dy),
+    );
   });
 
   // A weekly 'Firma X' series on lane 1 — by default over the harness block
@@ -1357,7 +1363,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    final band = findEmojiText('🔒 Firma X\n12:00–14:00');
+    final band = findEmojiText('🔒 Firma X');
     expect(band, findsOneWidget);
     await tester.ensureVisible(band);
     await tester.pumpAndSettle();

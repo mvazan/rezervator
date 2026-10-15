@@ -17,6 +17,7 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 import 'legacy_score_sheet.dart';
+import 'sheet_swipe.dart';
 
 class ZapisPage extends ConsumerWidget {
   const ZapisPage({
@@ -27,9 +28,19 @@ class ZapisPage extends ConsumerWidget {
     this.withRegnums = false,
     this.backButton = false,
     this.hideSystemBars = true,
+    this.onTeam,
+    this.onSwipe,
   });
 
   final PrioritySlot slot;
+
+  /// A tap on a team's name — in the sheet, or in the title of a match
+  /// without one (the kiosk lists that team's matches, 0079); null = text.
+  final void Function(String team)? onTeam;
+
+  /// A swipe across the Zápis ([SheetSwipe]: 1 = the next match, -1 = the
+  /// previous); null = none.
+  final void Function(int direction)? onSwipe;
 
   /// The × — the kiosk only when its modal covers the whole screen.
   final bool closeButton;
@@ -76,12 +87,15 @@ class ZapisPage extends ConsumerWidget {
     }
     var players = lineup.value ?? const <MatchPlayerResult>[];
     if (players.isEmpty) {
-      return _NoSheet(
+      final none = _NoSheet(
         slot: slot,
         result: result,
         closeButton: closeButton || backButton,
         backButton: backButton,
+        onTeam: onTeam,
       );
+      final swipe = onSwipe;
+      return swipe == null ? none : SheetSwipe(onSwipe: swipe, child: none);
     }
     if (withRegnums) {
       final regnums =
@@ -104,6 +118,8 @@ class ZapisPage extends ConsumerWidget {
       showCloseButton: closeButton || backButton,
       backButton: backButton,
       hideSystemBars: hideSystemBars,
+      onTeam: onTeam,
+      onSwipe: onSwipe,
     );
   }
 }
@@ -116,12 +132,14 @@ class _NoSheet extends StatelessWidget {
     required this.result,
     required this.closeButton,
     required this.backButton,
+    this.onTeam,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final bool closeButton;
   final bool backButton;
+  final void Function(String team)? onTeam;
 
   @override
   Widget build(BuildContext context) {
@@ -139,11 +157,41 @@ class _NoSheet extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    slot.title,
-                    textAlign: TextAlign.center,
-                    style: text.headlineSmall,
-                  ),
+                  if (onTeam case final tap?
+                      when slot.homeTeam.isNotEmpty &&
+                          slot.awayTeam.isNotEmpty)
+                    // Each team a button: its matches.
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => tap(slot.homeTeam),
+                          iconAlignment: IconAlignment.end,
+                          icon: const Icon(Icons.expand_more),
+                          label: Text(
+                            slot.homeTeam,
+                            style: text.headlineSmall,
+                          ),
+                        ),
+                        Text(' – ', style: text.headlineSmall),
+                        TextButton.icon(
+                          onPressed: () => tap(slot.awayTeam),
+                          iconAlignment: IconAlignment.end,
+                          icon: const Icon(Icons.expand_more),
+                          label: Text(
+                            slot.awayTeam,
+                            style: text.headlineSmall,
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    Text(
+                      slot.title,
+                      textAlign: TextAlign.center,
+                      style: text.headlineSmall,
+                    ),
                   if (score != null) ...[
                     const SizedBox(height: 16),
                     Text(

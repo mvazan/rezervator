@@ -87,6 +87,19 @@ const appChangelog = <Release>[
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
     'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
         'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
+    'Pronájmy: poznámka má víc řádků a kalendář ji ukáže pod nájemcem '
+        'a časem, řádek po řádku (třeba které dráhy hrají který zápas). '
+        'V seznamu termínů je pod časem a drahami.',
+    'Kiosk, zápis zápasu: listování mezi odehranými zápasy — šipkami (v '
+        'liště nad zápisem, nebo po stranách) i přejetím prstem; ťuk na '
+        'družstvo ukáže jeho zápasy. Správce volí ve Správa → Kiosk → '
+        'Listování v zápisu.',
+    'Napište nám: v Klubovně je formulář pro zprávu autorovi aplikace — co '
+        'v Rezervátoru chybí nebo nefunguje. Jméno a e-mail jsou předvyplněné '
+        'a dají se smazat. Na webu jde formulář otevřít i bez přihlášení.',
+    'Kiosk: modul „Napište nám“ — QR kód formuláře na webu, zprávu napíšeš '
+        'v mobilu, ne na obrazovce kiosku. Ťuknutí ukáže velký kód. Správce '
+        'ho umístí ve Správa → Kiosk → Panely.',
     'Nástěnka: nejnovější oznam je nahoře — v aplikaci i na kiosku, také '
         'mezi sbalenými „Starší“. Naplánované oznamy zůstávají seřazené '
         'podle toho, kdy se zobrazí.',
@@ -98,17 +111,15 @@ const appChangelog = <Release>[
         'dvakrát déle — volí správce ve Správě → Kiosk → Nástěnka, „Čerstvé '
         'oznamy“. Nově vyvěšený oznam kiosk ukáže hned.',
   ], store: [
-    'Kiosk: dva panely vedle tabule, v nich Hráči týdne a Jak začít s QR '
-        'kódem aplikace.',
-    'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
-        'nebo oddílů, ⟳ obnoví výsledky.',
-    'Kiosk: nižší řádky drah, seznam zápasů neskáče.',
-    'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
-        'výraznější výsledek.',
-    'Kalendář po dnech: čas bloku pod sebou.',
-    'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
-    'Nástěnka: nejnovější nahoře, nové oznamy se štítkem v aplikaci i na '
-        'kiosku.',
+    'Kiosk: dva panely (Hráči týdne, Jak začít a Napište nám s QR kódy).',
+    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
+        'výsledky.',
+    'Kiosk: nižší řádky drah, listování v zápisu.',
+    'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo.',
+    'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
+    'Výsledky: filtr podle oddílu, pak družstva.',
+    'Klubovna: Napište nám — zpráva autorovi.',
+    'Nástěnka: nejnovější nahoře, nové se štítkem.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

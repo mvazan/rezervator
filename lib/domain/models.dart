@@ -657,6 +657,29 @@ enum KioskDutyBandPosition {
 /// tiles in their colour ([clubs]) — a tap lists that club's players — or
 /// with the club tiles above the letters ([both]). The names are the
 /// column's values — do not rename one.
+/// How the kiosk's Zápis pages through the matches with a score (0079).
+enum KioskZapisNav {
+  /// The bare sheet, as before.
+  off,
+
+  /// A bar above the sheet: ‹ ›, the two teams (a tap lists that team's
+  /// matches), the day and a ×. The default.
+  bar,
+
+  /// No bar: ‹ › beside the Zápis — floating over it at full screen, where
+  /// a tap on the sheet hides and shows them and the × — and a tap on a
+  /// team's name in the sheet lists its matches.
+  sides;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [bar], the column's default.
+  static KioskZapisNav parse(String? value) => switch (value) {
+        'off' => KioskZapisNav.off,
+        'sides' => KioskZapisNav.sides,
+        _ => KioskZapisNav.bar,
+      };
+}
+
 enum KioskPickerMode {
   letters,
   clubs,
@@ -801,6 +824,7 @@ class ScheduleSettings {
     this.kioskWarningFontSize = 22,
     this.kioskDayMatchesWidth = 560,
     this.kioskTodaysMatches = true,
+    this.kioskZapisNav = KioskZapisNav.bar,
     this.kioskStreamMax = 1,
     this.kioskDutyHeader = false,
     this.kioskDutyBoard = false,
@@ -891,6 +915,9 @@ class ScheduleSettings {
   /// The kiosk's status bar lists today's matches beside the clock (0071);
   /// off = it says what it says on a day without a match.
   final bool kioskTodaysMatches;
+
+  /// How the kiosk's Zápis pages through the matches (0079).
+  final KioskZapisNav kioskZapisNav;
 
   /// How many stream windows at once, 1–4 (0072): 1 turns through the
   /// open streams in one window, more give each its own.
@@ -1054,6 +1081,9 @@ class ScheduleSettings {
         kioskDayMatchesWidth:
             json['kiosk_day_matches_width'] as int? ?? 560,
         kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
+        kioskZapisNav: KioskZapisNav.parse(
+          json['kiosk_zapis_nav'] as String?,
+        ),
         kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
         kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
         kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,

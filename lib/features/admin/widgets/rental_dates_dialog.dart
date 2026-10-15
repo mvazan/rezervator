@@ -128,16 +128,17 @@ class _RentalDatesDialogState extends ConsumerState<RentalDatesDialog> {
     // A date that has passed stays on the list for the record; there is
     // nothing left to change about it.
     final past = date.isBefore(now);
-    final parts = [
-      '${d.startsAt.display()}–${d.endsAt.display()}',
-      'dráhy ${d.lanes.join(', ')}',
-      if (d.note.isNotEmpty) d.note,
-    ];
+    final when =
+        '${d.startsAt.display()}–${d.endsAt.display()} · '
+        'dráhy ${d.lanes.join(', ')}';
+    final note = d.note.trim();
     return ListTile(
       enabled: !past,
       contentPadding: EdgeInsets.zero,
       title: Text(dayFull(date)),
-      subtitle: Text(parts.join(' · ')),
+      // The note under the time and lanes, its own lines kept — as the
+      // calendar shows it.
+      subtitle: Text(note.isEmpty ? when : '$when\n$note'),
       onTap: () => showDialog<bool>(
         context: context,
         builder: (_) => RentalDateDialog(

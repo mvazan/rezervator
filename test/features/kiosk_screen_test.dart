@@ -78,7 +78,7 @@ void main() {
   // The page is long (the panel options sit above the address): a tall
   // window keeps every section built.
   void tall(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 6400);
+    tester.view.physicalSize = const Size(800, 6800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
   }
@@ -778,6 +778,7 @@ void main() {
         (KioskModule.matches, 'Zápasy', 'Vpravo'),
         (KioskModule.guide, 'Jak začít', 'Vypnuto'),
         (KioskModule.week, 'Hráči týdne', 'Vypnuto'),
+        (KioskModule.feedback, 'Napište nám', 'Vypnuto'),
       ]) {
         final row = moduleRow(module);
         expect(inSection('Panely', row), findsOneWidget, reason: name);
@@ -814,7 +815,12 @@ void main() {
       expect(shown(tester, share(KioskModule.notices)), '40');
       expect(shown(tester, share(KioskModule.matches)), '60');
       // An unplaced module has no share and no arrows.
-      for (final m in [KioskModule.duty, KioskModule.guide, KioskModule.week]) {
+      for (final m in [
+        KioskModule.duty,
+        KioskModule.guide,
+        KioskModule.week,
+        KioskModule.feedback,
+      ]) {
         expect(inRow(moduleRow(m), find.byType(TextField)), findsNothing,
             reason: m.name);
         expect(inRow(moduleRow(m), find.byType(IconButton)), findsNothing,
@@ -904,7 +910,7 @@ void main() {
           {'days': 2, 'open': false});
       expect((lastPatch()['kiosk_panels'] as Map)['right'],
           {'days': 2, 'open': false});
-      expect(patchedModules(), hasLength(5));
+      expect(patchedModules(), hasLength(KioskModule.values.length));
       expect(
         patchedModules(),
         contains(equals({'id': 'guide', 'side': 'left', 'share': 45})),
@@ -1154,7 +1160,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.byType(DropdownButtonFormField<PanelSide>), findsNWidgets(5));
+      expect(find.byType(DropdownButtonFormField<PanelSide>),
+          findsNWidgets(KioskModule.values.length));
       // Nothing this app shows is on the left: no row for that panel.
       expect(panelRow(PanelSide.left), findsNothing);
 
@@ -1256,6 +1263,32 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_stream_max': 3});
+  });
+
+  testWidgets('paging through the Zápis: the bar by default, one of three, '
+      'under its size; a choice PATCHes its own column (0079)', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    final paging = find.widgetWithText(
+      DropdownButtonFormField<KioskZapisNav>,
+      'Listování v zápisu',
+    );
+    expect(find.descendant(of: paging, matching: find.text('Lišta nad zápisem')),
+        findsOneWidget);
+    expect(
+      tester.getTopLeft(paging).dy,
+      greaterThan(tester.getTopLeft(find.text('Velikost zápisu')).dy),
+    );
+    await tester.ensureVisible(paging);
+    await tester.tap(paging);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Šipky po stranách').last);
+    await tester.pumpAndSettle();
+    final patch = jsonDecode(
+      requests.lastWhere((r) => r.method == 'PATCH').body,
+    ) as Map<String, dynamic>;
+    expect(patch, {'kiosk_zapis_nav': 'sides'});
   });
 
   testWidgets('today\'s matches in the header: on by default, in the '
@@ -2010,6 +2043,7 @@ void main() {
           {'id': 'matches', 'side': 'right', 'share': 60},
           {'id': 'guide', 'side': 'off', 'share': 45},
           {'id': 'week', 'side': 'off', 'share': 55},
+          {'id': 'feedback', 'side': 'off', 'share': 35},
         ],
       },
     });

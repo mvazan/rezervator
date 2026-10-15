@@ -136,12 +136,20 @@ void main() {
       await open(tester, web: true);
 
       expect(find.textContaining('Web se aktualizuje průběžně'), findsOneWidget);
-      expect(find.text('${newestRelease.date} · verze ${newestRelease.version}'),
-          findsOneWidget);
       if (webOnly != null) {
         expect(find.text('${webOnly.date} · zatím jen na webu'), findsOneWidget);
         expect(find.text('• ${webOnly.changes.first}'), findsOneWidget);
       }
+      // Below the batches only the web has, however long they run.
+      final release = find.text(
+        '${newestRelease.date} · verze ${newestRelease.version}',
+      );
+      await tester.scrollUntilVisible(
+        release,
+        300,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(release, findsOneWidget);
     });
   });
 }

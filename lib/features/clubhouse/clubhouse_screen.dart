@@ -1,6 +1,7 @@
 /// Klubovna — the third home tab: a hub of team-facing screens (contacts,
-/// venues, the notice board, canteen duties, results, messages — in Czech
-/// alphabetical order), the same [HubMenu] Správa kuželny uses.
+/// venues, the notice board, canteen duties, results, messages — and a
+/// message to the app's author — in Czech alphabetical order), the same
+/// [HubMenu] Správa kuželny uses.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/hub_menu.dart';
 import '../../data/providers.dart';
 import '../../domain/collation.dart';
+import '../feedback/feedback_screen.dart';
 import '../schedule/widgets/home_header.dart';
 import 'contacts_screen.dart';
 import 'duties_screen.dart';
@@ -76,6 +78,26 @@ class ClubhouseScreen extends ConsumerWidget {
                 subtitle: 'Oznámení správce',
                 badge: unreadNotices,
                 onTap: () => pushScreen(context, (_) => const NoticeBoardScreen()),
+              ),
+              (
+                label: 'Napište nám',
+                icon: Icons.rate_review_outlined,
+                subtitle: 'Co v Rezervátoru chybí nebo nefunguje',
+                badge: null,
+                // Name, e-mail and kuželna filled in from the profile —
+                // a player can still clear them.
+                onTap: () {
+                  final me = ref.read(myProfileProvider).value;
+                  pushScreen(
+                    context,
+                    (_) => FeedbackScreen(
+                      source: FeedbackSource.clubhouse,
+                      initialName: me?.displayName,
+                      initialEmail: me?.email,
+                      tenantId: me?.tenantId,
+                    ),
+                  );
+                },
               ),
               (
                 label: 'Zprávy',

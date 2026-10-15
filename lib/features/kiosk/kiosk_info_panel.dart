@@ -37,6 +37,7 @@ import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
+import 'kiosk_feedback.dart' show KioskFeedbackCard;
 import 'kiosk_guide.dart' show KioskGuideCard;
 import 'kiosk_new_chip.dart';
 import 'kiosk_notice_turns.dart';
@@ -148,8 +149,8 @@ final kioskPanelContentProvider =
           // The list — or the match being played alone, when the list's
           // weeks hold no match (Sunday evening's, still live on Monday).
           KioskModule.matches => hasMatches || live.isNotEmpty,
-          // A fixed text: always something to show.
-          KioskModule.guide => true,
+          // Fixed texts: always something to show.
+          KioskModule.guide || KioskModule.feedback => true,
           KioskModule.week => hasWeek,
         };
         if (shows) entries.add(KioskPanelEntry(module, placement.share));
@@ -217,6 +218,7 @@ class KioskPanelView extends ConsumerWidget {
     required this.onOpenMatch,
     this.onOpenGuide,
     this.onOpenWeek,
+    this.onOpenFeedback,
     this.onPlay,
     this.resetToken = 0,
     this.boardDays,
@@ -265,6 +267,9 @@ class KioskPanelView extends ConsumerWidget {
   /// A tap on „Hráči týdne“: the whole week full screen; null = a tap does
   /// nothing.
   final VoidCallback? onOpenWeek;
+
+  /// A tap on „Napište nám“: its QR code large; null = a tap does nothing.
+  final VoidCallback? onOpenFeedback;
 
   /// ▶ at a match with a video: its stream (0072); null while the admin
   /// has the streams off — no ▶ and no live badge.
@@ -319,6 +324,9 @@ class KioskPanelView extends ConsumerWidget {
       KioskModule.week => KioskWeekCard(
         key: ValueKey(resetToken),
         onOpen: () => onOpenWeek?.call(),
+      ),
+      KioskModule.feedback => KioskFeedbackCard(
+        onOpen: () => onOpenFeedback?.call(),
       ),
     };
     final showsLive =
@@ -391,7 +399,7 @@ class KioskPanelView extends ConsumerWidget {
 /// Every few seconds it breathes once — a soft glow and a little more
 /// opacity — so a tablet on the wall shows that there is something to
 /// open, without ever moving; both buttons breathe together.
-class KioskDrawerButton extends StatefulWidget {
+class KioskDrawerButton extends StatelessWidget {
   const KioskDrawerButton({
     super.key,
     required this.side,
@@ -433,10 +441,65 @@ class KioskDrawerButton extends StatefulWidget {
   static DateTime Function() clock = DateTime.now;
 
   @override
-  State<KioskDrawerButton> createState() => _KioskDrawerButtonState();
+  Widget build(BuildContext context) {
+    final left = side == PanelSide.left;
+    // The way a tap moves the panel: the right one opens to the left and
+    // closes to the right, the left one the other way round.
+    final towardsRight = left != open;
+    return Semantics(
+      // A node of its own: two buttons, each known by its label.
+      container: true,
+      button: true,
+      label: '${open ? 'Skrýt' : 'Zobrazit'} ${left ? 'levý' : 'pravý'} panel',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Center(
+            child: KioskBreathingIcon(
+              towardsRight
+                  ? Icons.keyboard_double_arrow_right
+                  : Icons.keyboard_double_arrow_left,
+              breathe: breathe,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _KioskDrawerButtonState extends State<KioskDrawerButton>
+/// An icon that breathes like [KioskDrawerButton]'s — once every few
+/// seconds on the same wall-clock beat ([KioskDrawerButton.untilBreath]), a
+/// soft glow and a little more opacity — or keeps still ([breathe] off).
+/// The side panels' buttons and the Zápis's side arrows (0079) wear it, so
+/// whatever on the wall opens or turns breathes together. [enabled] false
+/// = a dim, still icon: nothing that way. [strong]: on a disc of its own
+/// (over the Zápis), where the panel's faint grey would hardly show — the
+/// disc's foreground, nearly whole, the breath on top.
+class KioskBreathingIcon extends StatefulWidget {
+  const KioskBreathingIcon(
+    this.icon, {
+    super.key,
+    this.breathe = true,
+    this.enabled = true,
+    this.strong = false,
+    this.size = 44,
+  });
+
+  final IconData icon;
+  final bool breathe;
+  final bool enabled;
+  final bool strong;
+  final double size;
+
+  @override
+  State<KioskBreathingIcon> createState() => _KioskBreathingIconState();
+}
+
+class _KioskBreathingIconState extends State<KioskBreathingIcon>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
@@ -444,17 +507,19 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   );
   Timer? _rest;
 
+  bool get _breathes => widget.breathe && widget.enabled;
+
   @override
   void initState() {
     super.initState();
-    if (widget.breathe) _breathe();
+    if (_breathes) _breathe();
   }
 
   @override
-  void didUpdateWidget(KioskDrawerButton old) {
+  void didUpdateWidget(KioskBreathingIcon old) {
     super.didUpdateWidget(old);
-    if (old.breathe == widget.breathe) return;
-    if (widget.breathe) {
+    if ((old.breathe && old.enabled) == _breathes) return;
+    if (_breathes) {
       _breathe();
     } else {
       // Mid-breath: stopped, and no rest timer follows a breath that never
@@ -475,7 +540,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
     _rest = Timer(wait, () {
       if (!mounted) return;
       _controller.forward(from: 0).whenComplete(() {
-        if (mounted) _breathe();
+        if (mounted && _breathes) _breathe();
       });
     });
   }
@@ -490,52 +555,31 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final left = widget.side == PanelSide.left;
-    // The way a tap moves the panel: the right one opens to the left and
-    // closes to the right, the left one the other way round.
-    final towardsRight = left != widget.open;
-    return Semantics(
-      // A node of its own: two buttons, each known by its label.
-      container: true,
-      button: true,
-      label:
-          '${widget.open ? 'Skrýt' : 'Zobrazit'} '
-          '${left ? 'levý' : 'pravý'} panel',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: SizedBox(
-          width: KioskDrawerButton.size,
-          height: KioskDrawerButton.size,
-          child: Center(
-            // Its own layer: a breath repaints the icon, not the board and
-            // the panel under it.
-            child: RepaintBoundary(
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  // 0 → 1 → 0 over one breath; 0 while the button is still.
-                  final glow = math.sin(_controller.value * math.pi);
-                  return Icon(
-                    towardsRight
-                        ? Icons.keyboard_double_arrow_right
-                        : Icons.keyboard_double_arrow_left,
-                    size: 44,
-                    color: scheme.onSurfaceVariant.withValues(
-                      alpha: 0.4 + 0.35 * glow,
-                    ),
-                    shadows: [
-                      Shadow(
-                        color: scheme.primary.withValues(alpha: 0.75 * glow),
-                        blurRadius: 4 + 16 * glow,
-                      ),
-                    ],
-                  );
-                },
-              ),
+    // Its own layer: a breath repaints the icon, not the board and the
+    // panel under it.
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          // 0 → 1 → 0 over one breath; 0 while the icon is still.
+          final glow = math.sin(_controller.value * math.pi);
+          final (color, rest, breath, off) = widget.strong
+              ? (scheme.onSurface, 0.75, 0.25, 0.25)
+              : (scheme.onSurfaceVariant, 0.4, 0.35, 0.15);
+          return Icon(
+            widget.icon,
+            size: widget.size,
+            color: color.withValues(
+              alpha: widget.enabled ? rest + breath * glow : off,
             ),
-          ),
-        ),
+            shadows: [
+              Shadow(
+                color: scheme.primary.withValues(alpha: 0.75 * glow),
+                blurRadius: 4 + 16 * glow,
+              ),
+            ],
+          );
+        },
       ),
     );
   }

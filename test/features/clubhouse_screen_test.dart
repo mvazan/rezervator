@@ -6,6 +6,7 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/core/hub_menu.dart';
 import 'package:rezervator/features/clubhouse/clubhouse_screen.dart';
+import 'package:rezervator/features/feedback/feedback_screen.dart';
 
 /// Records every provider that fails — a screen reaching past its test
 /// doubles to the uninitialised Supabase client shows up here.
@@ -20,7 +21,7 @@ final class _Failures extends ProviderObserver {
   ) => errors.add(error);
 }
 
-/// The Klubovna hub: its six entries, the shell's trailing icons riding
+/// The Klubovna hub: its seven entries, the shell's trailing icons riding
 /// along on the same header, and the shared HubMenu's list/grid breakpoint
 /// (below vs at/above 840 dp).
 void main() {
@@ -105,8 +106,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('shows the Výsledky, Kuželny, Kontakty, Služby, Nástěnka and '
-      'Zprávy entries with their subtitles', (tester) async {
+  testWidgets('shows the Výsledky, Kuželny, Kontakty, Služby, Nástěnka, '
+      'Napište nám and Zprávy entries with their subtitles', (tester) async {
     narrow(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -131,6 +132,9 @@ void main() {
     expect(find.text('Zprávy'), findsOneWidget);
     expect(find.text('Zprávy pro tebe a od tebe'), findsOneWidget);
     expect(find.byIcon(Icons.forum_outlined), findsOneWidget);
+    expect(find.text('Napište nám'), findsOneWidget);
+    expect(find.text('Co v Rezervátoru chybí nebo nefunguje'), findsOneWidget);
+    expect(find.byIcon(Icons.rate_review_outlined), findsOneWidget);
   });
 
   /// Hub labels top to bottom (list) or in reading order (grid).
@@ -138,7 +142,7 @@ void main() {
     final found = find.descendant(
       of: find.byType(HubMenu),
       matching: find.byWidgetPredicate(
-        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Nástěnka', 'Služby', 'Výsledky', 'Zprávy'}
+        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Napište nám', 'Nástěnka', 'Služby', 'Výsledky', 'Zprávy'}
             .contains(w.data),
       ),
     );
@@ -160,6 +164,7 @@ void main() {
     expect(labels(tester), [
       'Kontakty',
       'Kuželny',
+      'Napište nám',
       'Nástěnka',
       'Služby',
       'Výsledky',
@@ -176,6 +181,7 @@ void main() {
     expect(labels(tester), [
       'Kontakty',
       'Kuželny',
+      'Napište nám',
       'Nástěnka',
       'Služby',
       'Výsledky',
@@ -190,7 +196,7 @@ void main() {
 
     expect(find.byType(ListView), findsOneWidget);
     expect(find.byType(GridView), findsNothing);
-    expect(find.byType(ListTile), findsNWidgets(6));
+    expect(find.byType(ListTile), findsNWidgets(7));
   });
 
   testWidgets('at 840 dp and above the hub renders a card grid', (
@@ -202,7 +208,7 @@ void main() {
 
     expect(find.byType(GridView), findsOneWidget);
     expect(find.byType(ListView), findsNothing);
-    expect(find.byType(Card), findsNWidgets(6));
+    expect(find.byType(Card), findsNWidgets(7));
   });
 
   testWidgets(
@@ -360,6 +366,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.widgetWithText(AppBar, 'Zprávy'), findsOneWidget);
     expect(find.text('Zatím žádné zprávy.'), findsOneWidget);
+    expect(failures.errors, isEmpty);
+  });
+
+  testWidgets('tapping Napište nám opens the form with the player\'s name '
+      'and e-mail filled in', (tester) async {
+    narrow(tester);
+    final failures = _Failures();
+    await tester.pumpWidget(app(observer: failures));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Napište nám'));
+    await tester.pumpAndSettle();
+    final screen = tester.widget<FeedbackScreen>(find.byType(FeedbackScreen));
+    expect(screen.source, FeedbackSource.clubhouse);
+    expect(find.widgetWithText(AppBar, 'Napište nám'), findsOneWidget);
+    expect(find.text('Já Hráč'), findsOneWidget);
+    expect(find.text('me@example.com'), findsOneWidget);
     expect(failures.errors, isEmpty);
   });
 }

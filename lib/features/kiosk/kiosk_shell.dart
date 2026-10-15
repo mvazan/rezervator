@@ -29,6 +29,7 @@ import 'kiosk_connection.dart';
 import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
 import 'kiosk_duty.dart';
+import 'kiosk_feedback.dart';
 import 'kiosk_guide.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_warning.dart';
@@ -237,6 +238,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// panel.
   void _openGuide() => unawaited(showKioskGuide(context, wrap: _touchable));
 
+  /// „Napište nám“'s QR code large — a tap on its card in a panel.
+  void _openFeedback() =>
+      unawaited(showKioskFeedback(context, wrap: _touchable));
+
   /// „Hráči týdne“ full screen (0078) — a tap on its card in a panel; a tap
   /// on a line there opens that match's Zápis over it.
   void _openWeek() => unawaited(
@@ -264,36 +269,41 @@ class _KioskShellState extends ConsumerState<KioskShell>
   void _openMatch(PrioritySlot match, {bool overWeek = false}) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
     final play = _play;
+    final settings = ref.read(settingsProvider).value;
     unawaited(
       showKioskZapis(
         context,
         slot: match,
-        brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
+        brightness: (settings?.kioskDark ?? true)
             ? Brightness.dark
             : Brightness.light,
-        percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
+        percent: settings?.kioskZapisPercent ?? 80,
         onTouch: _touch,
-        // The Zápis closes and the stream opens beside the board.
-        play: play != null && hasKioskVideo(match)
-            ? (
-                label: kioskStreamLabel(
-                  match,
-                  ref.read(matchResultsProvider).value?[match.id],
-                  now,
-                ),
-                onPlay: () {
-                  // Behind the week's page the player would run unseen,
-                  // sound and all: back to the board first.
-                  if (overWeek) {
-                    Navigator.of(
-                      context,
-                      rootNavigator: true,
-                    ).popUntil((r) => r.isFirst);
-                  }
-                  play(match);
-                },
-              )
-            : null,
+        nav: settings?.kioskZapisNav ?? KioskZapisNav.bar,
+        // The ▶ of whichever match the Zápis shows (it pages, 0079): it
+        // closes and the stream opens beside the board.
+        playFor: play == null
+            ? null
+            : (m) => hasKioskVideo(m)
+                  ? (
+                      label: kioskStreamLabel(
+                        m,
+                        ref.read(matchResultsProvider).value?[m.id],
+                        now,
+                      ),
+                      onPlay: () {
+                        // Behind the week's page the player would run
+                        // unseen, sound and all: back to the board first.
+                        if (overWeek) {
+                          Navigator.of(
+                            context,
+                            rootNavigator: true,
+                          ).popUntil((r) => r.isFirst);
+                        }
+                        play(m);
+                      },
+                    )
+                  : null,
       ),
     );
   }
@@ -429,6 +439,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
           onOpenMatch: _openMatch,
           onOpenGuide: _openGuide,
           onOpenWeek: _openWeek,
+          onOpenFeedback: _openFeedback,
           onPlay: play,
           resetToken: _resets,
           showLive: !(holdsMatches && _liveHidden),

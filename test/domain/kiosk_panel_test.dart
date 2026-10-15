@@ -594,4 +594,50 @@ void main() {
       expect(kioskNewlyShownDays(span(0, 6), span(1, 5), today: today), isNull);
     });
   });
+
+  group('kioskZapisMatches (0079)', () {
+    final d = Day(2026, 10, 10);
+
+    test('the federation matches with a score, chronological', () {
+      final late = match('late', d, start: const HourMinute(18, 0));
+      final early = match('early', d);
+      final before = match('before', d.addDays(-7));
+      final list = kioskZapisMatches(
+        [
+          late,
+          early,
+          before,
+          match('coming', d.addDays(7)),
+          match('manual', d, imported: false),
+          match('uklid', d, parent: 'late'),
+          match('scheduled', d),
+        ],
+        {
+          'late': result('late', MatchStatus.finished),
+          'early': result('early', MatchStatus.inProgress),
+          'before': result('before', MatchStatus.forfeit),
+          'manual': result('manual', MatchStatus.finished),
+          'uklid': result('uklid', MatchStatus.finished),
+          'scheduled': result('scheduled', MatchStatus.scheduled),
+        },
+      );
+      expect([for (final m in list) m.id], ['before', 'early', 'late']);
+    });
+
+    test('kioskTeamMatches keeps a team\'s, home or away, in order', () {
+      PrioritySlot game(String id, String home, String away) => PrioritySlot(
+        id: id,
+        date: d,
+        startsAt: const HourMinute(14, 0),
+        endsAt: const HourMinute(17, 0),
+        type: matchType,
+        homeTeam: home,
+        awayTeam: away,
+        importKey: 'cka:$id',
+      );
+      final list = [game('1', 'A', 'B'), game('2', 'C', 'A'), game('3', 'B', 'C')];
+      expect([for (final m in kioskTeamMatches(list, 'A')) m.id], ['1', '2']);
+      expect([for (final m in kioskTeamMatches(list, 'C')) m.id], ['2', '3']);
+    });
+  });
 }
