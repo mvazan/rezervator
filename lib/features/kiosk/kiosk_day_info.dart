@@ -48,16 +48,17 @@ IconData weatherIcon(WeatherKind kind, {required bool isDay}) =>
       WeatherKind.thunderstorm => Icons.thunderstorm,
     };
 
-/// The weather module: the admin's title („Brno:“) over the icon,
-/// the temperature and today's high and low, at most a fifth of the
-/// screen (the row scales down). A tap shows the forecast's source in
-/// place of the title for [sourceFor] — no watermark in the header
-/// otherwise, the credit is a tap away.
+/// The weather module: the admin's title („Brno:“) over the icon, the
+/// temperature now and the [items] the admin picked (0082), at most
+/// [kioskHeaderWeatherShare] of the screen (the row scales down). A tap
+/// shows the forecast's source in place of the title for [sourceFor] — no
+/// watermark in the header otherwise, the credit is a tap away.
 class KioskWeatherModule extends StatefulWidget {
   const KioskWeatherModule({
     super.key,
     required this.weather,
     required this.title,
+    this.items = kioskWeatherItemsDefault,
   });
 
   /// How long a tap on the weather shows its source in place of the title.
@@ -67,6 +68,9 @@ class KioskWeatherModule extends StatefulWidget {
   /// without one.
   final KioskWeather weather;
   final String title;
+
+  /// What it shows beside the temperature now, in the enum's order.
+  final Set<KioskWeatherItem> items;
 
   @override
   State<KioskWeatherModule> createState() => _KioskWeatherModuleState();
@@ -96,13 +100,14 @@ class _KioskWeatherModuleState extends State<KioskWeatherModule> {
     final scheme = Theme.of(context).colorScheme;
     return KioskHeaderModuleFrame(
       title: _source != null ? weatherSource : widget.title,
-      maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderModuleShare,
+      maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderWeatherShare,
       onTap: _showSource,
       child: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
         child: _Weather(
           weather: widget.weather,
+          items: widget.items,
           quiet: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
         ),
       ),
@@ -136,24 +141,53 @@ class KioskNameDayModule extends StatelessWidget {
 }
 
 class _Weather extends StatelessWidget {
-  const _Weather({required this.weather, required this.quiet});
+  const _Weather({
+    required this.weather,
+    required this.items,
+    required this.quiet,
+  });
 
   final KioskWeather weather;
+  final Set<KioskWeatherItem> items;
   final TextStyle quiet;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final max = weather.max;
-    final min = weather.min;
+    bool picked(KioskWeatherItem item) => items.contains(item);
+    // Each value only when the admin picked it and the forecast has it.
+    final range = picked(KioskWeatherItem.range);
+    final max = range ? weather.max : null;
+    final min = range ? weather.min : null;
+    final feels = picked(KioskWeatherItem.feels) ? weather.feelsLike : null;
+    final wind = picked(KioskWeatherItem.wind) ? weather.wind : null;
+    final gusts = wind == null ? null : notableGusts(wind, weather.gusts);
+    // The umbrella only when rain or snow is likely: a fair chance, or
+    // some of it in the sum — each shown when it alone would do.
+    final rain = picked(KioskWeatherItem.rain);
     final chance = weather.precipitationChance;
-    final rainy = chance != null && chance >= weatherUmbrellaFrom;
+    final sum = weather.precipitationSum;
+    final likely = rain && chance != null && chance >= weatherUmbrellaFrom;
+    final wet = rain && sum != null && sum >= weatherWetFrom;
+    // „60 %, 3 mm“; a sum under 1 mm reads „méně než 1 mm“.
+    List<String> rainParts({required bool spoken}) => [
+      if (likely) '$chance %',
+      if (wet) spoken && sum < 1 ? 'méně než 1 mm' : millimetres(sum),
+    ];
+    final windText = wind == null
+        ? null
+        : [
+            '${wind.round()} km/h',
+            if (gusts != null) 'nárazy $gusts',
+          ].join(', ');
     final label = [
       weatherLabel(weather.kind),
       degrees(weather.temperature),
       if (max != null && min != null)
         'dnes nejvýš ${degrees(max)}, nejníž ${degrees(min)}',
-      if (rainy) 'srážky $chance %',
+      if (feels != null) 'pocitově ${degrees(feels)}',
+      if (windText != null) 'vítr $windText',
+      if (likely || wet) 'srážky ${rainParts(spoken: true).join(', ')}',
     ].join(', ');
     return Semantics(
       label: 'Počasí: $label. $weatherSource',
@@ -175,11 +209,21 @@ class _Weather extends StatelessWidget {
             const SizedBox(width: 10),
             Text('${degrees(max)} / ${degrees(min)}', style: quiet),
           ],
-          if (rainy) ...[
+          if (feels != null) ...[
+            const SizedBox(width: 10),
+            Text('pocitově ${degrees(feels)}', style: quiet),
+          ],
+          if (windText != null) ...[
+            const SizedBox(width: 10),
+            Icon(Icons.air, size: 16, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 2),
+            Text(windText, style: quiet),
+          ],
+          if (likely || wet) ...[
             const SizedBox(width: 10),
             Icon(Icons.umbrella, size: 16, color: scheme.onSurfaceVariant),
             const SizedBox(width: 2),
-            Text('$chance %', style: quiet),
+            Text(rainParts(spoken: false).join(', '), style: quiet),
           ],
         ],
       ),

@@ -159,6 +159,26 @@ const weatherStaleAfter = Duration(hours: 3);
 /// From this chance of rain or snow on, the status line shows the umbrella.
 const weatherUmbrellaFrom = 30;
 
+/// From this sum of rain or snow on, in mm, it shows the umbrella too —
+/// whatever the chance (0082).
+const weatherWetFrom = 0.1;
+
+/// Gusts at least this many km/h above the wind are worth a mention
+/// (0082).
+const weatherGustsAbove = 10;
+
+/// [gusts] in whole km/h when they blow at least [weatherGustsAbove] above
+/// [wind] — compared as shown, rounded —, else null.
+int? notableGusts(double wind, double? gusts) {
+  if (gusts == null) return null;
+  final whole = gusts.round();
+  return whole - wind.round() >= weatherGustsAbove ? whole : null;
+}
+
+/// Today's rain or snow as the kiosk prints it: whole mm, „< 1 mm“ under
+/// one.
+String millimetres(double mm) => mm < 1 ? '< 1 mm' : '${mm.round()} mm';
+
 /// [weather] if it is still fresh at [now], else null.
 KioskWeather? freshWeather(KioskWeather? weather, DateTime now) =>
     weather != null && now.difference(weather.fetchedAt) < weatherStaleAfter

@@ -13,10 +13,14 @@ const kioskHeaderValueHeight = 34.0;
 /// The space between two modules.
 const kioskHeaderGap = 32.0;
 
-/// The share of the screen's width a module with a short value (weather,
-/// name day, duty) may take: the centre, the notices and „Rezervace
-/// tréninku“ keep their room on a narrow kiosk with large text.
+/// The share of the screen's width a module with a short value (name
+/// day, duty) may take: the centre, the notices and „Rezervace tréninku“
+/// keep their room on a narrow kiosk with large text.
 const kioskHeaderModuleShare = 0.2;
+
+/// The weather's share: with every value the admin may pick (0082) its
+/// row is longer than a name; it still scales down to fit.
+const kioskHeaderWeatherShare = 0.3;
 
 /// A module's title: small, quiet, one line.
 TextStyle kioskHeaderTitleStyle(ColorScheme scheme) => TextStyle(

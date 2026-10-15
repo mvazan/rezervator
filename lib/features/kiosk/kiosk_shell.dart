@@ -783,6 +783,8 @@ class _StatusBar extends ConsumerWidget {
                 key: ValueKey(m),
                 weather: weather,
                 title: kioskWeatherTitleOf(settings?.kioskWeatherTitle),
+                items:
+                    settings?.kioskWeatherItems ?? kioskWeatherItemsDefault,
               ),
       KioskHeaderModule.nameday =>
         nameDay == null

@@ -51,6 +51,30 @@ void main() {
     fetchedAt: now.subtract(const Duration(minutes: 10)),
   );
 
+  /// Every value the admin may pick (0082), each worth showing: the gusts
+  /// well above the wind, rain likely and some of it in the sum.
+  KioskWeather full({
+    double? feels = -8.6,
+    double? wind = 12.3,
+    double? gusts = 27.8,
+    int? chance = 60,
+    double? sum = 2.6,
+  }) => KioskWeather(
+    temperature: -3.4,
+    kind: WeatherKind.snow,
+    isDay: true,
+    max: 1.2,
+    min: -6.8,
+    precipitationChance: chance,
+    feelsLike: feels,
+    wind: wind,
+    gusts: gusts,
+    precipitationSum: sum,
+    fetchedAt: now.subtract(const Duration(minutes: 10)),
+  );
+
+  final all = KioskWeatherItem.values.toSet();
+
   Widget app(Widget module, {Size? size, double textScale = 1}) =>
       MaterialApp(
         home: Builder(
@@ -107,6 +131,206 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.umbrella), findsOneWidget);
     expect(find.text('30 %'), findsOneWidget);
+  });
+
+  group('the values the admin picks (0082)', () {
+    const texts = {
+      KioskWeatherItem.range: '1° / −7°',
+      KioskWeatherItem.feels: 'pocitově −9°',
+      KioskWeatherItem.wind: '12 km/h, nárazy 28',
+      KioskWeatherItem.rain: '60 %, 3 mm',
+    };
+
+    for (final item in KioskWeatherItem.values) {
+      testWidgets('${item.name} alone: ${texts[item]} beside the '
+          'temperature, nothing else', (tester) async {
+        await tester.pumpWidget(
+          app(
+            KioskWeatherModule(
+              weather: full(),
+              title: 'Brno:',
+              items: {item},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.cloudy_snowing), findsOneWidget);
+        expect(find.text('−3°'), findsOneWidget);
+        for (final other in KioskWeatherItem.values) {
+          expect(
+            find.text(texts[other]!),
+            other == item ? findsOneWidget : findsNothing,
+            reason: '$other',
+          );
+        }
+        expect(
+          find.byIcon(Icons.air),
+          item == KioskWeatherItem.wind ? findsOneWidget : findsNothing,
+        );
+        expect(
+          find.byIcon(Icons.umbrella),
+          item == KioskWeatherItem.rain ? findsOneWidget : findsNothing,
+        );
+      });
+    }
+
+    testWidgets('all four after the icon and the temperature, in the '
+        'enum\'s order, and read out in words', (tester) async {
+      await tester.pumpWidget(
+        app(KioskWeatherModule(weather: full(), title: 'Brno:', items: all)),
+      );
+      await tester.pumpAndSettle();
+      final xs = [
+        find.byIcon(Icons.cloudy_snowing),
+        find.text('−3°'),
+        find.text('1° / −7°'),
+        find.text('pocitově −9°'),
+        find.byIcon(Icons.air),
+        find.text('12 km/h, nárazy 28'),
+        find.byIcon(Icons.umbrella),
+        find.text('60 %, 3 mm'),
+      ].map((f) => tester.getRect(f).left).toList();
+      for (var i = 1; i < xs.length; i++) {
+        expect(xs[i], greaterThan(xs[i - 1]), reason: 'item $i');
+      }
+      expect(
+        find.bySemanticsLabel(
+          'Brno:\n'
+          'Počasí: Sněžení, −3°, dnes nejvýš 1°, nejníž −7°, pocitově −9°, '
+          'vítr 12 km/h, nárazy 28, srážky 60 %, 3 mm. $weatherSource',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('none picked: the temperature alone', (tester) async {
+      await tester.pumpWidget(
+        app(KioskWeatherModule(weather: full(), title: 'Brno:', items: {})),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.cloudy_snowing), findsOneWidget);
+      expect(find.text('−3°'), findsOneWidget);
+      for (final text in texts.values) {
+        expect(find.text(text), findsNothing, reason: text);
+      }
+      expect(find.byIcon(Icons.air), findsNothing);
+      expect(find.byIcon(Icons.umbrella), findsNothing);
+      expect(
+        find.bySemanticsLabel(
+          'Brno:\nPočasí: Sněžení, −3°. $weatherSource',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a value the forecast lacks shows nothing, picked or not', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          KioskWeatherModule(
+            weather: full(feels: null, wind: null, chance: null, sum: null),
+            title: 'Brno:',
+            items: all,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('1° / −7°'), findsOneWidget);
+      expect(find.textContaining('pocitově'), findsNothing);
+      expect(find.byIcon(Icons.air), findsNothing);
+      expect(find.byIcon(Icons.umbrella), findsNothing);
+    });
+
+    // The umbrella when rain or snow is likely: a chance of at least 30 %
+    // or a sum of at least 0.1 mm — each shown when it alone would do.
+    for (final (chance, sum, shown) in [
+      (29, 0.05, null),
+      (29, null, null),
+      (null, null, null),
+      (30, 0.0, '30 %'),
+      (10, 0.1, '< 1 mm'),
+      (10, 0.94, '< 1 mm'),
+      (10, 1.0, '1 mm'),
+      (null, 4.4, '4 mm'),
+      (60, 2.5, '60 %, 3 mm'),
+    ]) {
+      testWidgets('rain: a $chance % chance and $sum mm show '
+          '${shown ?? 'no umbrella'}', (tester) async {
+        await tester.pumpWidget(
+          app(
+            KioskWeatherModule(
+              weather: full(chance: chance, sum: sum),
+              title: 'Brno:',
+              items: {KioskWeatherItem.rain},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byIcon(Icons.umbrella),
+          shown == null ? findsNothing : findsOneWidget,
+        );
+        if (shown != null) expect(find.text(shown), findsOneWidget);
+      });
+    }
+
+    testWidgets('a sum under 1 mm is read „méně než 1 mm“', (tester) async {
+      await tester.pumpWidget(
+        app(
+          KioskWeatherModule(
+            weather: full(chance: 10, sum: 0.3),
+            title: 'Brno:',
+            items: {KioskWeatherItem.rain},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.bySemanticsLabel(
+          'Brno:\n'
+          'Počasí: Sněžení, −3°, srážky méně než 1 mm. $weatherSource',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    // The gusts when they blow at least 10 km/h above the wind, both as
+    // shown (rounded).
+    for (final (wind, gusts, shown) in [
+      (12.3, 21.4, '12 km/h'),
+      (12.3, 21.6, '12 km/h, nárazy 22'),
+      (12.3, null, '12 km/h'),
+      (0.4, 9.6, '0 km/h, nárazy 10'),
+    ]) {
+      testWidgets('wind $wind with gusts $gusts: $shown', (tester) async {
+        await tester.pumpWidget(
+          app(
+            KioskWeatherModule(
+              weather: full(wind: wind, gusts: gusts),
+              title: 'Brno:',
+              items: {KioskWeatherItem.wind},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.air), findsOneWidget);
+        expect(find.text(shown), findsOneWidget);
+      });
+    }
+
+    testWidgets('the default: the high and low and the umbrella, as before', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(KioskWeatherModule(weather: full(), title: 'Brno:')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('1° / −7°'), findsOneWidget);
+      expect(find.text('60 %, 3 mm'), findsOneWidget);
+      expect(find.textContaining('pocitově'), findsNothing);
+      expect(find.byIcon(Icons.air), findsNothing);
+    });
   });
 
   testWidgets('no source in the header; a tap on the weather shows it in '
@@ -172,10 +396,9 @@ void main() {
     );
   });
 
-  testWidgets('a narrow kiosk with large text: each module keeps to a fifth '
-      'of the screen — the weather scales down, the names are cut', (
-    tester,
-  ) async {
+  testWidgets('a narrow kiosk with large text: the weather with every value '
+      'keeps to 0.3 of the screen and scales down, the names to a fifth and '
+      'are cut', (tester) async {
     tester.view.physicalSize = const Size(1024, 600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -185,8 +408,9 @@ void main() {
           mainAxisSize: MainAxisSize.min,
           children: [
             KioskWeatherModule(
-              weather: weather(t: -12.4, chance: 100),
+              weather: full(chance: 100, sum: 24.6),
               title: 'Brno:',
+              items: all,
             ),
             KioskNameDayModule(
               day: nameDayHeader(czechNameDay(Day(2026, 1, 6)))!,
@@ -201,15 +425,28 @@ void main() {
     expect(tester.takeException(), isNull);
     final names = find.text('Kašpar, Melichar a Baltazar');
     expect(names, findsOneWidget);
-    for (final module in [
-      find.byType(KioskWeatherModule),
-      find.byType(KioskNameDayModule),
-    ]) {
-      expect(
-        tester.getSize(module).width,
-        lessThanOrEqualTo(1024 * kioskHeaderModuleShare),
-      );
-    }
+    expect(
+      tester.getSize(find.byType(KioskWeatherModule)).width,
+      lessThanOrEqualTo(1024 * kioskHeaderWeatherShare),
+    );
+    // Scaled down: the row is wider than the room it is drawn in.
+    expect(
+      tester
+          .getSize(
+            find
+                .descendant(
+                  of: find.byType(KioskWeatherModule),
+                  matching: find.byType(Row),
+                )
+                .first,
+          )
+          .width,
+      greaterThan(1024 * kioskHeaderWeatherShare),
+    );
+    expect(
+      tester.getSize(find.byType(KioskNameDayModule)).width,
+      lessThanOrEqualTo(1024 * kioskHeaderModuleShare),
+    );
     final paragraph = tester.renderObject<RenderParagraph>(
       find.descendant(of: names, matching: find.byType(RichText)),
     );

@@ -1875,9 +1875,11 @@ void main() {
       bool stream = false,
       bool nameday = false,
       bool weather = false,
-      // The weather module's forecast and the admin's title for it.
+      // The weather module's forecast, the admin's title for it and what
+      // it shows beside the temperature (0082; null = the default).
       KioskWeather? forecast,
       String? weatherTitle,
+      Set<KioskWeatherItem>? weatherItems,
       String? warning,
       bool todaysMatches = true,
       KioskZapisNav zapisNav = KioskZapisNav.bar,
@@ -1936,6 +1938,7 @@ void main() {
                   noticesHeader: headerNotices,
                 ),
             kioskWeatherTitle: weatherTitle,
+            kioskWeatherItems: weatherItems ?? kioskWeatherItemsDefault,
             kioskShowUpcoming: showUpcoming,
             kioskLiveMode: liveMode,
             kioskWeeksBack: weeksBack,
@@ -3589,6 +3592,47 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('the weather shows the values the admin picked beside the '
+          'temperature; the high and low by default', (tester) async {
+        fullHd(tester);
+        final windy = KioskWeather(
+          temperature: 14,
+          kind: WeatherKind.clear,
+          isDay: true,
+          max: 16,
+          min: 7,
+          feelsLike: 11.2,
+          wind: 18,
+          gusts: 35,
+          fetchedAt: nowAt,
+        );
+        await tester.pumpWidget(app(weather: true, forecast: windy));
+        await tester.pumpAndSettle();
+        expect(find.text('16° / 7°'), findsOneWidget);
+        expect(find.textContaining('pocitově'), findsNothing);
+        expect(find.byIcon(Icons.air), findsNothing);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            weather: true,
+            forecast: windy,
+            weatherItems: {KioskWeatherItem.feels, KioskWeatherItem.wind},
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('14°'), findsOneWidget);
+        expect(find.text('16° / 7°'), findsNothing);
+        expect(find.text('pocitově 11°'), findsOneWidget);
+        expect(find.text('18 km/h, nárazy 35'), findsOneWidget);
+        // Wider than a name may be, still within its share.
+        expect(
+          rectOf(tester, KioskWeatherModule).width,
+          lessThanOrEqualTo(1920 * kioskHeaderWeatherShare),
+        );
+        await finish(tester);
+      });
+
       testWidgets('a tap on a module shows: its ink paints on the module\'s '
           'own Material, above the bar\'s opaque background', (tester) async {
         fullHd(tester);
@@ -3694,15 +3738,15 @@ void main() {
         );
         final button = tester.getRect(find.byType(GradientButton));
         expect(button.right, lessThanOrEqualTo(1024));
-        for (final module in [
-          KioskWeatherModule,
-          KioskNameDayModule,
-          KioskDutyModule,
+        for (final (module, share) in [
+          (KioskWeatherModule, kioskHeaderWeatherShare),
+          (KioskNameDayModule, kioskHeaderModuleShare),
+          (KioskDutyModule, kioskHeaderModuleShare),
         ]) {
           final rect = rectOf(tester, module);
           expect(
             rect.width,
-            lessThanOrEqualTo(1024 * kioskHeaderModuleShare),
+            lessThanOrEqualTo(1024 * share),
             reason: '$module',
           );
           expect(rect.right, lessThan(button.left), reason: '$module');
