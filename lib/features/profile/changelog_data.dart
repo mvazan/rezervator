@@ -84,15 +84,19 @@ const appChangelog = <Release>[
         'v každém řádku stejně, i při větším písmu.',
     'Kiosk: seznam zápasů při posunu tabule neskáče — ukáže jen zápasy dnů, '
         'které na tabuli přibyly, a posune se jen o tolik, aby byly vidět.',
+    'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
+    'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
+        'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
   ], store: [
     'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
         'Hráči týdne a Jak začít s QR kódem aplikace.',
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
     'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
-    'Zápas v rozvrhu: nahoře pohár s časem, pod ním domácí a hosté.',
-    'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
+    'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
+        'výraznější výsledek.',
     'Kalendář po dnech: čas bloku pod sebou.',
+    'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
