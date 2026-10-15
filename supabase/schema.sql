@@ -6006,7 +6006,7 @@ COMMENT ON COLUMN "public"."schedule_settings"."kiosk_header" IS 'The kiosk''s h
 
 
 
-COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_title" IS 'The weather module''s title on the kiosk (0082), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_title" IS 'The weather module''s title on the kiosk (0082), typed by the admin („Brno“, shown „Brno:“); null shows „Počasí:“.';
 
 
 

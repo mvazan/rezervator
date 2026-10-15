@@ -10,8 +10,8 @@
 -- side. kiosk_header_valid checks the shape, not the ids: the app keeps an
 -- id it does not know and writes it back unchanged, so a later module
 -- needs no migration. kiosk_weather_title is the weather's title on the
--- kiosk („Dnes v Brně“ — Czech declines the place, so the admin types it);
--- null shows „Počasí“.
+-- kiosk, the place the admin types („Brno“; the kiosk adds the colon all
+-- its titles have); null shows „Počasí“.
 --
 -- The four switches the column replaces (kiosk_weather and kiosk_nameday
 -- from 0067, kiosk_duty_header from 0073, kiosk_notices_header from 0077)
@@ -75,7 +75,7 @@ alter table schedule_settings
 comment on column schedule_settings.kiosk_header is
   'The kiosk''s header modules (0082): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
 comment on column schedule_settings.kiosk_weather_title is
-  'The weather module''s title on the kiosk (0082), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
+  'The weather module''s title on the kiosk (0082), typed by the admin („Brno“, shown „Brno:“); null shows „Počasí:“.';
 
 -- The old switches, converted: one on goes left — the weather, the name
 -- day and the duty stood beside or under the clock — and the notices

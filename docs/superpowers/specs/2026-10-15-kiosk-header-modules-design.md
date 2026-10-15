@@ -20,16 +20,21 @@ at another height. The admin switches are spread over three sections
 
 - **One shape for every module:** a small title on top, the value under it.
   All titles share one line, all values the next one.
-- **Clock:** a module too — title the date („Čtvrtek 15. 10.“), value the time.
+- **Titles, simplified** (the user, after the first review): the clock says
+  the day — „Dnes je čtvrtek 15. 10.“ — so no other title repeats „Dnes“;
+  the others end with a colon: „Brno:“, „Svátek slaví:“, „Službu má:“,
+  „Nástěnka:“.
+- **Clock:** a module too — title „Dnes je čtvrtek 15. 10.“, value the time.
   Always first on the left; it cannot be moved or switched off.
-- **Weather:** title typed by the admin („Dnes v Brně“ — Czech locatives cannot
-  be derived from the place label), default „Počasí“.
-- **Name day:** „Dnes má svátek“ / „Hedvika“; „Dnes mají svátek“ for two or
-  more names; a public holiday without a name: „Státní svátek“ / „Nový rok“.
-- **Duty (new module):** „Dnes má službu“ / „Jan Novák“; „Dnes mají službu“ for
-  two or more people (the user's wording; plural like the name day). Replaces
-  the „Služba: …“ chip under the clock. The side-panel card and the board band
-  stay.
+- **Weather:** title the place the admin types („Brno“ — the place label is
+  „TJ Sokol Brno IV, Štolcova…“ for the alley's venue, so it cannot be
+  derived), shown with a colon; default „Počasí:“.
+- **Name day:** „Svátek slaví:“ / „Hedvika“ (or „Adam a Eva“ — „slaví“ fits
+  one and more); a public holiday without a name: „Státní svátek:“ / „Nový
+  rok“.
+- **Duty (new module):** „Službu má:“ / „Jan Novák“; „Službu mají:“ for two
+  or more people. Replaces the „Služba: …“ chip under the clock. The
+  side-panel card and the board band stay.
 - **Notices:** a module with the title „Nástěnka“ and the rotating headline as
   its value; it takes the width that is left.
 - **Position:** every module except the clock is off, left or right; left ones
@@ -101,14 +106,14 @@ notices on). The modules' order in the list is their order on each side.
   come. A cached row from before 0082 reads as the defaults.
 
 `lib/domain/namedays.dart`: `nameDayLine` gives way to a title/value pair
-(`({String title, String text})?`) — „Dnes má svátek“ / „Dnes mají svátek“ /
-„Státní svátek“, names joined the Czech way.
+(`({String title, String text})?`) — „Svátek slaví:“ /
+„Státní svátek:“, names joined the Czech way.
 
 ## The kiosk
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│ Čtvrtek 15. 10.  Dnes v Brně      Dnes má svátek  🏠 A – Tatran · 17:00–21:00  Nástěnka            ╭──────────────────╮ │
+│ Dnes je čtvrtek 15. 10.  Brno:   Svátek slaví:   🏠 A – Tatran · 17:00–21:00  Nástěnka            ╭──────────────────╮ │
 │ 14:32            ☀ 14°  16°/7°    Hedvika            B – Slavia · 10:00–14:00  📢 Brigáda v sobotu │ Rezervace tréninku│ │
 │                                                                                                ╰──────────────────╯ │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
@@ -162,7 +167,7 @@ Nástěnka              [Vpravo       ▾]       ↑ ↓
 Dnešní zápasy         [Uprostřed    ▾]
 
 📍 Místo pro počasí      TJ Sokol Brno IV, …           Změnit…
-   Nadpis počasí         Dnes v Brně                   Upravit…
+   Nadpis počasí         Brno                          Upravit…
 Počasí: ČHMÚ (model ALADIN) přes Open-Meteo.com (CC BY 4.0), obnovuje se
 každou půlhodinu; zdroj kiosk ukáže po ťuknutí na počasí. Svátek podle
 českého kalendáře; ve státní svátek bez jména jeho název. Služba podle plánu
