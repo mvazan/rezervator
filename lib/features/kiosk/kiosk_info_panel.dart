@@ -386,7 +386,7 @@ class KioskPanelView extends ConsumerWidget {
 /// edge, the left one on the hour ruler — never over today's column).
 /// Every few seconds it breathes once — a soft glow and a little more
 /// opacity — so a tablet on the wall shows that there is something to
-/// open, without ever moving.
+/// open, without ever moving; both buttons breathe together.
 class KioskDrawerButton extends StatefulWidget {
   const KioskDrawerButton({
     super.key,
@@ -411,6 +411,22 @@ class KioskDrawerButton extends StatefulWidget {
   /// One breath, and the rest between two.
   static const pulse = Duration(milliseconds: 2400);
   static const pause = Duration(milliseconds: 1800);
+
+  /// How long from [now] until the next breath. Every button breathes at
+  /// the multiples of [pulse] + [pause] on the wall clock, whenever it
+  /// appeared: the two panels' buttons breathe together, and the screen
+  /// rests between — two breaths out of step would leave it hardly any
+  /// frame without an animation.
+  static Duration untilBreath(DateTime now) {
+    final period = (pulse + pause).inMilliseconds;
+    final into = now.millisecondsSinceEpoch % period;
+    return Duration(milliseconds: into == 0 ? 0 : period - into);
+  }
+
+  /// The wall clock the breaths keep time by; a widget test hands in its
+  /// fake one, which moves with the pumps.
+  @visibleForTesting
+  static DateTime Function() clock = DateTime.now;
 
   @override
   State<KioskDrawerButton> createState() => _KioskDrawerButtonState();
@@ -445,12 +461,18 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
     }
   }
 
-  /// One breath, then a rest on a timer (not a repeating animation, which
-  /// would keep a test's pumpAndSettle from ever settling).
+  /// A rest on a timer until the shared rhythm's next breath
+  /// ([KioskDrawerButton.untilBreath]), then one breath, and again (not a
+  /// repeating animation, which would keep a test's pumpAndSettle from ever
+  /// settling).
   void _breathe() {
-    _controller.forward(from: 0).whenComplete(() {
+    _rest?.cancel();
+    final wait = KioskDrawerButton.untilBreath(KioskDrawerButton.clock());
+    _rest = Timer(wait, () {
       if (!mounted) return;
-      _rest = Timer(KioskDrawerButton.pause, _breathe);
+      _controller.forward(from: 0).whenComplete(() {
+        if (mounted) _breathe();
+      });
     });
   }
 

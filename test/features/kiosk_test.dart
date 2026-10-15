@@ -4951,6 +4951,9 @@ void main() {
     testWidgets('the drawer button breathes on a layer of its own — and keeps '
         'still when the admin turns the animation off', (tester) async {
       fullHd(tester);
+      // The breaths keep the test's fake time.
+      KioskDrawerButton.clock = tester.binding.clock.now;
+      addTearDown(() => KioskDrawerButton.clock = DateTime.now);
       double alpha() => tester
           .widget<Icon>(
             find.descendant(
@@ -4963,7 +4966,11 @@ void main() {
       Future<void> midBreath(Widget tree) async {
         await tester.pumpWidget(tree);
         await tester.pump();
-        // Half-way through the first breath the glow peaks.
+        // The first breath comes on the shared rhythm's beat (the frame
+        // there starts it); half-way through it the glow peaks.
+        await tester.pump(
+          KioskDrawerButton.untilBreath(tester.binding.clock.now()),
+        );
         await tester.pump(KioskDrawerButton.pulse ~/ 2);
       }
 
@@ -4983,6 +4990,88 @@ void main() {
       );
       expect(alpha(), closeTo(0.4, 0.001));
       await finish(tester);
+    });
+
+    testWidgets('two drawer buttons breathe together, whenever each appeared',
+        (tester) async {
+      KioskDrawerButton.clock = tester.binding.clock.now;
+      addTearDown(() => KioskDrawerButton.clock = DateTime.now);
+      const sides = [PanelSide.right, PanelSide.left];
+      Widget buttons(int count) => MaterialApp(
+        home: Row(
+          children: [
+            for (final side in sides.take(count))
+              KioskDrawerButton(
+                key: ValueKey(side),
+                side: side,
+                open: false,
+                onTap: () {},
+              ),
+          ],
+        ),
+      );
+      double alpha(PanelSide side) => tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byKey(ValueKey(side)),
+              matching: find.byType(Icon),
+            ),
+          )
+          .color!
+          .a;
+
+      // Frames as a display draws them: one long pump would draw only one.
+      Future<void> frames(Duration span) async {
+        const step = Duration(milliseconds: 50);
+        var left = span;
+        while (left > Duration.zero) {
+          final next = left < step ? left : step;
+          await tester.pump(next);
+          left -= next;
+        }
+      }
+
+      Duration untilBreath() =>
+          KioskDrawerButton.untilBreath(tester.binding.clock.now());
+
+      await tester.pumpWidget(buttons(1));
+      await frames(untilBreath());
+      // The other panel's content arrives later, at no particular moment —
+      // here mid-breath of the first button.
+      await frames(const Duration(milliseconds: 1500));
+      await tester.pumpWidget(buttons(2));
+      // From the rhythm's next beat on, both glow alike.
+      await frames(untilBreath());
+      final period = KioskDrawerButton.pulse + KioskDrawerButton.pause;
+      var glowed = false;
+      for (var t = Duration.zero; t < period * 2; t += period ~/ 42) {
+        await frames(period ~/ 42);
+        expect(alpha(PanelSide.left), closeTo(alpha(PanelSide.right), 1e-9));
+        if (alpha(PanelSide.left) > 0.6) glowed = true;
+      }
+      expect(glowed, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    test('the breaths keep the wall clock\'s beat: every multiple of pulse '
+        '+ pause', () {
+      final beat = DateTime.fromMillisecondsSinceEpoch(
+        4200 * 400000000,
+        isUtc: true,
+      );
+      expect(KioskDrawerButton.untilBreath(beat), Duration.zero);
+      expect(
+        KioskDrawerButton.untilBreath(
+          beat.add(const Duration(milliseconds: 1)),
+        ),
+        const Duration(milliseconds: 4199),
+      );
+      expect(
+        KioskDrawerButton.untilBreath(
+          beat.add(const Duration(milliseconds: 2400)),
+        ),
+        const Duration(milliseconds: 1800),
+      );
     });
 
     testWidgets('the board and the drawer sit on layers of their own', (
