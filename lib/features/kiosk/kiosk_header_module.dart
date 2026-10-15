@@ -1,4 +1,4 @@
-/// One module of the kiosk's header (0081): a small title over its value.
+/// One module of the kiosk's header (0082): a small title over its value.
 /// Every module has the same height — a title line, then a value box
 /// [kioskHeaderValueHeight] tall (scaled with the text) — so the bar,
 /// which centres its children, lines all titles up and all values up.

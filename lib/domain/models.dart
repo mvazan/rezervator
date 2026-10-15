@@ -254,6 +254,7 @@ class Club {
     this.colorIndex = -1,
     this.siteSlug,
     this.siteName,
+    this.nickname,
   });
 
   final String id;
@@ -261,6 +262,14 @@ class Club {
 
   /// Palette index 0–11, or -1 for "no color assigned".
   final int colorIndex;
+
+  /// The short name the app shows instead of [name] (0080) — and instead
+  /// of the start of the club's teams' names ([NameDisplay]); null = the
+  /// full name.
+  final String? nickname;
+
+  /// What the app shows for the club: its [nickname], or its [name].
+  String get shown => nickname ?? name;
 
   /// The venue club on vysledky.kuzelky.cz this club is linked to
   /// (`detail-klubu/<slug>`) and its name there (0047). null until a
@@ -277,18 +286,74 @@ class Club {
         colorIndex: json['color'] as int? ?? -1,
         siteSlug: json['site_slug'] as String?,
         siteName: json['site_name'] as String?,
+        nickname: (json['nickname'] as String?)?.trim().isEmpty ?? true
+            ? null
+            : (json['nickname'] as String).trim(),
       );
 }
 
-/// Display name of [clubId] from the live club roster; '' when the profile
+/// Display name of [clubId] from the live club roster — its nickname when
+/// it has one (0080); '' when the profile
 /// has no club or the club was deleted. (The old `profiles.club` text was a
 /// registration-time copy that went stale on reassignment; dropped in 0019.)
 String clubNameOf(String? clubId, Iterable<Club> clubs) {
   if (clubId == null) return '';
   for (final club in clubs) {
-    if (club.id == clubId) return club.name;
+    if (club.id == clubId) return club.shown;
   }
   return '';
+}
+
+/// What the app shows for a club's and a team's name (0080): a club's
+/// nickname instead of its name, and instead of the start of its teams'
+/// names — the club's name on the federation's site, or its own name —
+/// „TJ Sokol Brno IV B“ → „Sokol IV B“. Display only: the app keys
+/// matches, follows, colours and calendars by the stored names, never by
+/// these. A name no club with a nickname starts is shown as it is (a
+/// team of another alley, a club without a nickname).
+class NameDisplay {
+  NameDisplay(Iterable<Club> clubs)
+    : _prefixes = [
+        for (final c in clubs)
+          if (c.nickname case final nick?)
+            for (final prefix in {?c.siteName, c.name})
+              if (prefix.trim().isNotEmpty) (prefix.trim(), nick),
+      ]..sort((a, b) => b.$1.length.compareTo(a.$1.length));
+
+  /// No nicknames: every name as it is.
+  static final none = NameDisplay(const []);
+
+  /// (the start a nickname replaces, the nickname), the longest first — a
+  /// club's site name before a shorter own name it begins with.
+  final List<(String, String)> _prefixes;
+
+  /// [team] with its club's nickname for the club's name at its start.
+  String team(String team) {
+    for (final (prefix, nick) in _prefixes) {
+      if (team == prefix) return nick;
+      if (team.startsWith('$prefix ')) {
+        return '$nick${team.substring(prefix.length)}';
+      }
+    }
+    return team;
+  }
+
+  /// [slot] with its teams' names as shown — for a widget that draws them
+  /// and keys nothing by them; [slot] itself when nothing changes.
+  PrioritySlot shown(PrioritySlot slot) {
+    final home = team(slot.homeTeam);
+    final away = team(slot.awayTeam);
+    return home == slot.homeTeam && away == slot.awayTeam
+        ? slot
+        : slot.withTeams(home: home, away: away);
+  }
+
+  /// [slot]'s title ([PrioritySlot.title]) with the teams' names as shown.
+  String title(PrioritySlot slot) => !slot.type.isMatch
+      ? slot.title
+      : slot.homeTeam.isEmpty
+      ? team(slot.awayTeam)
+      : '${team(slot.homeTeam)} – ${team(slot.awayTeam)}';
 }
 
 /// One of the alley's teams on the federation's results site (0045). [name]
@@ -701,6 +766,36 @@ enum KioskPickerMode {
   bool get showsLetters => this != KioskPickerMode.clubs;
 }
 
+/// What a fresh notice gets on the kiosk (0081, `kiosk_notices_fresh_mode`),
+/// on the panel's card and in the status bar: nothing ([off]), the „NOVÉ“
+/// label ([highlight]), twice the turn before the next notice ([longer]),
+/// or the label and the longer turn ([both]). A notice is fresh for
+/// [ScheduleSettings.kioskNoticesFreshDays] days (`isFreshNotice`). The
+/// names are the column's values — do not rename one.
+enum KioskNoticesFresh {
+  off,
+  highlight,
+  longer,
+  both;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [highlight], the column's default.
+  static KioskNoticesFresh parse(String? value) => switch (value) {
+        'off' => KioskNoticesFresh.off,
+        'longer' => KioskNoticesFresh.longer,
+        'both' => KioskNoticesFresh.both,
+        _ => KioskNoticesFresh.highlight,
+      };
+
+  /// Whether a fresh notice wears the „NOVÉ“ label.
+  bool get highlights =>
+      this == KioskNoticesFresh.highlight || this == KioskNoticesFresh.both;
+
+  /// Whether a fresh notice stays twice the turn (`kioskNoticeTurn`).
+  bool get lingers =>
+      this == KioskNoticesFresh.longer || this == KioskNoticesFresh.both;
+}
+
 /// How a match is drawn — the kiosk's live match (0064,
 /// `kiosk_live_layout`) and the app's match detail (a device preference per
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
@@ -800,6 +895,8 @@ class ScheduleSettings {
     this.kioskPanels = KioskPanels.defaults,
     this.kioskHeader = KioskHeader.defaults,
     this.kioskWeatherTitle,
+    this.kioskNoticesFresh = KioskNoticesFresh.highlight,
+    this.kioskNoticesFreshDays = 3,
     this.kioskPickerMode = KioskPickerMode.letters,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
@@ -854,7 +951,7 @@ class ScheduleSettings {
   final KioskCorner kioskStreamCorner;
   final int kioskStreamWidth;
   /// The place for the header's weather module (0067; whether it shows is
-  /// [kioskHeader]'s business since 0081) — the label it shows and its
+  /// [kioskHeader]'s business since 0082) — the label it shows and its
   /// coordinates (both or neither). The kiosk asks Open-Meteo itself.
   final String? kioskWeatherPlace;
   final double? kioskWeatherLat;
@@ -887,7 +984,7 @@ class ScheduleSettings {
   final int kioskStreamMax;
   /// The canteen duty on the board (0073): a band across a duty's days in
   /// the board's day headers. Today's duty in the status bar is the
-  /// header's module ([kioskHeader], 0081); the card with the duty and the
+  /// header's module ([kioskHeader], 0082); the card with the duty and the
   /// plan is the panels' module `duty` ([kioskPanels]).
   final bool kioskDutyBoard;
 
@@ -899,7 +996,7 @@ class ScheduleSettings {
   /// which panel — with its share of the height, in its order.
   final KioskPanels kioskPanels;
 
-  /// The header's modules (0081, `kiosk_header`): which of the weather,
+  /// The header's modules (0082, `kiosk_header`): which of the weather,
   /// the name day, the duty and the notices stand left of the centre,
   /// which right and which are off, in their order. It replaced the four
   /// switches `kiosk_weather`, `kiosk_nameday`, `kiosk_duty_header` and
@@ -907,9 +1004,15 @@ class ScheduleSettings {
   /// [kioskPanels]' business.
   final KioskHeader kioskHeader;
 
-  /// The weather module's title (0081), typed by the admin („Dnes v
+  /// The weather module's title (0082), typed by the admin („Dnes v
   /// Brně“); null shows [kioskWeatherDefaultTitle].
   final String? kioskWeatherTitle;
+
+  /// What a fresh notice gets on the kiosk — the „NOVÉ“ label, twice the
+  /// turn, both or nothing (0081, `kiosk_notices_fresh_mode`) — and for how
+  /// many days, 1–14, a notice is fresh (`kiosk_notices_fresh_days`).
+  final KioskNoticesFresh kioskNoticesFresh;
+  final int kioskNoticesFreshDays;
 
   /// How the kiosk's name picker starts (0076).
   final KioskPickerMode kioskPickerMode;
@@ -1055,6 +1158,10 @@ class ScheduleSettings {
           final String t when t.trim().isNotEmpty => t.trim(),
           _ => null,
         },
+        kioskNoticesFresh: KioskNoticesFresh.parse(
+          json['kiosk_notices_fresh_mode'] as String?,
+        ),
+        kioskNoticesFreshDays: json['kiosk_notices_fresh_days'] as int? ?? 3,
         kioskPickerMode: KioskPickerMode.parse(
           json['kiosk_picker_mode'] as String?,
         ),
@@ -1287,6 +1394,33 @@ class PrioritySlot {
       : type.name;
 
   bool coversLane(int lane) => type.coversLane(lane);
+
+  /// This slot with other team names — the names as the app shows them
+  /// ([NameDisplay.shown]), for a widget that only draws them.
+  PrioritySlot withTeams({required String home, required String away}) =>
+      PrioritySlot(
+        id: id,
+        date: date,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        type: type,
+        homeTeam: home,
+        awayTeam: away,
+        prepMinutes: prepMinutes,
+        description: description,
+        parentId: parentId,
+        isAway: isAway,
+        importKey: importKey,
+        handEdited: handEdited,
+        videoUrl: videoUrl,
+        competition: competition,
+        round: round,
+        siteSlug: siteSlug,
+        siteMatchId: siteMatchId,
+        venue: venue,
+        venueSlug: venueSlug,
+        timeKnown: timeKnown,
+      );
 
   /// [type] is resolved by the caller (the provider joins the types stream);
   /// an unknown type_id falls back to a built-in-match placeholder so a
@@ -2476,5 +2610,7 @@ class CalendarLink {
 /// "Žádný tým" / the teams joined — the profile card's one-line summary.
 /// Not "Žádné": the reminders line right above says that, and the two rows
 /// must read apart at a glance.
-String matchTeamsSummary(List<String> teams) =>
-    teams.isEmpty ? 'Žádný tým' : teams.join(' · ');
+String matchTeamsSummary(List<String> teams, {NameDisplay? names}) =>
+    teams.isEmpty
+        ? 'Žádný tým'
+        : [for (final t in teams) names?.team(t) ?? t].join(' · ');

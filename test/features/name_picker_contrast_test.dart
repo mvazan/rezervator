@@ -123,7 +123,7 @@ void main() {
         );
       });
 
-      test('the header modules\' titles (0081) read as normal text on the '
+      test('the header modules\' titles (0082) read as normal text on the '
           'status bar', () {
         // 13px semi-bold is normal text to WCAG, so 4.5:1 on the bar's
         // surfaceContainerHighest; the colour is the title style's own, so

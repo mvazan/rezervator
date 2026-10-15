@@ -102,10 +102,11 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     );
   }
 
-  Widget _row(ThemeData theme, Contact contact) {
+  Widget _row(ThemeData theme, Contact contact, NameDisplay names) {
     final subtitle = [
       if (contact.nick.isNotEmpty) '„${contact.nick}“',
-      ?contact.clubName,
+      // The club's nickname (0080) for its name.
+      if (contact.clubName case final club?) names.team(club),
       ?contact.regnum,
     ].join(' · ');
     final email = contact.email;
@@ -159,6 +160,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // A club's nickname (0080) for its name in the rows.
+    final names = ref.watch(nameDisplayProvider);
     final theme = Theme.of(context);
     final contactsAsync = ref.watch(contactsProvider);
 
@@ -210,7 +213,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 24)),
                     itemCount: shown.length,
-                    itemBuilder: (context, i) => _row(theme, shown[i]),
+                    itemBuilder: (context, i) => _row(theme, shown[i], names),
                   ),
       );
     }

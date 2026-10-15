@@ -41,7 +41,7 @@ final kioskDutyPlanProvider =
       );
     });
 
-/// The header's duty module (0081): „Dnes má službu“ over „Jan Novák“,
+/// The header's duty module (0082): „Dnes má službu“ over „Jan Novák“,
 /// „Dnes mají službu“ for two or more. One line of at most a fifth of the
 /// screen — a long list of names is cut, the centre and the notices keep
 /// their room. A tap opens the plan ([onTap]).

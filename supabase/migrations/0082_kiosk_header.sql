@@ -1,4 +1,4 @@
--- 0081 — the kiosk's header modules (Správa → Kiosk → Záhlaví): every
+-- 0082 — the kiosk's header modules (Správa → Kiosk → Záhlaví): every
 -- module of the status bar but the clock and today's matches is off, left
 -- (after the clock) or right (before „Rezervace tréninku“), in an order.
 -- One jsonb column holds it:
@@ -56,7 +56,7 @@ $$;
 revoke all on function kiosk_header_valid(jsonb) from public, anon;
 grant execute on function kiosk_header_valid(jsonb) to authenticated, service_role;
 comment on function kiosk_header_valid(jsonb) is
-  'Whether a value is a kiosk header layout (0081), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
+  'Whether a value is a kiosk header layout (0082), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
 
 -- A new alley: the notices on the right, the rest off — what the old
 -- switches' defaults convert to.
@@ -73,9 +73,9 @@ alter table schedule_settings
     check (kiosk_weather_title is null
            or char_length(btrim(kiosk_weather_title)) between 1 and 40);
 comment on column schedule_settings.kiosk_header is
-  'The kiosk''s header modules (0081): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
+  'The kiosk''s header modules (0082): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
 comment on column schedule_settings.kiosk_weather_title is
-  'The weather module''s title on the kiosk (0081), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
+  'The weather module''s title on the kiosk (0082), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
 
 -- The old switches, converted: one on goes left — the weather, the name
 -- day and the duty stood beside or under the clock — and the notices

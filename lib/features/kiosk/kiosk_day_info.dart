@@ -1,5 +1,5 @@
 /// The kiosk header's weather and name-day modules (0067, laid out by
-/// 0081): today's weather at the admin's place under the admin's title,
+/// 0082): today's weather at the admin's place under the admin's title,
 /// and whose name day it is — each where the admin put it (Správa → Kiosk
 /// → Záhlaví). The status bar leaves a module out while it has nothing to
 /// say.

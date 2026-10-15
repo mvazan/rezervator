@@ -925,7 +925,8 @@ begin
   update reservations r
   set cancelled_at = now(), cancelled_via = 'admin',
       cancel_note = case when v_type.is_match
-                         then 'zápas: ' || p_slot.away_team
+                         then 'zápas: ' || team_shown(p_slot.tenant_id,
+                                                      p_slot.away_team)
                          else v_type.name end,
       notify_player = true,
       notify_message = null
@@ -1222,6 +1223,57 @@ $$;
 
 
 ALTER FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."clubs_enqueue_calendar"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant uuid;
+  v_prefixes text[];
+begin
+  if tg_op = 'UPDATE' then
+    if (old.nickname is null and new.nickname is null)
+       or (old.nickname, old.name, old.site_name)
+          is not distinct from (new.nickname, new.name, new.site_name) then
+      return null;
+    end if;
+    v_tenant := new.tenant_id;
+    v_prefixes := array[old.name, old.site_name, new.name, new.site_name];
+  else
+    if old.nickname is null then
+      return null;
+    end if;
+    v_tenant := old.tenant_id;
+    v_prefixes := array[old.name, old.site_name];
+  end if;
+  perform enqueue_match_calendar_sync(f.user_id, s.id)
+     from priority_slots s
+     join priority_slot_types y on y.id = s.type_id and y.is_match
+     cross join lateral (
+       select u from match_calendar_followers(s.tenant_id, s.home_team,
+                                              s.away_team) u
+       union
+       select e.user_id from match_exceptions e where e.match_id = s.id
+     ) f(user_id)
+    where s.tenant_id = v_tenant
+      and s.parent_id is null
+      and s.date >= (now() at time zone 'Europe/Prague')::date
+      and exists (
+        select 1
+          from unnest(v_prefixes) x(prefix)
+          cross join unnest(array[s.home_team, s.away_team]) t(team)
+         where btrim(x.prefix) <> ''
+           and (t.team = btrim(x.prefix)
+                or left(t.team, char_length(btrim(x.prefix)) + 1)
+                   = btrim(x.prefix) || ' '));
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."clubs_enqueue_calendar"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") RETURNS "uuid"
@@ -2551,7 +2603,7 @@ $$;
 ALTER FUNCTION "public"."kiosk_header_valid"("p" "jsonb") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."kiosk_header_valid"("p" "jsonb") IS 'Whether a value is a kiosk header layout (0081), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
+COMMENT ON FUNCTION "public"."kiosk_header_valid"("p" "jsonb") IS 'Whether a value is a kiosk header layout (0082), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
 
 
 
@@ -3071,7 +3123,12 @@ begin
     raise exception 'not_allowed';
   end if;
   update messages
-     set visible_from = v_from, notify = coalesce(p_notify, notify)
+     set visible_from = case
+           when v_from is not null then v_from
+           when visible_from > now() then now()
+           else visible_from
+         end,
+         notify = coalesce(p_notify, notify)
    where id = p_id and tenant_id = current_tenant_id() and kind = 'notice'
   returning notify into v_notify;
   if not found then
@@ -3290,7 +3347,9 @@ CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS
     SET "search_path" TO 'public'
     AS $$
   select s.id, s.date, s.starts_at, s.ends_at,
-         s.home_team, s.away_team, s.is_away, s.description, t.name,
+         team_shown(s.tenant_id, s.home_team),
+         team_shown(s.tenant_id, s.away_team),
+         s.is_away, s.description, t.name,
          coalesce(e.calendar, c.calendar), tc.color_id
     from priority_slots s
     join priority_slot_types y on y.id = s.type_id and y.is_match
@@ -3376,7 +3435,9 @@ CREATE OR REPLACE FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") RETUR
     SET "search_path" TO 'public'
     AS $$
   select s.id, s.date, s.starts_at, s.ends_at,
-         s.home_team, s.away_team, s.is_away, s.description
+         team_shown(s.tenant_id, s.home_team),
+         team_shown(s.tenant_id, s.away_team),
+         s.is_away, s.description
     from priority_slots s
     join priority_slot_types y on y.id = s.type_id and y.is_match
     join profiles p on p.id = p_user and p.tenant_id = s.tenant_id
@@ -3915,9 +3976,9 @@ CREATE OR REPLACE FUNCTION "public"."registration_clubs"("p_tenant_id" "uuid") R
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
-  select c.id, c.name from clubs c
+  select c.id, coalesce(btrim(c.nickname), c.name) from clubs c
   where auth.uid() is not null and c.tenant_id = p_tenant_id
-  order by c.name;
+  order by 2;
 $$;
 
 
@@ -4955,6 +5016,27 @@ $$;
 ALTER FUNCTION "public"."sync_uklid_for_match"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."team_shown"("p_tenant" "uuid", "p_team" "text") RETURNS "text"
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public'
+    AS $$
+  select coalesce((
+    select btrim(c.nickname) || substr(p_team, char_length(x.prefix) + 1)
+      from clubs c
+      cross join lateral (values (btrim(c.site_name)), (btrim(c.name))) x(prefix)
+     where c.tenant_id = p_tenant
+       and c.nickname is not null
+       and x.prefix <> ''
+       and (p_team = x.prefix
+            or left(p_team, char_length(x.prefix) + 1) = x.prefix || ' ')
+     order by char_length(x.prefix) desc, c.id
+     limit 1), p_team);
+$$;
+
+
+ALTER FUNCTION "public"."team_shown"("p_tenant" "uuid", "p_team" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."time_blocks_enqueue_calendar"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -5058,7 +5140,9 @@ CREATE TABLE IF NOT EXISTS "public"."clubs" (
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
     "site_slug" "text",
     "site_name" "text",
-    CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
+    "nickname" "text",
+    CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431)))),
+    CONSTRAINT "clubs_nickname_check" CHECK ((("nickname" IS NULL) OR (("char_length"("btrim"("nickname")) >= 1) AND ("char_length"("btrim"("nickname")) <= 30))))
 );
 
 
@@ -5074,6 +5158,10 @@ COMMENT ON COLUMN "public"."clubs"."site_slug" IS 'The venue club on vysledky.ku
 
 
 COMMENT ON COLUMN "public"."clubs"."site_name" IS 'The linked club''s name on vysledky.kuzelky.cz, refreshed by every discovery.';
+
+
+
+COMMENT ON COLUMN "public"."clubs"."nickname" IS 'Short name the app shows instead of the club''s name and instead of the start of its teams'' names (site_name, else name). null = the full name. Display only.';
 
 
 
@@ -5852,6 +5940,8 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
     "kiosk_panels" "jsonb" DEFAULT '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false}, "modules": [{"id": "duty", "side": "off", "share": 30}, {"id": "notices", "side": "right", "share": 40}, {"id": "matches", "side": "right", "share": 60}, {"id": "guide", "side": "off", "share": 45}, {"id": "week", "side": "off", "share": 55}]}'::"jsonb" NOT NULL,
     "kiosk_zapis_nav" "text" DEFAULT 'bar'::"text" NOT NULL,
+    "kiosk_notices_fresh_mode" "text" DEFAULT 'highlight'::"text" NOT NULL,
+    "kiosk_notices_fresh_days" smallint DEFAULT 3 NOT NULL,
     "kiosk_header" "jsonb" DEFAULT '{"modules": [{"id": "weather", "side": "off"}, {"id": "nameday", "side": "off"}, {"id": "duty", "side": "off"}, {"id": "notices", "side": "right"}]}'::"jsonb" NOT NULL,
     "kiosk_weather_title" "text",
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
@@ -5867,6 +5957,8 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_notices_fresh_days_check" CHECK ((("kiosk_notices_fresh_days" >= 1) AND ("kiosk_notices_fresh_days" <= 14))),
+    CONSTRAINT "schedule_settings_kiosk_notices_fresh_mode_check" CHECK (("kiosk_notices_fresh_mode" = ANY (ARRAY['off'::"text", 'highlight'::"text", 'longer'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_panels_check" CHECK ("public"."kiosk_panels_valid"("kiosk_panels")),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
@@ -5902,11 +5994,19 @@ COMMENT ON COLUMN "public"."schedule_settings"."kiosk_panels" IS 'The kiosk''s t
 
 
 
-COMMENT ON COLUMN "public"."schedule_settings"."kiosk_header" IS 'The kiosk''s header modules (0081): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_fresh_mode" IS 'What a fresh notice gets on the kiosk (0081): off | highlight (the NOVÉ label) | longer (twice kiosk_notices_rotation_seconds) | both. Default highlight.';
 
 
 
-COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_title" IS 'The weather module''s title on the kiosk (0081), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_fresh_days" IS 'A notice is fresh on the kiosk while it has been up (visible_from, else created_at) for fewer days than this (0081), 1–14, default 3.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_header" IS 'The kiosk''s header modules (0082): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_weather_title" IS 'The weather module''s title on the kiosk (0082), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
 
 
 
@@ -6374,6 +6474,10 @@ CREATE INDEX "slot_watches_day_idx" ON "public"."slot_watches" USING "btree" ("t
 
 
 CREATE OR REPLACE TRIGGER "block_deactivated" AFTER UPDATE OF "active" ON "public"."time_blocks" FOR EACH ROW WHEN (("old"."active" AND (NOT "new"."active"))) EXECUTE FUNCTION "public"."cascade_schedule_change"();
+
+
+
+CREATE OR REPLACE TRIGGER "clubs_enqueue_calendar" AFTER DELETE OR UPDATE ON "public"."clubs" FOR EACH ROW EXECUTE FUNCTION "public"."clubs_enqueue_calendar"();
 
 
 
@@ -7219,6 +7323,11 @@ GRANT ALL ON FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid
 
 
 
+REVOKE ALL ON FUNCTION "public"."clubs_enqueue_calendar"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."clubs_enqueue_calendar"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") TO "service_role";
 
@@ -7802,6 +7911,11 @@ GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "service_role";
 REVOKE ALL ON FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."team_shown"("p_tenant" "uuid", "p_team" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."team_shown"("p_tenant" "uuid", "p_team" "text") TO "service_role";
 
 
 

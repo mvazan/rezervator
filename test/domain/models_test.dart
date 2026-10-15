@@ -343,19 +343,26 @@ void main() {
     test('the default panel layout is the column\'s default, value for value',
         () {
       // Every alley without a saved layout gets 0077's default; the app's
-      // fallback must be the same layout.
+      // fallback must be the same layout — the modules added since at its
+      // end, off, as the app reads that default.
       final sql = File(
         'supabase/migrations/0077_kiosk_panels.sql',
       ).readAsStringSync();
       final column = RegExp(
         r"kiosk_panels\s+jsonb[^;']*?default\s+'(\{[^']*\})'",
       ).firstMatch(sql)!.group(1)!;
-      final decoded = jsonDecode(column);
-      expect(decoded, KioskPanels.defaults.toJson());
+      final decoded = jsonDecode(column) as Map<String, Object?>;
+      final app = KioskPanels.defaults.toJson();
+      final ours = (decoded['modules']! as List).length;
+      final appModules = app['modules']! as List;
+      expect(decoded, {...app, 'modules': appModules.take(ours).toList()});
+      for (final later in appModules.skip(ours)) {
+        expect((later as Map)['side'], 'off', reason: '$later');
+      }
       expect(KioskPanels.fromJson(decoded), KioskPanels.defaults);
     });
 
-    test('fromJson reads the header\'s modules (0081); the default layout '
+    test('fromJson reads the header\'s modules (0082); the default layout '
         'when absent', () {
       const base = {
         'lane_count': 4,
@@ -384,7 +391,7 @@ void main() {
       expect(ScheduleSettings.defaults.kioskHeader, KioskHeader.defaults);
     });
 
-    test('fromJson reads the weather\'s title (0081) trimmed; blank or '
+    test('fromJson reads the weather\'s title (0082) trimmed; blank or '
         'absent is none', () {
       const base = {
         'lane_count': 4,
@@ -401,9 +408,9 @@ void main() {
       expect(ScheduleSettings.defaults.kioskWeatherTitle, isNull);
     });
 
-    test('a cached row from before 0081, with the dropped header switches '
+    test('a cached row from before 0082, with the dropped header switches '
         'still in it, reads as the default header', () {
-      // No conversion in the app: the old switches are 0081's business.
+      // No conversion in the app: the old switches are 0082's business.
       final s = ScheduleSettings.fromJson({
         'lane_count': 4,
         'training_weekdays': [1, 2, 4],
@@ -416,6 +423,63 @@ void main() {
       });
       expect(s.kioskHeader, KioskHeader.defaults);
       expect(s.kioskWeatherTitle, isNull);
+    });
+
+    test('fromJson reads what a fresh notice gets and for how many days '
+        '(0081); the label for three days when absent or unknown', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      for (final (name, fresh, highlights, lingers) in [
+        ('off', KioskNoticesFresh.off, false, false),
+        ('highlight', KioskNoticesFresh.highlight, true, false),
+        ('longer', KioskNoticesFresh.longer, false, true),
+        ('both', KioskNoticesFresh.both, true, true),
+      ]) {
+        final read = ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_notices_fresh_mode': name,
+          'kiosk_notices_fresh_days': 7,
+        });
+        expect(read.kioskNoticesFresh, fresh);
+        // The name is the column's value.
+        expect(fresh.name, name);
+        expect(fresh.highlights, highlights, reason: name);
+        expect(fresh.lingers, lingers, reason: name);
+        expect(read.kioskNoticesFreshDays, 7);
+      }
+      final old = ScheduleSettings.fromJson(base);
+      expect(old.kioskNoticesFresh, KioskNoticesFresh.highlight);
+      expect(old.kioskNoticesFreshDays, 3);
+      expect(
+        ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_notices_fresh_mode': 'blink',
+        }).kioskNoticesFresh,
+        KioskNoticesFresh.highlight,
+      );
+      expect(KioskNoticesFresh.parse(null), KioskNoticesFresh.highlight);
+      expect(ScheduleSettings.defaults.kioskNoticesFresh,
+          KioskNoticesFresh.highlight);
+      expect(ScheduleSettings.defaults.kioskNoticesFreshDays, 3);
+    });
+
+    test('the fresh notices\' defaults are the columns\' defaults', () {
+      // A new alley gets 0081's defaults; the app's fallbacks must match.
+      final sql = File(
+        'supabase/migrations/0081_kiosk_notices_fresh.sql',
+      ).readAsStringSync();
+      final mode = RegExp(
+        r"kiosk_notices_fresh_mode\s+text\s+not\s+null\s+default\s+'(\w+)'",
+      ).firstMatch(sql)!.group(1);
+      final days = RegExp(
+        r'kiosk_notices_fresh_days\s+smallint\s+not\s+null\s+default\s+(\d+)',
+      ).firstMatch(sql)!.group(1)!;
+      expect(mode, ScheduleSettings.defaults.kioskNoticesFresh.name);
+      expect(int.parse(days), ScheduleSettings.defaults.kioskNoticesFreshDays);
     });
   });
 
@@ -1152,6 +1216,73 @@ void main() {
         RegnumCandidate.fromJson(const {'id': '7', 'club': 'TJ'}).detail,
         'věk neuveden',
       );
+    });
+  });
+
+  group('club nicknames (0080)', () {
+    test('Club reads its nickname; blank = none; shown falls back to the name',
+        () {
+      final nick = Club.fromJson(
+        {'id': 'c', 'name': 'TJ Sokol Brno IV', 'nickname': ' Sokol IV '},
+      );
+      expect(nick.nickname, 'Sokol IV');
+      expect(nick.shown, 'Sokol IV');
+      final blank = Club.fromJson({'id': 'c', 'name': 'KK Brno', 'nickname': ' '});
+      expect(blank.nickname, isNull);
+      expect(blank.shown, 'KK Brno');
+      expect(clubNameOf('c', [nick]), 'Sokol IV');
+    });
+
+    final sokol = Club(
+      id: 's',
+      name: 'TJ Sokol Brno IV',
+      siteName: 'TJ Sokol Brno IV',
+      nickname: 'Sokol IV',
+    );
+    final veverky = Club(
+      id: 'v',
+      name: 'SKK Veverky',
+      siteName: 'SKK Veverky Brno',
+      nickname: 'Veverky',
+    );
+    const plain = Club(id: 'p', name: 'KS Devítka Brno', siteName: 'KS Devítka Brno');
+    final names = NameDisplay([sokol, veverky, plain]);
+
+    test('a team of a club with a nickname: the nickname for the club', () {
+      expect(names.team('TJ Sokol Brno IV'), 'Sokol IV');
+      expect(names.team('TJ Sokol Brno IV B'), 'Sokol IV B');
+      // The site's name, longer than the club's own, wins.
+      expect(names.team('SKK Veverky Brno C'), 'Veverky C');
+      // The club's own name works too, word by word only.
+      expect(names.team('SKK Veverky ženy'), 'Veverky ženy');
+      expect(names.team('SKK Veverkyová'), 'SKK Veverkyová');
+    });
+
+    test('anything else as it is: no nickname, another alley\'s team', () {
+      expect(names.team('KS Devítka Brno A'), 'KS Devítka Brno A');
+      expect(names.team('Slavia Praha C'), 'Slavia Praha C');
+      expect(NameDisplay.none.team('TJ Sokol Brno IV B'), 'TJ Sokol Brno IV B');
+    });
+
+    test('a match title with both teams shown; another blockage as it is', () {
+      final match = PrioritySlot(
+        id: 'm',
+        date: Day(2026, 10, 15),
+        startsAt: const HourMinute(17, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'TJ Sokol Brno IV B',
+        awayTeam: 'SKK Veverky Brno A',
+      );
+      expect(names.title(match), 'Sokol IV B – Veverky A');
+      final blockage = PrioritySlot(
+        id: 'b',
+        date: Day(2026, 10, 15),
+        startsAt: const HourMinute(9, 0),
+        endsAt: const HourMinute(12, 0),
+        type: const PrioritySlotType(id: 't', name: 'TJ Sokol Brno IV brigáda'),
+      );
+      expect(names.title(blockage), 'TJ Sokol Brno IV brigáda');
     });
   });
 }

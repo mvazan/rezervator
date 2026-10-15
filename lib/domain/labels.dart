@@ -8,8 +8,9 @@ import 'schedule.dart';
 
 /// '🏆 {title}' for matches, '⛔ {title}' for other blockages — the in-grid
 /// and band wording (day headers keep headerEventLabel's 🏠/none/⛔).
-String slotEventLabel(PrioritySlot m) =>
-    '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}';
+/// [names]: the teams as the app shows them (0080), none = as stored.
+String slotEventLabel(PrioritySlot m, {NameDisplay? names}) =>
+    '${m.type.isMatch ? '🏆' : '⛔'} ${(names ?? NameDisplay.none).title(m)}';
 
 /// One line of a stacked band: its [text], and whether it may wrap onto
 /// more lines (a team's name, the cup with the time in a narrow column) or
@@ -26,19 +27,21 @@ const BandLine bandGap = (text: '', wraps: false);
 /// take several lines of its own. Null for anything but a match with both
 /// teams (a blockage, a match typed with one name): those keep
 /// [slotEventLabel].
-List<BandLine>? matchBandLines(PrioritySlot m) =>
+List<BandLine>? matchBandLines(PrioritySlot m, {NameDisplay? names}) =>
     m.type.isMatch && m.homeTeam.isNotEmpty && m.awayTeam.isNotEmpty
-    ? [
-        (
-          text: '🏆 ${m.startsAt.display()}–${m.endsAt.display()}',
-          wraps: true,
-        ),
-        bandGap,
-        (text: m.homeTeam, wraps: true),
-        (text: 'x', wraps: false),
-        (text: m.awayTeam, wraps: true),
-      ]
+    ? _matchLines(m, names ?? NameDisplay.none)
     : null;
+
+List<BandLine> _matchLines(PrioritySlot m, NameDisplay names) => [
+  (
+    text: '🏆 ${m.startsAt.display()}–${m.endsAt.display()}',
+    wraps: true,
+  ),
+  bandGap,
+  (text: names.team(m.homeTeam), wraps: true),
+  (text: 'x', wraps: false),
+  (text: names.team(m.awayTeam), wraps: true),
+];
 
 /// '🔒 {renterName}', plus ' (výjimka)' for an occurrence an exception row
 /// reshaped (fewer lanes / other times than the series).
@@ -85,9 +88,9 @@ String rentalMoreDatesLabel(int n) {
 }
 
 /// Band text: the label above + ' · od–do' using HourMinute.display().
-String eventBandLabel(OffBlockEvent e) {
+String eventBandLabel(OffBlockEvent e, {NameDisplay? names}) {
   final label = switch (e) {
-    OffBlockPriority(:final slot) => slotEventLabel(slot),
+    OffBlockPriority(:final slot) => slotEventLabel(slot, names: names),
     OffBlockRental(:final rental) => rentalLabel(rental),
   };
   return '$label · ${e.start.display()}–${e.end.display()}';

@@ -23,6 +23,7 @@ import '../../domain/kiosk_panel.dart'
 import '../../domain/models.dart';
 import '../../domain/youtube.dart' show youtubeVideoId;
 import 'stream/kiosk_stream_view.dart';
+import '../../core/widgets/shown_names.dart';
 
 /// Builds the player for [videoId]; [interactive] false = the player must
 /// not take touches (a gesture on the window, a route above the kiosk);
@@ -559,7 +560,10 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
       final shown = _shown;
       // The provider lets only matches with a YouTube id through.
       final videoId = youtubeVideoId(shown.videoUrl ?? '')!;
-      final title = '${shown.homeTeam} – ${shown.awayTeam}';
+      // The teams as the app shows them: a club's nickname (0080).
+      final names = shownNamesNow(context);
+      final title =
+          '${names.team(shown.homeTeam)} – ${names.team(shown.awayTeam)}';
       final frame = _maximized ? Offset.zero & _area : rect;
       final interactive = widget.interactive && !_gesture && !widget.hidden;
       final playerOf = widget.content(

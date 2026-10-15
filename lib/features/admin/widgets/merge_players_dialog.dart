@@ -239,7 +239,7 @@ class _MergePlayersDialogState extends State<MergePlayersDialog> {
             items: [
               const DropdownMenuItem(value: null, child: Text('Bez oddílu')),
               for (final club in widget.clubs)
-                DropdownMenuItem(value: club.id, child: Text(club.name)),
+                DropdownMenuItem(value: club.id, child: Text(club.shown)),
             ],
             onChanged: (id) => setState(() => _clubId = id),
           ),

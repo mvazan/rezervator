@@ -165,9 +165,9 @@ List<PrioritySlot> headerEvents(DaySchedule day) => [
 /// One header line for a priority slot: home matches get the house icon,
 /// away matches no icon at all (that IS the away marker), blockages keep ⛔ —
 /// always with the od–do times.
-String headerEventLabel(PrioritySlot m) {
+String headerEventLabel(PrioritySlot m, {NameDisplay? names}) {
   final prefix = !m.type.isMatch ? '⛔ ' : (m.isAway ? '' : '🏠 ');
-  return '$prefix${m.title} · '
+  return '$prefix${(names ?? NameDisplay.none).title(m)} · '
       '${m.startsAt.display()}–${m.endsAt.display()}';
 }
 

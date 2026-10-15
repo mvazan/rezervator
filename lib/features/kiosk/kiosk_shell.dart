@@ -32,6 +32,7 @@ import 'kiosk_connection.dart';
 import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
 import 'kiosk_duty.dart';
+import 'kiosk_feedback.dart';
 import 'kiosk_guide.dart';
 import 'kiosk_header_module.dart';
 import 'kiosk_headline.dart';
@@ -241,6 +242,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// panel.
   void _openGuide() => unawaited(showKioskGuide(context, wrap: _touchable));
 
+  /// „Napište nám“'s QR code large — a tap on its card in a panel.
+  void _openFeedback() =>
+      unawaited(showKioskFeedback(context, wrap: _touchable));
+
   /// „Hráči týdne“ full screen (0078) — a tap on its card in a panel; a tap
   /// on a line there opens that match's Zápis over it.
   void _openWeek() => unawaited(
@@ -438,6 +443,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
           onOpenMatch: _openMatch,
           onOpenGuide: _openGuide,
           onOpenWeek: _openWeek,
+          onOpenFeedback: _openFeedback,
           onPlay: play,
           resetToken: _resets,
           showLive: !(holdsMatches && _liveHidden),
@@ -588,7 +594,7 @@ String _capitalized(String text) =>
     text.isEmpty ? text : text[0].toUpperCase() + text.substring(1);
 
 /// The header: the clock, the admin's modules left and right of the centre
-/// (0081, each a title over its value — [KioskHeaderModuleFrame]), today's
+/// (0082, each a title over its value — [KioskHeaderModuleFrame]), today's
 /// matches or the info line in the centre, „Rezervace tréninku“ last.
 /// Watches [nowProvider] itself, so a minute tick repaints this strip only
 /// — never the shell or the board beneath it.
@@ -755,7 +761,7 @@ class _StatusBar extends ConsumerWidget {
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
     // Each module's data, read only while the admin has it in the header
-    // (0081) and no warning hangs.
+    // (0082) and no warning hangs.
     bool on(KioskHeaderModule m) => warning == null && header.isOn(m);
     final notices = on(KioskHeaderModule.notices)
         ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
@@ -815,6 +821,11 @@ class _StatusBar extends ConsumerWidget {
                               seconds:
                                   settings?.kioskNoticesRotationSeconds ?? 12,
                             ),
+                            now: now,
+                            fresh:
+                                settings?.kioskNoticesFresh ??
+                                KioskNoticesFresh.highlight,
+                            freshDays: settings?.kioskNoticesFreshDays ?? 3,
                             onOpen: onOpenNotice,
                             alignment: Alignment.centerLeft,
                             padding: EdgeInsets.zero,
@@ -848,7 +859,10 @@ class _StatusBar extends ConsumerWidget {
               // One line each: on a narrow kiosk with large text a long
               // label is cut, never broken letter by letter down the bar.
               child: EmojiText(
-                headerEventLabel(matches[i]),
+                headerEventLabel(
+                  matches[i],
+                  names: ref.watch(nameDisplayProvider),
+                ),
                 style: infoStyle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

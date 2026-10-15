@@ -1,4 +1,4 @@
-/// The kiosk's header modules, the pure half (0081, `schedule_settings.
+/// The kiosk's header modules, the pure half (0082, `schedule_settings.
 /// kiosk_header`): which module stands left of the centre (after the
 /// clock), which right (before „Rezervace tréninku“), which is off, and
 /// their order. Správa → Kiosk → Záhlaví edits it, the status bar lays it
@@ -14,7 +14,7 @@ import 'kiosk_layout.dart' show PanelSide;
 /// — do not rename one.
 enum KioskHeaderModule { weather, nameday, duty, notices }
 
-/// The weather module's title while the admin has typed none (0081's
+/// The weather module's title while the admin has typed none (0082's
 /// `kiosk_weather_title` null).
 const kioskWeatherDefaultTitle = 'Počasí';
 
@@ -62,7 +62,7 @@ class KioskHeader {
   /// In order: a side lays its modules out left to right as listed here.
   final List<KioskHeaderPlacement> modules;
 
-  /// 0081's column default, letter for letter (a test compares the two):
+  /// 0082's column default, letter for letter (a test compares the two):
   /// the notices on the right, the rest off — what the old switches'
   /// defaults convert to.
   static const defaults = KioskHeader(
@@ -75,7 +75,7 @@ class KioskHeader {
   );
 
   /// Reads `kiosk_header`. Without a `modules` list (a row from before
-  /// 0081) it is the defaults. Entries that are no object or have no id,
+  /// 0082) it is the defaults. Entries that are no object or have no id,
   /// and an id's second entry, are skipped; a bad side is off; an id this
   /// build does not know is kept as it was read; a module the list lacks
   /// is added at its end, off.
@@ -181,7 +181,7 @@ class KioskHeader {
   String toString() => 'KioskHeader($modules)';
 }
 
-/// 0081's conversion of the four old switches, in Dart (tested against the
+/// 0082's conversion of the four old switches, in Dart (tested against the
 /// same cases as the tenancy suite): an old switch on puts the weather,
 /// the name day and the duty left — they stood beside or under the clock —
 /// and the notices right, where their line was.

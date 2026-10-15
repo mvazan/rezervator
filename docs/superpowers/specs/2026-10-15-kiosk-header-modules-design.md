@@ -2,7 +2,7 @@
 
 Requested by the user on 2026-10-15. The app speaks Czech; the user writes
 Slovak. Branch `kiosk-header-modules` from `main` (9f25a31, migrations up to
-0079); migration `0081_kiosk_header.sql`. Two unmerged local branches already
+0079); migration `0082_kiosk_header.sql`. Two unmerged local branches already
 hold an 0080 (`club-nickname`, `notices-newest`); `notices-newest` also changes
 the header's notices (`kiosk_shell.dart` `_StatusBar`, `kiosk_headline.dart`) —
 whichever merges second resolves the conflict and, if needed, renumbers.
@@ -40,7 +40,7 @@ at another height. The admin switches are spread over three sections
   they are.
 - **Admin:** one section „Záhlaví“ with a table like „Panely“.
 
-## Data (0081)
+## Data (0082)
 
 `schedule_settings.kiosk_header jsonb not null`, default
 
@@ -72,7 +72,7 @@ notices on). The modules' order in the list is their order on each side.
   `kiosk_notices_header` (`drop column if exists`). `kiosk_todays_matches`
   stays a boolean; the weather place columns stay.
 - `public_week` is an allow-list since 0066: nothing to change.
-- Comments on the function and both columns cite (0081). Re-runnable: the
+- Comments on the function and both columns cite (0082). Re-runnable: the
   tenancy suite re-runs 0067, 0071, 0073 and 0077, which bring the old columns
   back.
 - No backward compatibility, as with 0077: an older kiosk falls back to its
@@ -98,7 +98,7 @@ notices on). The modules' order in the list is their order on each side.
 - `ScheduleSettings`: `kioskWeather`, `kioskNameday`, `kioskDutyHeader` and
   `kioskNoticesHeader` go; `kioskHeader` (`KioskHeader.fromJson(
   json['kiosk_header'])`) and `kioskWeatherTitle` (trimmed, blank → null)
-  come. A cached row from before 0081 reads as the defaults.
+  come. A cached row from before 0082 reads as the defaults.
 
 `lib/domain/namedays.dart`: `nameDayLine` gives way to a title/value pair
 (`({String title, String text})?`) — „Dnes má svátek“ / „Dnes mají svátek“ /
@@ -200,7 +200,7 @@ bullet (the store summary has about 50 characters left).
 
 - **Unit:** `kiosk_header_test.dart` (ids, defaults, fromJson, edits, legacy
   conversion, default equals the migration's column default), `models_test`
-  (fields, cached pre-0081 row), `namedays_test` (title/value pairs).
+  (fields, cached pre-0082 row), `namedays_test` (title/value pairs).
 - **Widget:** header modules (titles and values on one line each, order by
   side, hidden modules, warning, weather source tap, duty tap → plan, narrow
   kiosk with large text, home/away lines); admin section (table, PATCHes,
@@ -208,9 +208,9 @@ bullet (the store summary has about 50 characters left).
   Služby without „V záhlaví“).
 - **Contrast:** module titles (`onSurfaceVariant` on `surfaceContainerHighest`)
   in the kiosk's light and dark themes, WCAG AA.
-- **SQL tenancy suite:** an 0081 block (conversion per case, re-run is a no-op,
+- **SQL tenancy suite:** an 0082 block (conversion per case, re-run is a no-op,
   old columns gone, checks raise, validator false not error, grants), `\ir
-  0081` after the blocks that re-run older migrations.
+  0082` after the blocks that re-run older migrations.
 - **Schema snapshot** regenerated on a throwaway stack.
 - **Browser** at 1920×1080 against a local stack: both themes, every module
   on, a warning, matches home + away.

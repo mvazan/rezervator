@@ -10805,10 +10805,10 @@ begin
 end $$;
 
 -- 0067 and 0073 (above) brought back three of the header's old switches
--- and 0077 the fourth: 0081 converts them into kiosk_header and drops them
--- again, so everything below sees the schema as it is (0081's own checks
+-- and 0077 the fourth: 0082 converts them into kiosk_header and drops them
+-- again, so everything below sees the schema as it is (0082's own checks
 -- are at the end of the file).
-\ir ../migrations/0081_kiosk_header.sql
+\ir ../migrations/0082_kiosk_header.sql
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
@@ -12102,7 +12102,8 @@ declare
 begin
   perform set_config('request.jwt.claims',
     '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
-  -- A time gone by is now: no schedule, no job.
+  -- A time gone by is now: no schedule, no job (when it went up — 0080 —
+  -- is pinned in 0080's block).
   perform message_set_visible_from(v_notice, now() - interval '1 hour');
 end $$;
 reset role;
@@ -12110,7 +12111,7 @@ do $$
 declare
   v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
 begin
-  if (select visible_from from messages where id = v_notice) is not null
+  if (select visible_from from messages where id = v_notice) > now()
      or exists (select 1 from notification_jobs
                  where kind = 'notice_visible'
                    and payload->>'message_id' = v_notice::text) then
@@ -12611,10 +12612,10 @@ begin
 end $$;
 
 -- 0073 and 0077 (above) brought back the duty's and the notices' header
--- switches: 0081 drops them again (the weather's and the name day's are
+-- switches: 0082 drops them again (the weather's and the name day's are
 -- gone, so it converts nothing), so everything below sees the schema as it
--- is (0081's own checks are at the end of the file).
-\ir ../migrations/0081_kiosk_header.sql
+-- is (0082's own checks are at the end of the file).
+\ir ../migrations/0082_kiosk_header.sql
 
 -- 0078: „Hráči týdne“. kiosk_week_players gives an alley's approved members
 -- and its kiosk the lines of the alley's OWN side in the finished federation
@@ -12902,27 +12903,341 @@ begin
   raise notice 'OK: the Zápis pages with the bar for a new alley, one of three ways, off the public overview (0079)';
 end $$;
 
--- 0081: the kiosk's header modules. Alleys with the four old switches in
+-- 0080: a club's nickname — 1–30 characters, not blank, or none. Run
+-- again first: the migration is re-runnable.
+\ir ../migrations/0080_club_nickname.sql
+do $$
+declare
+  v_club uuid;
+begin
+  select id into v_club from clubs
+   where tenant_id = '00000000-0000-0000-0000-00000000000a' limit 1;
+  if v_club is null then
+    insert into clubs (tenant_id, name)
+    values ('00000000-0000-0000-0000-00000000000a', 'Oddíl (0080)')
+    returning id into v_club;
+  end if;
+  update clubs set nickname = 'Sokol IV' where id = v_club;
+  update clubs set nickname = null where id = v_club;
+  begin
+    update clubs set nickname = '   ' where id = v_club;
+    raise exception 'FAIL: a blank club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  begin
+    update clubs set nickname = repeat('x', 31) where id = v_club;
+    raise exception 'FAIL: a 31-character club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: a club nickname is 1–30 characters or none (0080)';
+end $$;
+
+-- 0080: what the server writes for people reads with the nickname —
+-- the longest matching club name wins, a name merely starting with it does
+-- not count, another tenant's clubs never apply — and a new nickname puts
+-- the club's future matches back in the calendar queue.
+do $$
+declare
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_other constant uuid := '00000000-0000-0000-0000-00000000000b';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_long uuid;
+  v_short uuid;
+  v_type uuid;
+  v_match uuid;
+  v_row record;
+begin
+  insert into clubs (tenant_id, name, site_name, nickname)
+  values (v_tenant, 'Sokol IV (0080)', 'TJ Sokol Brno IV', 'Sokol IV')
+  returning id into v_long;
+  insert into clubs (tenant_id, name, nickname)
+  values (v_tenant, 'TJ Sokol Brno', 'Sokol')
+  returning id into v_short;
+  if team_shown(v_tenant, 'TJ Sokol Brno IV B') <> 'Sokol IV B'
+     or team_shown(v_tenant, 'TJ Sokol Brno IV') <> 'Sokol IV'
+     or team_shown(v_tenant, 'Sokol IV (0080) A') <> 'Sokol IV A'
+     or team_shown(v_tenant, 'TJ Sokol Brno A') <> 'Sokol A'
+     or team_shown(v_tenant, 'TJ Sokol Brnox A') <> 'TJ Sokol Brnox A'
+     or team_shown(v_tenant, 'KK Blansko') <> 'KK Blansko'
+     or team_shown(v_other, 'TJ Sokol Brno IV B') <> 'TJ Sokol Brno IV B' then
+    raise exception 'FAIL: team_shown maps names wrong (0080)';
+  end if;
+
+  -- A followed future match: the calendar and the reminder see the
+  -- nickname; the follow itself still matches the stored name.
+  insert into google_calendar_links (user_id, status, google_email)
+  values (v_uid, 'linked', 'a@gmail.com')
+  on conflict (user_id) do update set status = 'linked';
+  delete from calendar_teams where user_id = v_uid;
+  insert into calendar_teams (user_id, team) values (v_uid, 'TJ Sokol Brno IV B');
+  update profiles set followed_teams = array['TJ Sokol Brno IV B']
+   where id = v_uid;
+  select id into v_type from priority_slot_types
+   where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     is_away, created_by)
+  values
+    (v_tenant, (now() at time zone 'Europe/Prague')::date + 300, '06:00',
+     '07:00', v_type, 'KK Blansko', 'TJ Sokol Brno IV B', true, v_uid)
+  returning id into v_match;
+  select * into v_row from my_future_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.home_team <> 'KK Blansko'
+     or v_row.away_team <> 'Sokol IV B' then
+    raise exception 'FAIL: my_future_matches does not show the nickname: %',
+      to_jsonb(v_row);
+  end if;
+  select * into v_row from my_upcoming_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.away_team <> 'Sokol IV B' then
+    raise exception 'FAIL: my_upcoming_matches does not show the nickname: %',
+      to_jsonb(v_row);
+  end if;
+
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  update clubs set color = 3 where id = v_long;
+  if exists (select 1 from notification_jobs
+              where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a club change that keeps its names queued a calendar sync (0080)';
+  end if;
+  update clubs set nickname = 'Sokolíci' where id = v_long;
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a new nickname did not queue the calendar sync (0080)';
+  end if;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  delete from clubs where id = v_long;
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: deleting a nicknamed club did not queue the calendar sync (0080)';
+  end if;
+  raise notice 'OK: reminders and calendar read team names with the nickname (0080)';
+end $$;
+
+-- Not callable from the app: it is a helper of the server's own functions.
+do $$
+begin
+  if has_function_privilege('authenticated', 'public.team_shown(uuid, text)', 'execute')
+     or has_function_privilege('anon', 'public.team_shown(uuid, text)', 'execute') then
+    raise exception 'FAIL: team_shown is callable by app roles (0080)';
+  end if;
+  raise notice 'OK: team_shown stays server-side (0080)';
+end $$;
+
+-- 0081: a fresh notice on the kiosk gets the „NOVÉ“ label for three days
+-- unless the admin says otherwise — on every alley, a new one too; only the
+-- four modes and 1–14 days go in, the admin saves both through the API's
+-- role, and both stay off the public overview. 0081 runs twice (it
+-- re-runs).
+\ir ../migrations/0081_kiosk_notices_fresh.sql
+\ir ../migrations/0081_kiosk_notices_fresh.sql
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000000081', 'Kuželna P (0081)');
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_p constant uuid := '00000000-0000-0000-0000-000000000081';
+begin
+  if (select count(*) from schedule_settings
+       where tenant_id in (v_a, v_p)
+         and kiosk_notices_fresh_mode = 'highlight'
+         and kiosk_notices_fresh_days = 3) <> 2 then
+    raise exception 'FAIL: an alley does not start with the label for three days (0081)';
+  end if;
+  update schedule_settings set kiosk_notices_fresh_mode = 'off' where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_mode = 'longer' where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_mode = 'both' where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_days = 1 where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_days = 14 where tenant_id = v_a;
+  begin
+    update schedule_settings set kiosk_notices_fresh_mode = 'blink' where tenant_id = v_a;
+    raise exception 'FAIL: an unknown fresh notice mode was accepted (0081)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_notices_fresh_mode = null where tenant_id = v_a;
+    raise exception 'FAIL: no fresh notice mode was accepted (0081)';
+  exception when not_null_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_notices_fresh_days = 0 where tenant_id = v_a;
+    raise exception 'FAIL: a notice fresh for 0 days was accepted (0081)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_notices_fresh_days = 15 where tenant_id = v_a;
+    raise exception 'FAIL: a notice fresh for 15 days was accepted (0081)';
+  exception when check_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ?| array[
+       'kiosk_notices_fresh_mode', 'kiosk_notices_fresh_days'] then
+    raise exception 'FAIL: the public overview hands out a 0081 setting';
+  end if;
+  update schedule_settings set kiosk_notices_fresh_mode = 'highlight',
+                               kiosk_notices_fresh_days = 3
+   where tenant_id = v_a;
+  raise notice 'OK: a fresh notice gets the label for three days unless the admin says otherwise, one of four modes, 1–14 days, off the public overview (0081)';
+end $$;
+
+-- Alley A's admin saves both through the API's role (0017's table-wide
+-- UPDATE grant, the settings_update policy); the checks still hold.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  update schedule_settings
+     set kiosk_notices_fresh_mode = 'longer', kiosk_notices_fresh_days = 7
+   where tenant_id = '00000000-0000-0000-0000-00000000000a';
+  if not found then
+    raise exception 'FAIL: the admin could not save the fresh notices (0081)';
+  end if;
+  begin
+    update schedule_settings set kiosk_notices_fresh_days = 15
+     where tenant_id = '00000000-0000-0000-0000-00000000000a';
+    raise exception 'FAIL: the admin saved a notice fresh for 15 days (0081)';
+  exception when check_violation then null;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = '00000000-0000-0000-0000-00000000000a'
+                    and kiosk_notices_fresh_mode = 'longer'
+                    and kiosk_notices_fresh_days = 7) then
+    raise exception 'FAIL: the admin''s fresh notices were not saved (0081)';
+  end if;
+  update schedule_settings set kiosk_notices_fresh_mode = 'highlight',
+                               kiosk_notices_fresh_days = 3
+   where tenant_id = '00000000-0000-0000-0000-00000000000a';
+  raise notice 'OK: an admin saves the fresh notices as authenticated (0081)';
+end $$;
+
+-- 0081: visible_from keeps when a notice went up. A time ahead schedules it
+-- and its ping waits as one job, as in 0064; shown at once while it still
+-- waits, it records now() and the job is gone; a notice already up keeps
+-- its time — a past one, or none — when shown at once or given a time gone
+-- by. (The whole suite is one transaction: now() is the same throughout.)
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+  v_at constant timestamptz := now() + interval '2 days';
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, v_at, true);
+  if (select visible_from from messages where id = v_notice) is distinct from v_at then
+    raise exception 'FAIL: the admin could not schedule the notice (0081)';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select count(*) from notification_jobs
+       where kind = 'notice_visible' and payload->>'message_id' = v_notice::text
+         and run_at = now() + interval '2 days') <> 1 then
+    raise exception 'FAIL: a scheduled notice has no notice_visible job at its time (0081)';
+  end if;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  -- „Zobrazit hned“ while it still waits.
+  perform message_set_visible_from(v_notice, null);
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select visible_from from messages where id = v_notice) is distinct from now() then
+    raise exception 'FAIL: a scheduled notice shown at once does not count from now (0081)';
+  end if;
+  if exists (select 1 from notification_jobs
+              where kind = 'notice_visible'
+                and payload->>'message_id' = v_notice::text) then
+    raise exception 'FAIL: a scheduled notice shown at once kept its job (0081)';
+  end if;
+  -- It went up two days ago.
+  update messages set visible_from = now() - interval '2 days' where id = v_notice;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, null);
+  if (select visible_from from messages where id = v_notice)
+       is distinct from now() - interval '2 days' then
+    raise exception 'FAIL: a notice already up moved when shown at once (0081)';
+  end if;
+  perform message_set_visible_from(v_notice, now() - interval '1 hour');
+  if (select visible_from from messages where id = v_notice)
+       is distinct from now() - interval '2 days' then
+    raise exception 'FAIL: a notice already up moved to a time gone by (0081)';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if exists (select 1 from notification_jobs
+              where kind = 'notice_visible'
+                and payload->>'message_id' = v_notice::text) then
+    raise exception 'FAIL: a notice already up got a notice_visible job (0081)';
+  end if;
+  -- Posted at once: no visible_from, it counts from created_at.
+  update messages set visible_from = null where id = v_notice;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, null);
+  if (select visible_from from messages where id = v_notice) is not null then
+    raise exception 'FAIL: a notice posted at once got a visible_from when shown at once (0081)';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  raise notice 'OK: a notice shown early counts from then, one already up keeps its time, scheduling and its job as before (0081)';
+end $$;
+
+-- 0082: the kiosk's header modules. Alleys with the four old switches in
 -- the combinations that matter, set through the old columns — 0067, 0073
--- and 0077 bring them back — and then 0081 twice: the first run converts
+-- and 0077 bring them back — and then 0082 twice: the first run converts
 -- them into kiosk_header and drops the four columns, the second finds them
 -- gone and skips the conversion (it would fail on a missing column
 -- otherwise) and changes nothing.
 insert into tenants (id, name) values
-  ('00000000-0000-0000-0000-000000081001', 'Kuželna (0081) vše vypnuto'),
-  ('00000000-0000-0000-0000-000000081002', 'Kuželna (0081) vše zapnuto'),
-  ('00000000-0000-0000-0000-000000081003', 'Kuželna (0081) jen počasí'),
-  ('00000000-0000-0000-0000-000000081004', 'Kuželna (0081) bez nástěnky'),
-  ('00000000-0000-0000-0000-000000081005', 'Kuželna (0081) svátek a služba');
+  ('00000000-0000-0000-0000-000000082001', 'Kuželna (0082) vše vypnuto'),
+  ('00000000-0000-0000-0000-000000082002', 'Kuželna (0082) vše zapnuto'),
+  ('00000000-0000-0000-0000-000000082003', 'Kuželna (0082) jen počasí'),
+  ('00000000-0000-0000-0000-000000082004', 'Kuželna (0082) bez nástěnky'),
+  ('00000000-0000-0000-0000-000000082005', 'Kuželna (0082) svátek a služba');
 \ir ../migrations/0067_kiosk_weather_nameday.sql
 \ir ../migrations/0073_kiosk_duty.sql
 \ir ../migrations/0077_kiosk_panels.sql
--- Each alley's old switches and what 0081 must make of them.
-create temp table kiosk_0081_case (
+-- Each alley's old switches and what 0082 must make of them.
+create temp table kiosk_0082_case (
   tenant_id uuid primary key,
   weather boolean, nameday boolean, duty boolean, notices boolean,
   header jsonb);
-insert into kiosk_0081_case values
+insert into kiosk_0082_case values
   -- The suite's alley A at the old defaults: the new default.
   ('00000000-0000-0000-0000-00000000000a', false, false, false, true,
    '{"modules": [{"id": "weather", "side": "off"},
@@ -12930,33 +13245,33 @@ insert into kiosk_0081_case values
                  {"id": "duty", "side": "off"},
                  {"id": "notices", "side": "right"}]}'),
   -- Everything off, the notices too.
-  ('00000000-0000-0000-0000-000000081001', false, false, false, false,
+  ('00000000-0000-0000-0000-000000082001', false, false, false, false,
    '{"modules": [{"id": "weather", "side": "off"},
                  {"id": "nameday", "side": "off"},
                  {"id": "duty", "side": "off"},
                  {"id": "notices", "side": "off"}]}'),
   -- Everything on (the weather with a place, set below): the three left
   -- after the clock in that order, the notices right.
-  ('00000000-0000-0000-0000-000000081002', true, true, true, true,
+  ('00000000-0000-0000-0000-000000082002', true, true, true, true,
    '{"modules": [{"id": "weather", "side": "left"},
                  {"id": "nameday", "side": "left"},
                  {"id": "duty", "side": "left"},
                  {"id": "notices", "side": "right"}]}'),
   -- The weather alone and without a place: left all the same — the kiosk
   -- shows nothing without a place, as before.
-  ('00000000-0000-0000-0000-000000081003', true, false, false, false,
+  ('00000000-0000-0000-0000-000000082003', true, false, false, false,
    '{"modules": [{"id": "weather", "side": "left"},
                  {"id": "nameday", "side": "off"},
                  {"id": "duty", "side": "off"},
                  {"id": "notices", "side": "off"}]}'),
   -- Everything but the notices.
-  ('00000000-0000-0000-0000-000000081004', true, true, true, false,
+  ('00000000-0000-0000-0000-000000082004', true, true, true, false,
    '{"modules": [{"id": "weather", "side": "left"},
                  {"id": "nameday", "side": "left"},
                  {"id": "duty", "side": "left"},
                  {"id": "notices", "side": "off"}]}'),
   -- The name day and the duty, the notices at their default.
-  ('00000000-0000-0000-0000-000000081005', false, true, true, true,
+  ('00000000-0000-0000-0000-000000082005', false, true, true, true,
    '{"modules": [{"id": "weather", "side": "off"},
                  {"id": "nameday", "side": "left"},
                  {"id": "duty", "side": "left"},
@@ -12964,31 +13279,31 @@ insert into kiosk_0081_case values
 update schedule_settings s
    set kiosk_weather = c.weather, kiosk_nameday = c.nameday,
        kiosk_duty_header = c.duty, kiosk_notices_header = c.notices
-  from kiosk_0081_case c
+  from kiosk_0082_case c
  where c.tenant_id = s.tenant_id;
 update schedule_settings
    set kiosk_weather_place = 'Brno, Jihomoravský',
        kiosk_weather_lat = 49.19522, kiosk_weather_lon = 16.60796
- where tenant_id = '00000000-0000-0000-0000-000000081002';
-\ir ../migrations/0081_kiosk_header.sql
-create temp table kiosk_0081_first as
+ where tenant_id = '00000000-0000-0000-0000-000000082002';
+\ir ../migrations/0082_kiosk_header.sql
+create temp table kiosk_0082_first as
   select tenant_id, kiosk_header, kiosk_weather_title from schedule_settings;
-\ir ../migrations/0081_kiosk_header.sql
+\ir ../migrations/0082_kiosk_header.sql
 
 -- An admin of a new alley, who saves the header as authenticated below.
 insert into tenants (id, name) values
-  ('00000000-0000-0000-0000-000000081000', 'Kuželna (0081)');
+  ('00000000-0000-0000-0000-000000082000', 'Kuželna (0082)');
 insert into auth.users (id, email) values
-  ('81000000-0000-0000-0000-000000000001', 'zahlavi-0081@example.com')
+  ('81000000-0000-0000-0000-000000000001', 'zahlavi-0082@example.com')
 on conflict do nothing;
 insert into profiles (id, tenant_id, display_name, email, role, status)
 values ('81000000-0000-0000-0000-000000000001',
-        '00000000-0000-0000-0000-000000081000', 'Správce 0081',
-        'zahlavi-0081@example.com', 'admin', 'approved');
+        '00000000-0000-0000-0000-000000082000', 'Správce 0082',
+        'zahlavi-0082@example.com', 'admin', 'approved');
 
 do $$
 declare
-  v_new constant uuid := '00000000-0000-0000-0000-000000081000';
+  v_new constant uuid := '00000000-0000-0000-0000-000000082000';
   v_default constant jsonb :=
     '{"modules": [{"id": "weather", "side": "off"},
                   {"id": "nameday", "side": "off"},
@@ -13002,17 +13317,17 @@ begin
   -- Each alley converted as its old switches showed the header.
   for v_case in
     select c.tenant_id, c.header, s.kiosk_header as got
-      from kiosk_0081_case c
+      from kiosk_0082_case c
       join schedule_settings s on s.tenant_id = c.tenant_id
   loop
     if v_case.got is distinct from v_case.header then
-      raise exception 'FAIL: alley % converted to %, expected % (0081)',
+      raise exception 'FAIL: alley % converted to %, expected % (0082)',
         v_case.tenant_id, v_case.got, v_case.header;
     end if;
   end loop;
-  if (select count(*) from kiosk_0081_case c
+  if (select count(*) from kiosk_0082_case c
         join schedule_settings s using (tenant_id)) <> 6 then
-    raise exception 'FAIL: the conversion cases are not all there (0081)';
+    raise exception 'FAIL: the conversion cases are not all there (0082)';
   end if;
   -- The order is the array's: the weather, the name day, the duty, the
   -- notices.
@@ -13020,17 +13335,17 @@ begin
         from schedule_settings s,
              jsonb_array_elements(s.kiosk_header -> 'modules')
                with ordinality as e(m, o)
-       where s.tenant_id = '00000000-0000-0000-0000-000000081002')
+       where s.tenant_id = '00000000-0000-0000-0000-000000082002')
      is distinct from array['weather', 'nameday', 'duty', 'notices'] then
-    raise exception 'FAIL: the converted modules are not in the old header''s order (0081)';
+    raise exception 'FAIL: the converted modules are not in the old header''s order (0082)';
   end if;
 
   -- The second run skipped the conversion and changed nothing.
-  if exists (select 1 from kiosk_0081_first f
+  if exists (select 1 from kiosk_0082_first f
                join schedule_settings s using (tenant_id)
               where s.kiosk_header is distinct from f.kiosk_header
                  or s.kiosk_weather_title is distinct from f.kiosk_weather_title) then
-    raise exception 'FAIL: running 0081 again changed a converted header (0081)';
+    raise exception 'FAIL: running 0082 again changed a converted header (0082)';
   end if;
 
   -- The old switches are gone, the new checks are there.
@@ -13039,13 +13354,13 @@ begin
                 and column_name in ('kiosk_weather', 'kiosk_nameday',
                                     'kiosk_duty_header',
                                     'kiosk_notices_header')) then
-    raise exception 'FAIL: an old header switch survived 0081';
+    raise exception 'FAIL: an old header switch survived 0082';
   end if;
   if (select count(*) from pg_constraint
        where conrelid = 'schedule_settings'::regclass
          and conname in ('schedule_settings_kiosk_header_check',
                          'schedule_settings_kiosk_weather_title_check')) <> 2 then
-    raise exception 'FAIL: kiosk_header or kiosk_weather_title has no named check (0081)';
+    raise exception 'FAIL: kiosk_header or kiosk_weather_title has no named check (0082)';
   end if;
 
   -- A new alley starts with the notices on the right, the rest off, and
@@ -13053,7 +13368,7 @@ begin
   if not exists (select 1 from schedule_settings
                   where tenant_id = v_new and kiosk_header = v_default
                     and kiosk_weather_title is null) then
-    raise exception 'FAIL: a new alley does not start with the default header (0081)';
+    raise exception 'FAIL: a new alley does not start with the default header (0082)';
   end if;
 
   -- Bad layouts are a check violation, nothing else.
@@ -13079,7 +13394,7 @@ begin
   loop
     begin
       update schedule_settings set kiosk_header = v_layout where tenant_id = v_new;
-      raise exception 'FAIL: kiosk_header took a layout with % (0081): %', v_label, v_layout;
+      raise exception 'FAIL: kiosk_header took a layout with % (0082): %', v_label, v_layout;
     exception when check_violation then null;
     end;
   end loop;
@@ -13090,14 +13405,14 @@ begin
      or kiosk_header_valid('[]') is distinct from false
      or kiosk_header_valid('{"modules": [1]}') is distinct from false
      or kiosk_header_valid('{"modules": "x"}') is distinct from false then
-    raise exception 'FAIL: kiosk_header_valid does not answer false for a non-layout (0081)';
+    raise exception 'FAIL: kiosk_header_valid does not answer false for a non-layout (0082)';
   end if;
 
   -- A module this database has never heard of passes, with options of its
   -- own: the app keeps it and writes it back. So does no module at all.
   if kiosk_header_valid('{"modules": [{"id": "later", "side": "left"}]}')
      is distinct from true then
-    raise exception 'FAIL: kiosk_header_valid refuses a module it does not know (0081)';
+    raise exception 'FAIL: kiosk_header_valid refuses a module it does not know (0082)';
   end if;
   update schedule_settings
      set kiosk_header =
@@ -13115,7 +13430,7 @@ begin
     begin
       update schedule_settings set kiosk_weather_title = v_label
        where tenant_id = v_new;
-      raise exception 'FAIL: the weather''s title took ''%'' (0081)', v_label;
+      raise exception 'FAIL: the weather''s title took ''%'' (0082)', v_label;
     exception when check_violation then null;
     end;
   end loop;
@@ -13129,10 +13444,10 @@ begin
   -- The check calls the validator as the admin who saves: authenticated
   -- may execute it, anon may not.
   if not has_function_privilege('authenticated', 'public.kiosk_header_valid(jsonb)', 'execute') then
-    raise exception 'FAIL: authenticated cannot execute kiosk_header_valid — no admin could save the header (0081)';
+    raise exception 'FAIL: authenticated cannot execute kiosk_header_valid — no admin could save the header (0082)';
   end if;
   if has_function_privilege('anon', 'public.kiosk_header_valid(jsonb)', 'execute') then
-    raise exception 'FAIL: anon may execute kiosk_header_valid (0081)';
+    raise exception 'FAIL: anon may execute kiosk_header_valid (0082)';
   end if;
 
   -- None of it reaches the public overview: its six settings, nothing more.
@@ -13142,9 +13457,9 @@ begin
   if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
                       'lane_count', 'max_active_reservations',
                       'training_weekdays'] then
-    raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s header may be reaching anon (0081): %', v_keys;
+    raise exception 'FAIL: public_week''s settings keys changed — the kiosk''s header may be reaching anon (0082): %', v_keys;
   end if;
-  raise notice 'OK: the old header switches convert into kiosk_header and are gone, a new alley gets the default, bad layouts and titles are check violations, the header stays off the public overview (0081)';
+  raise notice 'OK: the old header switches convert into kiosk_header and are gone, a new alley gets the default, bad layouts and titles are check violations, the header stays off the public overview (0082)';
 end $$;
 
 -- The admin saves the header through the API's role: the check runs as
@@ -13154,7 +13469,7 @@ set local request.jwt.claims =
   '{"sub":"81000000-0000-0000-0000-000000000001","role":"authenticated"}';
 do $$
 declare
-  v_new constant uuid := '00000000-0000-0000-0000-000000081000';
+  v_new constant uuid := '00000000-0000-0000-0000-000000082000';
 begin
   update schedule_settings
      set kiosk_header =
@@ -13165,13 +13480,13 @@ begin
          kiosk_weather_title = 'Dnes v Brně'
    where tenant_id = v_new;
   if not found then
-    raise exception 'FAIL: the admin could not save the kiosk header (0081)';
+    raise exception 'FAIL: the admin could not save the kiosk header (0082)';
   end if;
   begin
     update schedule_settings
        set kiosk_header = '{"modules": [{"id": "duty", "side": "middle"}]}'
      where tenant_id = v_new;
-    raise exception 'FAIL: the admin saved a module in the middle (0081)';
+    raise exception 'FAIL: the admin saved a module in the middle (0082)';
   exception when check_violation then null;
   end;
 end $$;
@@ -13179,13 +13494,13 @@ reset role;
 do $$
 begin
   if not exists (select 1 from schedule_settings
-                  where tenant_id = '00000000-0000-0000-0000-000000081000'
+                  where tenant_id = '00000000-0000-0000-0000-000000082000'
                     and kiosk_header -> 'modules' -> 1 ->> 'id' = 'duty'
                     and kiosk_header -> 'modules' -> 1 ->> 'side' = 'left'
                     and kiosk_weather_title = 'Dnes v Brně') then
-    raise exception 'FAIL: the admin''s header was not saved (0081)';
+    raise exception 'FAIL: the admin''s header was not saved (0082)';
   end if;
-  raise notice 'OK: an admin saves the kiosk header through the check as authenticated (0081)';
+  raise notice 'OK: an admin saves the kiosk header through the check as authenticated (0082)';
 end $$;
 
 rollback;

@@ -1,17 +1,22 @@
-/// The kiosk's QR code of Rezervátor on Google Play, for the „Jak začít“
-/// card (kiosk_guide.dart): its modules bundled as text, drawn as a black
-/// code on a white tile — no QR package, nothing encoded on the device.
+/// The kiosk's QR codes, drawn as black codes on white tiles — their
+/// modules bundled as text, no QR package, nothing encoded on the device:
+/// Rezervátor on Google Play, for the „Jak začít“ card (kiosk_guide.dart),
+/// and the web's Napište nám form, for the „Napište nám“ card
+/// (kiosk_feedback.dart) — a message is typed on a phone, not on the
+/// kiosk's 32" screen.
 ///
 /// Generated once, outside the app, with the Dart package qr 3.0.2
-/// (pub.dev, BSD-3-Clause) from [kioskPlayUrl]: byte mode, error correction
-/// level L — a screen is never scratched or smudged like a printed code,
-/// so the lowest level gives the largest modules — which makes version 4,
-/// 33 × 33 modules, mask 2 (the package's pick). To generate it again: a
-/// scratch package depending on `qr: 3.0.2`, `QrImage(QrCode.fromData(data:
-/// kioskPlayUrl, errorCorrectLevel: QrErrorCorrectLevel.L))`, one string per
-/// row of `isDark(row, col)`. Checked by decoding the rows back to the URL
-/// (macOS Core Image's QR detector); after any change, scan the kiosk's
-/// screen with a phone before a release.
+/// (pub.dev, BSD-3-Clause) from [kioskPlayUrl] and [kioskFeedbackUrl]: byte
+/// mode, error correction level L — a screen is never scratched or smudged
+/// like a printed code, so the lowest level gives the largest modules —
+/// which makes version 4, 33 × 33 modules, mask 2 for Google Play and
+/// version 3, 29 × 29 modules, mask 7 for the form (the package's picks).
+/// To generate one again: a scratch package depending on `qr: 3.0.2`,
+/// `QrImage(QrCode.fromData(data: url, errorCorrectLevel:
+/// QrErrorCorrectLevel.L))`, one string per row of `isDark(row, col)`.
+/// Checked by decoding the rows back to the URL (macOS Core Image's QR
+/// detector); after any change, scan the kiosk's screen with a phone before
+/// a release.
 library;
 
 import 'package:flutter/material.dart';
@@ -66,6 +71,47 @@ const kioskPlayQr = <String>[
   '#######.#..##...##....###.##...#.',
 ];
 
+/// Where the feedback code leads: the web's Napište nám form with no
+/// sign-in (main.dart's `/napiste-nam`), marked as the kiosk's — the
+/// message's `source` tag in Sentry.
+const kioskFeedbackUrl = 'https://rezervator.online/#/napiste-nam?z=kiosk';
+
+/// What a screen reader says for the feedback code.
+const kioskFeedbackQrLabel = 'QR kód: Napište nám na webu Rezervátoru';
+
+/// [kioskFeedbackUrl] as a QR code, as [kioskPlayQr].
+const kioskFeedbackQr = <String>[
+  '#######...#..###.###..#######',
+  '#.....#.###..###.#....#.....#',
+  '#.###.#.#........#..#.#.###.#',
+  '#.###.#..#..#.#...#...#.###.#',
+  '#.###.#.###.####.##...#.###.#',
+  '#.....#.#.#.#########.#.....#',
+  '#######.#.#.#.#.#.#.#.#######',
+  '........#.##..##.#.##........',
+  '##.#..##...####.#..#..###.##.',
+  '.#.#.#..##.##...##..#.#..#..#',
+  '#.##.##....###.....#...#####.',
+  '##.##..#######.##.#..###..##.',
+  '...#.####.#####..######..#.##',
+  '.#.#.....#.#.##....##........',
+  '......######.##......###.####',
+  '.#.#.#.##.#..##..##.######.#.',
+  '#..##.#....##...###.##.#...#.',
+  '..##.#..##.##...#...####.#..#',
+  '#..#####..#..##..##.#.###..##',
+  '........#.#....#####..#....##',
+  '#.###.#..###.#.##.#.#####.#..',
+  '........##..#.#.#...#...#.###',
+  '#######.###..#...#..#.#.#..#.',
+  '#.....#...####.#..#.#...###.#',
+  '#.###.#..#####...#..#####..#.',
+  '#.###.#.##..##.....##.######.',
+  '#.###.#..#.#.#.....###..###.#',
+  '#.....#.#.##.###.#.##..##..#.',
+  '#######.##.##....#..#...#..#.',
+];
+
 /// The side of the tile for a code of [modules] × [modules] (its quiet zone
 /// around it), in logical pixels, given [size] logical pixels of room on a
 /// screen of [dpr] device pixels to one: every module the same whole number
@@ -80,9 +126,10 @@ double kioskQrTile(double size, double dpr, int modules) {
   return m < 3 ? 0 : m * span / dpr;
 }
 
-/// A QR code of [rows] (as [kioskPlayQr]): black modules on a white tile
-/// with the quiet zone, in either kiosk theme — a light code on a dark card
-/// is one that some scanners do not read. As large as fits [size]
+/// A QR code of [rows] (as [kioskPlayQr] or [kioskFeedbackQr]): black
+/// modules on a white tile with the quiet zone, in either kiosk theme — a
+/// light code on a dark card is one that some scanners do not read. As
+/// large as fits [size]
 /// ([kioskQrTile]), drawn in device pixels without anti-aliasing, so the
 /// edges are sharp even at the web kiosk's lower resolution.
 class KioskQr extends StatelessWidget {

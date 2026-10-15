@@ -35,6 +35,7 @@ import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
+import 'package:rezervator/features/kiosk/kiosk_new_chip.dart';
 import 'package:rezervator/features/kiosk/kiosk_warning.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
@@ -1756,6 +1757,8 @@ void main() {
       String title, {
       bool show = true,
       String body = 'Sejdeme se v devět.',
+      // When it went up; null = the [id]th of September.
+      DateTime? posted,
     }) => Message(
       id: id,
       kind: MessageKind.notice,
@@ -1769,8 +1772,8 @@ void main() {
       expiresAt: null,
       notify: true,
       showOnKiosk: show,
-      createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
-      updatedAt: DateTime(2026, 9, 1),
+      createdAt: posted ?? DateTime(2026, 9, int.tryParse(id) ?? 1),
+      updatedAt: posted ?? DateTime(2026, 9, 1),
     );
     // Each stand-in player's „the video has ended“, by video id.
     final streamEnded = <String, VoidCallback?>{};
@@ -1823,7 +1826,7 @@ void main() {
       Map<String, MatchResult> results = const {},
       bool drawerOpen = false,
       bool showNotices = true,
-      // The header's modules as the old switches had them (0081 converts
+      // The header's modules as the old switches had them (0082 converts
       // them so); [header] lays them out freely.
       bool headerNotices = true,
       bool showMatches = true,
@@ -1835,6 +1838,11 @@ void main() {
       int share = 40,
       int zapisPercent = 80,
       int noticeRotation = 12,
+      // What a fresh notice gets (0081), and for how many days it is one.
+      KioskNoticesFresh noticesFresh = KioskNoticesFresh.highlight,
+      int noticesFreshDays = 3,
+      // The notices as they change while the kiosk runs; null = [notices].
+      Stream<List<Message>>? noticesStream,
       int liveRotation = 12,
       bool panelEnabled = true,
       int pastDays = 0,
@@ -1879,9 +1887,11 @@ void main() {
       // Both panels as the admin lays them out (0077); null = the layout
       // the drawer settings above convert to, as 0077 converts them.
       KioskPanels? panels,
-      // The header's modules (0081); null = what the switches above
+      // The header's modules (0082); null = what the switches above
       // convert to.
       KioskHeader? header,
+      // Clubs' nicknames (0080); null = every name in full.
+      NameDisplay? names,
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith((ref) {
@@ -1919,6 +1929,8 @@ void main() {
             kioskWeeksAhead: weeksAhead,
             kioskZapisPercent: zapisPercent,
             kioskNoticesRotationSeconds: noticeRotation,
+            kioskNoticesFresh: noticesFresh,
+            kioskNoticesFreshDays: noticesFreshDays,
             kioskLiveRotationSeconds: liveRotation,
             kioskPastDays: pastDays,
             kioskIdleSeconds: idleSeconds,
@@ -1966,7 +1978,9 @@ void main() {
           ]),
         ),
         playersProvider.overrideWith((ref) async => players),
-        messagesProvider.overrideWith((ref) => Stream.value(notices)),
+        messagesProvider.overrideWith(
+          (ref) => noticesStream ?? Stream.value(notices),
+        ),
         kioskSocketOpenProvider.overrideWithValue(socketOpen ?? () => true),
         kioskRefreshMatchProvider.overrideWithValue((id) async {
           onRefresh?.call(id);
@@ -1983,6 +1997,7 @@ void main() {
           (ref) => Stream.value(dutyAssignments),
         ),
         kioskWeatherProvider.overrideWith((ref) => Stream.value(forecast)),
+        if (names != null) nameDisplayProvider.overrideWith((ref) => names),
       ],
       child: const MaterialApp(home: KioskShell()),
     );
@@ -3209,7 +3224,7 @@ void main() {
       await finish(tester);
     });
 
-    group('the header\'s modules (0081)', () {
+    group('the header\'s modules (0082)', () {
       final forecast = KioskWeather(
         temperature: 14,
         kind: WeatherKind.clear,
@@ -3631,7 +3646,7 @@ void main() {
           ),
         );
         // The board's day header, listing the matches too, runs out of
-        // height at this text size — as it did before 0081; only what the
+        // height at this text size — as it did before 0082; only what the
         // header lays out counts here.
         final errors = <FlutterErrorDetails>[];
         final reported = FlutterError.onError;
@@ -4563,11 +4578,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // The newest first: the long one, cut to its share.
+      expect(drawerText('Dlouhý'), findsOneWidget);
       final before = tester.getTopLeft(find.text('ZÁPASY'));
 
+      // It fades out over the short one's smaller block — clipped, not
+      // overflowing it.
       await tester.pump(const Duration(seconds: 13));
       await tester.pumpAndSettle();
-      expect(drawerText('Krátký'), findsNothing);
+      expect(drawerText('Dlouhý'), findsNothing);
+      expect(drawerText('Krátký'), findsOneWidget);
       expect(tester.getTopLeft(find.text('ZÁPASY')), before);
 
       await finish(tester);
@@ -4786,6 +4806,71 @@ void main() {
         await tester.tap(button(Icons.close));
         await tester.pumpAndSettle();
         expect(bar('Jiný'), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a club nickname (0080) names the teams in the bar and the '
+          'list; a tap still lists that team\'s matches', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            names: NameDisplay(const [
+              Club(id: 's', name: 'Soupeř', nickname: 'Sok'),
+              Club(id: 'd', name: 'Domácí', nickname: 'Dom'),
+            ]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        expect(bar('Dom'), findsOneWidget);
+        expect(bar('Sok'), findsOneWidget);
+        expect(bar('Soupeř'), findsNothing);
+
+        await tester.tap(bar('Sok'));
+        await tester.pumpAndSettle();
+        final rows = inList(find.byType(ListTile));
+        expect(rows, findsNWidgets(3));
+        expect([
+          for (final t in tester.widgetList<ListTile>(rows))
+            (t.title! as Text).data,
+        ], ['Dom', 'Jiný', 'Dom']);
+
+        await finish(tester);
+      });
+
+      testWidgets('beside the modal, a tap on the sheet\'s nickname lists the '
+          'team it stands for (0080)', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            zapisNav: KioskZapisNav.sides,
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            names: NameDisplay(const [
+              Club(id: 's', name: 'Soupeř', nickname: 'Sok'),
+            ]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(LegacyScoreSheetPage),
+            matching: find.textContaining('Sok', findRichText: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inList(find.byType(ListTile)), findsNWidgets(3));
 
         await finish(tester);
       });
@@ -5137,16 +5222,242 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(drawerText('První'), findsOneWidget);
+      // The newest first.
+      expect(drawerText('Druhý'), findsOneWidget);
 
-      await tester.fling(drawerText('První'), const Offset(-300, 0), 1000);
+      await tester.fling(drawerText('Druhý'), const Offset(-300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(drawerText('První'), findsOneWidget);
+      expect(drawerText('Druhý'), findsNothing);
+
+      await tester.fling(drawerText('První'), const Offset(300, 0), 1000);
       await tester.pumpAndSettle();
       expect(drawerText('Druhý'), findsOneWidget);
-      expect(drawerText('První'), findsNothing);
 
-      await tester.fling(drawerText('Druhý'), const Offset(300, 0), 1000);
+      await finish(tester);
+    });
+
+    // The notices' card, and its dots' decorations from left to right.
+    final noticesCard = find.ancestor(
+      of: drawerText('NÁSTĚNKA'),
+      matching: find.byType(KioskCard),
+    );
+    List<BoxDecoration> noticeDots(WidgetTester tester) => [
+      for (final c in tester.widgetList<Container>(
+        find.descendant(of: noticesCard, matching: find.byType(Container)),
+      ))
+        if (c.decoration case final BoxDecoration d
+            when d.shape == BoxShape.circle)
+          d,
+    ];
+
+    testWidgets('fresh notices (0081) in the card: the newest first with '
+        '„NOVÉ“ before its title, a stripe along the card and its dot in the '
+        'primary colour — a ring while it waits; an old one plain', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [
+            notice('1', 'Brigáda'),
+            notice(
+              '2',
+              'Turnaj',
+              posted: nowAt.subtract(const Duration(days: 1)),
+            ),
+          ],
+          drawerOpen: true,
+        ),
+      );
       await tester.pumpAndSettle();
-      expect(drawerText('První'), findsOneWidget);
+      final primary = Theme.of(
+        tester.element(find.byType(KioskPanelView)),
+      ).colorScheme.primary;
+      final chip = find.descendant(
+        of: noticesCard,
+        matching: find.byType(KioskNewChip),
+      );
+
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(chip, findsOneWidget);
+      expect(
+        tester.getRect(chip).right,
+        lessThan(tester.getRect(drawerText('Turnaj')).left),
+      );
+      expect(tester.widget<KioskCard>(noticesCard).stripe, primary);
+      expect(noticeDots(tester)[0].color, primary);
+      expect(noticeDots(tester)[1].color, isNot(primary));
+      expect(noticeDots(tester)[1].border, isNull);
+
+      // The old one's turn: plain — and the fresh one's dot a ring.
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+      expect(chip, findsNothing);
+      expect(tester.widget<KioskCard>(noticesCard).stripe, Colors.transparent);
+      expect(noticeDots(tester)[0].color, isNull);
+      expect((noticeDots(tester)[0].border! as Border).left.color, primary);
+      expect(noticeDots(tester)[1].color, primary);
+
+      await finish(tester);
+    });
+
+    testWidgets('fresh notices shown longer (0081): in the card a fresh one '
+        'stays two turns, an old one one — and no „NOVÉ“', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [
+            notice('1', 'Brigáda'),
+            notice(
+              '2',
+              'Turnaj',
+              posted: nowAt.subtract(const Duration(days: 1)),
+            ),
+          ],
+          drawerOpen: true,
+          noticesFresh: KioskNoticesFresh.longer,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(find.byType(KioskNewChip), findsNothing);
+      expect(tester.widget<KioskCard>(noticesCard).stripe, Colors.transparent);
+
+      // One turn (12 s) on: still the fresh one.
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      // Its second turn over: the old one, for one turn.
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('a notice posted while the kiosk runs shows at once, first — '
+        'in the card and in the status bar', (tester) async {
+      fullHd(tester);
+      final up = StreamController<List<Message>>();
+      addTearDown(up.close);
+      final before = [notice('1', 'Brigáda'), notice('2', 'Zámek')];
+      await tester.pumpWidget(app(noticesStream: up.stream, drawerOpen: true));
+      up.add(before);
+      await tester.pumpAndSettle();
+      expect(drawerText('Zámek'), findsOneWidget);
+
+      // A turn on, the older one shows ...
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+
+      // ... when a new one goes up: it is shown at once, in both places.
+      up.add([...before, notice('3', 'Turnaj', posted: nowAt)]);
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsNothing);
+      final bar = find.byType(KioskHeadline);
+      expect(
+        find.descendant(of: bar, matching: find.text('Turnaj')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: bar, matching: find.text('1/3')),
+        findsOneWidget,
+      );
+
+      await finish(tester);
+    });
+
+    testWidgets('a notice posted after the kiosk\'s minute clock (which runs '
+        'behind) is fresh at once: „NOVÉ“ and the stripe — and with fresh '
+        'ones shown longer, its first turn is two', (tester) async {
+      fullHd(tester);
+      final bar = find.byType(KioskHeadline);
+      Finder inBar(Finder f) => find.descendant(of: bar, matching: f);
+      final before = [notice('1', 'Brigáda'), notice('2', 'Zámek')];
+      // The server stamps it 30 s after the minute the kiosk's clock holds.
+      final posted = [
+        ...before,
+        notice('3', 'Turnaj', posted: nowAt.add(const Duration(seconds: 30))),
+      ];
+      Future<void> post(KioskNoticesFresh fresh) async {
+        final up = StreamController<List<Message>>();
+        addTearDown(up.close);
+        await tester.pumpWidget(
+          app(noticesStream: up.stream, drawerOpen: true, noticesFresh: fresh),
+        );
+        up.add(before);
+        await tester.pumpAndSettle();
+        expect(drawerText('Zámek'), findsOneWidget);
+        up.add(posted);
+        await tester.pumpAndSettle();
+        expect(drawerText('Turnaj'), findsOneWidget);
+        expect(inBar(find.text('Turnaj')), findsOneWidget);
+      }
+
+      await post(KioskNoticesFresh.highlight);
+      final primary = Theme.of(
+        tester.element(find.byType(KioskPanelView)),
+      ).colorScheme.primary;
+      expect(
+        find.descendant(of: noticesCard, matching: find.byType(KioskNewChip)),
+        findsOneWidget,
+      );
+      expect(tester.widget<KioskCard>(noticesCard).stripe, primary);
+      expect(inBar(find.byType(KioskNewChip)), findsOneWidget);
+      await finish(tester);
+
+      await post(KioskNoticesFresh.longer);
+      expect(find.byType(KioskNewChip), findsNothing);
+      // One turn (12 s) on: still the new one, in both places.
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      // Its second turn over: the next one.
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(drawerText('Zámek'), findsOneWidget);
+      expect(inBar(find.text('Zámek')), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('notices taken down while the last one shows: the card shows '
+        'the last one left, its dot lit', (tester) async {
+      fullHd(tester);
+      final up = StreamController<List<Message>>();
+      addTearDown(up.close);
+      final three = [
+        notice('1', 'Brigáda'),
+        notice('2', 'Zámek'),
+        notice('3', 'Turnaj'),
+      ];
+      await tester.pumpWidget(app(noticesStream: up.stream, drawerOpen: true));
+      up.add(three);
+      await tester.pumpAndSettle();
+      // Back from the newest to the last of the three.
+      await tester.fling(drawerText('Turnaj'), const Offset(300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(drawerText('Brigáda'), findsOneWidget);
+
+      // Brigáda is taken down.
+      up.add(three.skip(1).toList());
+      await tester.pumpAndSettle();
+      expect(drawerText('Zámek'), findsOneWidget);
+      final primary = Theme.of(
+        tester.element(find.byType(KioskPanelView)),
+      ).colorScheme.primary;
+      final dots = noticeDots(tester);
+      expect(dots, hasLength(2));
+      expect(dots[0].color, isNot(primary));
+      expect(dots[1].color, primary);
 
       await finish(tester);
     });
@@ -5273,19 +5584,12 @@ void main() {
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
         // The folded duel's card stays in the tree (cross-fade), hidden:
-        // only the visible ones count.
+        // only the visible ones count — and only a visible name is tapped.
         final openCards = find.byType(DuelCard).hitTestable();
-        // A tap opens a duel as the full card with its lane table. More
-        // may be open while they fit; past that the first opened folds.
-        expect(openCards, findsNothing);
-        await tester.tap(find.textContaining('Hráč1').first);
-        await tester.pumpAndSettle();
-        expect(openCards, findsOneWidget);
-        expect(find.text('Plné'), findsWidgets);
-        await tester.tap(find.textContaining('Hráč2').first);
-        await tester.pumpAndSettle();
-        expect(openCards, findsNWidgets(2));
-        // Each opening animates; the fit is measured once it has.
+        Finder name(int pos) => find.textContaining('Hráč$pos').hitTestable();
+        // Each opening animates; the fit is measured once it has, a timer
+        // after the animation — so every tap waits it out, or the check
+        // would race the fold.
         Future<void> settle() async {
           for (var i = 0; i < 6; i++) {
             await tester.pump(const Duration(milliseconds: 320));
@@ -5293,8 +5597,23 @@ void main() {
           }
         }
 
+        // A tap opens a duel as the full card with its lane table.
+        expect(openCards, findsNothing);
+        await tester.tap(name(1).first);
+        await settle();
+        expect(openCards, findsOneWidget);
+        expect(find.text('Plné'), findsWidgets);
+
+        // More may be open while they fit; past that the first opened
+        // folds. Two open cards overflow 1080 px by a few pixels, so the
+        // rest runs 120 px taller: two fit there, a third does not.
+        tester.view.physicalSize = const Size(1920, 1200);
+        await tester.pumpAndSettle();
+        await tester.tap(name(2).first);
+        await settle();
+        expect(openCards, findsNWidgets(2));
         for (var pos = 3; pos <= 6; pos++) {
-          await tester.tap(find.textContaining('Hráč$pos').first);
+          await tester.tap(name(pos).first);
           await settle();
         }
         final scroll = tester
@@ -6146,8 +6465,8 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('the status bar shows one notice title at a time, in turn',
-        (tester) async {
+    testWidgets('the status bar shows one notice title at a time, in turn, '
+        'the newest first', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
@@ -6162,7 +6481,7 @@ void main() {
       await tester.pumpAndSettle();
       final bar = find.byType(KioskHeadline);
       Finder inBar(String t) => find.descendant(of: bar, matching: find.text(t));
-      expect(inBar('Brigáda'), findsOneWidget);
+      expect(inBar('Zámek'), findsOneWidget);
       expect(inBar('1/2'), findsOneWidget);
       expect(find.textContaining('Skryté'), findsNothing);
       // A module: under its title „Nástěnka“, starting where it starts.
@@ -6184,18 +6503,57 @@ void main() {
 
       // Within one turn (settling already ran part of the clock) it fades
       // to the next.
-      for (var i = 0; i < 7 && inBar('Zámek').evaluate().isEmpty; i++) {
+      for (var i = 0; i < 7 && inBar('Brigáda').evaluate().isEmpty; i++) {
         await tester.pump(const Duration(seconds: 1));
         await tester.pump(const Duration(milliseconds: 700));
       }
-      expect(inBar('Zámek'), findsOneWidget);
-      expect(inBar('Brigáda'), findsNothing);
+      // The fade over (the last pump may have only started it).
+      await tester.pumpAndSettle();
+      expect(inBar('Brigáda'), findsOneWidget);
+      expect(inBar('Zámek'), findsNothing);
 
       // A tap reads the notice in full.
-      await tester.tap(inBar('Zámek'));
+      await tester.tap(inBar('Brigáda'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
 
+      await finish(tester);
+    });
+
+    testWidgets('fresh notices (0081) in the status bar: „NOVÉ“ on one '
+        'posted within the admin\'s days, none on an older one or with the '
+        'highlight off', (tester) async {
+      fullHd(tester);
+      final bar = find.byType(KioskHeadline);
+      Finder inBar(Finder f) => find.descendant(of: bar, matching: f);
+      final notices = [
+        notice('1', 'Brigáda'),
+        notice(
+          '2',
+          'Turnaj',
+          posted: nowAt.subtract(const Duration(days: 2)),
+        ),
+      ];
+
+      await tester.pumpWidget(app(notices: notices));
+      await tester.pumpAndSettle();
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      expect(inBar(find.byType(KioskNewChip)), findsOneWidget);
+      await finish(tester);
+
+      // Fresh for a day only: two days up is not.
+      await tester.pumpWidget(app(notices: notices, noticesFreshDays: 1));
+      await tester.pumpAndSettle();
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      expect(inBar(find.byType(KioskNewChip)), findsNothing);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(notices: notices, noticesFresh: KioskNoticesFresh.off),
+      );
+      await tester.pumpAndSettle();
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      expect(inBar(find.byType(KioskNewChip)), findsNothing);
       await finish(tester);
     });
 

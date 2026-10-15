@@ -25,7 +25,7 @@ NameDay czechNameDay(Day day) {
   return (names: _names[key] ?? const [], holiday: _holidays[key]);
 }
 
-/// What the kiosk's name-day module says for [day] (0081): „Dnes má
+/// What the kiosk's name-day module says for [day] (0082): „Dnes má
 /// svátek“ over „Radmila“, „Dnes mají svátek“ over „Adam a Eva“ (several
 /// names joined the Czech way); a public holiday without a name:
 /// „Státní svátek“ over the holiday; null when there is neither.

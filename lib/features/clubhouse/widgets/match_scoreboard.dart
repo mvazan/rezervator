@@ -21,6 +21,7 @@ import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 import 'lead_color.dart';
+import '../../../core/widgets/shown_names.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
@@ -132,7 +133,14 @@ class MatchScoreboard extends StatelessWidget {
               action: video,
             ),
             const SizedBox(height: 12),
-            _ScoreLine(slot: slot, result: result, running: running),
+            // The teams as the app shows them: a club's nickname (0080).
+            ShownNames(
+              builder: (context, names) => _ScoreLine(
+                slot: names.shown(slot),
+                result: result,
+                running: running,
+              ),
+            ),
             if (note != null) ...[
               const SizedBox(height: 8),
               Text(note, textAlign: TextAlign.center, style: text.bodySmall),

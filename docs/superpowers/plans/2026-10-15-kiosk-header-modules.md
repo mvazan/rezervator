@@ -4,7 +4,7 @@
 
 **Goal:** The kiosk's header becomes a row of uniform modules (title over value): clock, weather, name day, a new duty module and notices, each off/left/right in an admin-chosen order; today's matches untitled in the centre, home over away; one admin section „Záhlaví“.
 
-**Architecture:** A new jsonb column `schedule_settings.kiosk_header` (0081) with a never-raising validator, mirroring `kiosk_panels` (0077); a pure-Dart `KioskHeader` model beside `KioskPanels`; a presentational `KioskHeaderModuleFrame` the status bar fills; the admin table mirrors „Panely“.
+**Architecture:** A new jsonb column `schedule_settings.kiosk_header` (0082) with a never-raising validator, mirroring `kiosk_panels` (0077); a pure-Dart `KioskHeader` model beside `KioskPanels`; a presentational `KioskHeaderModuleFrame` the status bar fills; the admin table mirrors „Panely“.
 
 **Tech Stack:** Flutter 3.38 + Riverpod 3, Supabase (Postgres 15, PostgREST), `flutter_test`.
 
@@ -24,10 +24,10 @@ Spec: `docs/superpowers/specs/2026-10-15-kiosk-header-modules-design.md`. Branch
 
 ---
 
-### Task 1: Migration 0081, tenancy suite, schema snapshot, SCHEMA.md
+### Task 1: Migration 0082, tenancy suite, schema snapshot, SCHEMA.md
 
 **Files:**
-- Create: `supabase/migrations/0081_kiosk_header.sql`
+- Create: `supabase/migrations/0082_kiosk_header.sql`
 - Modify: `supabase/tests/tenancy_rls.sql` (new block before the final `rollback;` at the end; `\ir` re-runs after older blocks, see Step 3)
 - Modify: `supabase/schema.sql` (regenerated, never hand-edited)
 - Modify: `docs/SCHEMA.md` (the `schedule_settings` row near line 69 and the validator paragraph near lines 209–213)
@@ -38,7 +38,7 @@ Spec: `docs/superpowers/specs/2026-10-15-kiosk-header-modules-design.md`. Branch
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- 0081 — the kiosk's header modules (Správa → Kiosk → Záhlaví): every
+-- 0082 — the kiosk's header modules (Správa → Kiosk → Záhlaví): every
 -- module of the status bar but the clock and today's matches is off, left
 -- (after the clock) or right (before „Rezervace tréninku“), in an order.
 -- One jsonb column holds it:
@@ -96,7 +96,7 @@ $$;
 revoke all on function kiosk_header_valid(jsonb) from public, anon;
 grant execute on function kiosk_header_valid(jsonb) to authenticated, service_role;
 comment on function kiosk_header_valid(jsonb) is
-  'Whether a value is a kiosk header layout (0081), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
+  'Whether a value is a kiosk header layout (0082), for the check on schedule_settings.kiosk_header; never raises. authenticated executes it: the check runs as the admin who saves.';
 
 -- A new alley: the notices on the right, the rest off — what the old
 -- switches' defaults convert to.
@@ -113,9 +113,9 @@ alter table schedule_settings
     check (kiosk_weather_title is null
            or char_length(btrim(kiosk_weather_title)) between 1 and 40);
 comment on column schedule_settings.kiosk_header is
-  'The kiosk''s header modules (0081): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
+  'The kiosk''s header modules (0082): modules [{id, side off|left|right}] in their order — left after the clock, right before „Rezervace tréninku“. kiosk_header_valid checks the shape only; the app keeps an id it does not know.';
 comment on column schedule_settings.kiosk_weather_title is
-  'The weather module''s title on the kiosk (0081), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
+  'The weather module''s title on the kiosk (0082), typed by the admin („Dnes v Brně“); null shows „Počasí“.';
 
 -- The old switches, converted: one on goes left — the weather, the name
 -- day and the duty stood beside or under the clock — and the notices
@@ -150,10 +150,10 @@ alter table schedule_settings
   drop column if exists kiosk_notices_header;
 ```
 
-- [ ] **Step 2: Tenancy block for 0081** — before the final `rollback;` of `supabase/tests/tenancy_rls.sql`, after the 0079 block, modelled on the 0077 section (search `0077` around lines 12222–12610 for its case table, double run, snapshot and assertions). It must:
+- [ ] **Step 2: Tenancy block for 0082** — before the final `rollback;` of `supabase/tests/tenancy_rls.sql`, after the 0079 block, modelled on the 0077 section (search `0077` around lines 12222–12610 for its case table, double run, snapshot and assertions). It must:
   1. re-run `\ir ../migrations/0067_kiosk_weather_nameday.sql`, `0073_kiosk_duty.sql`, `0077_kiosk_panels.sql` (use the exact file names in `supabase/migrations/`) so the four old columns exist again;
   2. insert case tenants and set the four booleans per case (all off; all on; only weather; only notices off; nameday+duty) through a temp case table;
-  3. `\ir ../migrations/0081_kiosk_header.sql` twice with a snapshot temp table after the first run, asserting the second run changes nothing;
+  3. `\ir ../migrations/0082_kiosk_header.sql` twice with a snapshot temp table after the first run, asserting the second run changes nothing;
   4. assert per case the exact `kiosk_header` (e.g. all on → weather left, nameday left, duty left, notices right, in that order);
   5. assert the four old columns are absent from `information_schema.columns`; both named checks exist in `pg_constraint`; a new alley (insert a tenant) gets the default `{"modules":[weather off, nameday off, duty off, notices right]}`;
   6. assert `check_violation` for: a non-object, `{"modules": 3}`, a module without id, an empty id, a duplicate id, side `"middle"`; and that `kiosk_header_valid` returns `false` (not null, no error) for `'3'`, `'[]'`, `'{"modules":[1]}'`; that `kiosk_header_valid('{"modules":[{"id":"later","side":"left"}]}')` is true (unknown ids pass);
@@ -163,23 +163,23 @@ alter table schedule_settings
   10. the `public_week` settings keys stay the six (`booking_horizon_days`, `kiosk_dark`, `kiosk_fit_day`, `lane_count`, `max_active_reservations`, `training_weekdays`).
   Use the suite's existing assertion idiom (`do $$ … raise exception 'FAIL: …' … $$`).
 
-- [ ] **Step 3: Keep „the schema as it is“ for blocks after older re-runs** — the suite re-runs 0067 (≈line 10578), 0073 (≈10744) and 0077 (≈10749, 12378, 12381). After the 0073 block that reads `kiosk_duty_header` (ends ≈10804) and after the 0077 section's last statement, add `\ir ../migrations/0081_kiosk_header.sql` so later blocks see the post-0081 schema. Do not change what those older blocks assert.
+- [ ] **Step 3: Keep „the schema as it is“ for blocks after older re-runs** — the suite re-runs 0067 (≈line 10578), 0073 (≈10744) and 0077 (≈10749, 12378, 12381). After the 0073 block that reads `kiosk_duty_header` (ends ≈10804) and after the 0077 section's last statement, add `\ir ../migrations/0082_kiosk_header.sql` so later blocks see the post-0082 schema. Do not change what those older blocks assert.
 
 - [ ] **Step 4: Run the snapshot + tenancy suite on a throwaway stack (background, ~5–8 min)**
 
 Run (Bash, `run_in_background: true`):
-`/private/tmp/claude-501/-Users-mvazan-Home/f84a2aec-e721-4071-a80d-56057b8d0e94/scratchpad/snap_repo.sh /Users/mvazan/Home/rezervator-kiosk-header > <scratchpad>/snap0081.log 2>&1; echo EXIT=$? >> <scratchpad>/snap0081.log`
+`/private/tmp/claude-501/-Users-mvazan-Home/f84a2aec-e721-4071-a80d-56057b8d0e94/scratchpad/snap_repo.sh /Users/mvazan/Home/rezervator-kiosk-header > <scratchpad>/snap0082.log 2>&1; echo EXIT=$? >> <scratchpad>/snap0082.log`
 Expected: the log ends with `tenancy OK` and a `supabase/schema.sql` diff stat. On `tenancy FAILED`, read `/private/tmp/claude-501/-Users-mvazan-Home/f84a2aec-e721-4071-a80d-56057b8d0e94/scratchpad/supa-throwaway/tenancy.log`, fix, re-run. Check `git diff supabase/schema.sql`: four column lines gone, `kiosk_header` and `kiosk_weather_title` added with comments and checks, `kiosk_header_valid` function and its grants, the `kiosk_notices_header` COMMENT gone — nothing else.
 
-- [ ] **Step 5: docs/SCHEMA.md** — in the `schedule_settings` row replace the four dropped columns with `kiosk_header` (0081: header modules off/left/right in order, `kiosk_header_valid`) and `kiosk_weather_title` (0081); add `kiosk_header_valid` beside `kiosk_panels_valid` in the validators paragraph.
+- [ ] **Step 5: docs/SCHEMA.md** — in the `schedule_settings` row replace the four dropped columns with `kiosk_header` (0082: header modules off/left/right in order, `kiosk_header_valid`) and `kiosk_weather_title` (0082); add `kiosk_header_valid` beside `kiosk_panels_valid` in the validators paragraph.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add supabase/migrations/0081_kiosk_header.sql supabase/tests/tenancy_rls.sql supabase/schema.sql docs/SCHEMA.md
-git commit -m "feat(db): moduly záhlaví kiosku — kiosk_header a nadpis počasí (0081)
+git add supabase/migrations/0082_kiosk_header.sql supabase/tests/tenancy_rls.sql supabase/schema.sql docs/SCHEMA.md
+git commit -m "feat(db): moduly záhlaví kiosku — kiosk_header a nadpis počasí (0082)
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- supabase/migrations/0081_kiosk_header.sql supabase/tests/tenancy_rls.sql supabase/schema.sql docs/SCHEMA.md
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- supabase/migrations/0082_kiosk_header.sql supabase/tests/tenancy_rls.sql supabase/schema.sql docs/SCHEMA.md
 ```
 
 ---
@@ -197,20 +197,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- supabase/migrations/
 - [ ] **Step 1: Write the failing tests** `test/domain/kiosk_header_test.dart`, in the style of `test/domain/kiosk_layout_test.dart` (helper `placed(h)` printing `id:side` in list order):
   - the ids: `KioskHeaderModule.values.map((m) => m.name)` == `['weather', 'nameday', 'duty', 'notices']`.
   - `KioskHeader.defaults.toJson()` == `{'modules': [{'id': 'weather', 'side': 'off'}, {'id': 'nameday', 'side': 'off'}, {'id': 'duty', 'side': 'off'}, {'id': 'notices', 'side': 'right'}]}`.
-  - the default is 0081's column default: read `supabase/migrations/0081_kiosk_header.sql`, regex `r"kiosk_header\s+jsonb[^;']*?default\s+'(\{[^']*\})'"`, `jsonDecode` the match, compare to `KioskHeader.defaults.toJson()` (copy `models_test.dart`'s 0077 test ≈350–366).
+  - the default is 0082's column default: read `supabase/migrations/0082_kiosk_header.sql`, regex `r"kiosk_header\s+jsonb[^;']*?default\s+'(\{[^']*\})'"`, `jsonDecode` the match, compare to `KioskHeader.defaults.toJson()` (copy `models_test.dart`'s 0077 test ≈350–366).
   - fromJson: round trip through `jsonDecode(jsonEncode(...))`; `null`, `'x'`, `3`, `{}`, `{'modules': 3}` read as defaults; missing known modules appended off in enum order; an unknown id is kept and written back exactly (`{'id': 'later', 'side': 'left', 'x': 1}`); duplicate, id-less, empty-id and non-object entries skipped; an unknown side reads as off.
   - `modulesOn(PanelSide.left)` lists only known modules on the left, in order; `sideOf`/`isOn`.
   - `withSide` keeps the slot; `moved(m, -1/+1)` moves among known modules on the same side only and stops at the ends; a module off does not move; an unknown entry keeps its slot.
   - `kioskHeaderFromLegacy`: all off → weather/nameday/duty off, notices off; all on → left, left, left, right; only notices → defaults; the result's `toJson` passes the shape rules (ids unique, sides in off/left/right).
   - `==`/`hashCode` equal for equal layouts, unequal after `withSide`.
-  - In `test/domain/models_test.dart` add: `kiosk_header` parsed (`ScheduleSettings.fromJson({...base, 'kiosk_header': {...}}).kioskHeader.sideOf(KioskHeaderModule.weather) == PanelSide.left`); missing → `KioskHeader.defaults`; `kiosk_weather_title` `'  Dnes v Brně  '` → `'Dnes v Brně'`, `'   '` → null, missing → null; a cached row from before 0081 (with `kiosk_weather: true` but no `kiosk_header`) reads `kioskHeader == KioskHeader.defaults` (no conversion in Dart, like the 0077 test ≈200–218).
+  - In `test/domain/models_test.dart` add: `kiosk_header` parsed (`ScheduleSettings.fromJson({...base, 'kiosk_header': {...}}).kioskHeader.sideOf(KioskHeaderModule.weather) == PanelSide.left`); missing → `KioskHeader.defaults`; `kiosk_weather_title` `'  Dnes v Brně  '` → `'Dnes v Brně'`, `'   '` → null, missing → null; a cached row from before 0082 (with `kiosk_weather: true` but no `kiosk_header`) reads `kioskHeader == KioskHeader.defaults` (no conversion in Dart, like the 0077 test ≈200–218).
 
 - [ ] **Step 2: Run them — FAIL** (`TZ=Europe/Prague flutter test test/domain/kiosk_header_test.dart test/domain/models_test.dart` → compile errors).
 
 - [ ] **Step 3: Implement `lib/domain/kiosk_header.dart`**
 
 ```dart
-/// The kiosk's header modules, the pure half (0081, `schedule_settings.
+/// The kiosk's header modules, the pure half (0082, `schedule_settings.
 /// kiosk_header`): which module stands left of the centre (after the
 /// clock), which right (before „Rezervace tréninku“), which is off, and
 /// their order. Správa → Kiosk → Záhlaví edits it, the status bar lays it
@@ -226,7 +226,7 @@ import 'kiosk_layout.dart' show PanelSide;
 /// — do not rename one.
 enum KioskHeaderModule { weather, nameday, duty, notices }
 
-/// The weather module's title while the admin has typed none (0081's
+/// The weather module's title while the admin has typed none (0082's
 /// `kiosk_weather_title` null).
 const kioskWeatherDefaultTitle = 'Počasí';
 
@@ -274,7 +274,7 @@ class KioskHeader {
   /// In order: a side lays its modules out left to right as listed here.
   final List<KioskHeaderPlacement> modules;
 
-  /// 0081's column default, letter for letter (a test compares the two):
+  /// 0082's column default, letter for letter (a test compares the two):
   /// the notices on the right, the rest off — what the old switches'
   /// defaults convert to.
   static const defaults = KioskHeader(
@@ -287,7 +287,7 @@ class KioskHeader {
   );
 
   /// Reads `kiosk_header`. Without a `modules` list (a row from before
-  /// 0081) it is the defaults. Entries that are no object or have no id,
+  /// 0082) it is the defaults. Entries that are no object or have no id,
   /// and an id's second entry, are skipped; a bad side is off; an id this
   /// build does not know is kept as it was read; a module the list lacks
   /// is added at its end, off.
@@ -393,7 +393,7 @@ class KioskHeader {
   String toString() => 'KioskHeader($modules)';
 }
 
-/// 0081's conversion of the four old switches, in Dart (tested against the
+/// 0082's conversion of the four old switches, in Dart (tested against the
 /// same cases as the tenancy suite): an old switch on puts the weather,
 /// the name day and the duty left — they stood beside or under the clock —
 /// and the notices right, where their line was.
@@ -418,7 +418,7 @@ KioskHeader kioskHeaderFromLegacy({
 }
 ```
 
-- [ ] **Step 4: `ScheduleSettings`** — import `kiosk_header.dart` in `models.dart` (beside `kiosk_layout.dart`), add constructor params `this.kioskHeader = KioskHeader.defaults, this.kioskWeatherTitle`, fields with doc comments (`/// The header's modules (0081): …`, `/// The weather module's title (0081); null shows [kioskWeatherDefaultTitle].`), and in `fromJson`: `kioskHeader: KioskHeader.fromJson(json['kiosk_header'])`, `kioskWeatherTitle:` parsed exactly like `kioskWarning` (trimmed, blank → null). Leave `kioskWeather`, `kioskNameday`, `kioskDutyHeader`, `kioskNoticesHeader` untouched in this task.
+- [ ] **Step 4: `ScheduleSettings`** — import `kiosk_header.dart` in `models.dart` (beside `kiosk_layout.dart`), add constructor params `this.kioskHeader = KioskHeader.defaults, this.kioskWeatherTitle`, fields with doc comments (`/// The header's modules (0082): …`, `/// The weather module's title (0082); null shows [kioskWeatherDefaultTitle].`), and in `fromJson`: `kioskHeader: KioskHeader.fromJson(json['kiosk_header'])`, `kioskWeatherTitle:` parsed exactly like `kioskWarning` (trimmed, blank → null). Leave `kioskWeather`, `kioskNameday`, `kioskDutyHeader`, `kioskNoticesHeader` untouched in this task.
 
 - [ ] **Step 5: Run — PASS**: `TZ=Europe/Prague flutter test test/domain/kiosk_header_test.dart test/domain/models_test.dart test/domain/kiosk_layout_test.dart` and `flutter analyze`.
 
@@ -445,7 +445,7 @@ KioskHeader kioskHeaderFromLegacy({
 - [ ] **Step 1: Name day pair (TDD)** — in `test/domain/namedays_test.dart` replace the `nameDayLine` expectations: 3 Jan → `(title: 'Dnes má svátek', text: 'Radmila')`; several names → `(title: 'Dnes mají svátek', text: 'Kašpar, Melichar a Baltazar')`; 1 Jan → `(title: 'Státní svátek', text: 'Nový rok')`; 5 Jul → names win (`'Dnes mají svátek'`, `'Cyril a Metoděj'`); 29 Feb → `'Horymír'`; every day of a leap year non-null. Run → FAIL. Implement in `namedays.dart`:
 
 ```dart
-/// What the kiosk's name-day module says for [day] (0081): „Dnes má
+/// What the kiosk's name-day module says for [day] (0082): „Dnes má
 /// svátek“ over „Radmila“, „Dnes mají svátek“ over „Adam a Eva“ (several
 /// names joined the Czech way); a public holiday without a name:
 /// „Státní svátek“ over the holiday; null when there is neither.
@@ -469,7 +469,7 @@ Remove `nameDayLine` (its only caller is `KioskDayInfo`). Run → PASS.
 - [ ] **Step 2: The frame** `lib/features/kiosk/kiosk_header_module.dart`:
 
 ```dart
-/// One module of the kiosk's header (0081): a small title over its value.
+/// One module of the kiosk's header (0082): a small title over its value.
 /// Every module has the same height — a title line, then a value box
 /// [kioskHeaderValueHeight] tall (scaled with the text) — so the bar,
 /// which centres its children, lines all titles up and all values up.

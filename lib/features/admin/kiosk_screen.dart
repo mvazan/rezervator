@@ -114,6 +114,7 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskModule.matches => 'Zápasy',
     KioskModule.guide => 'Jak začít',
     KioskModule.week => 'Hráči týdne',
+    KioskModule.feedback => 'Napište nám',
   };
 
   static String _headerLabel(KioskHeaderModule module) => switch (module) {
@@ -140,6 +141,20 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskDutyBandPosition.middle => 'Mezi datem a zápasy',
     KioskDutyBandPosition.bottom => 'Dole pod zápasy',
   };
+
+  static String _freshLabel(KioskNoticesFresh f) => switch (f) {
+    KioskNoticesFresh.off => 'Nezvýrazňovat',
+    KioskNoticesFresh.highlight => 'Zvýraznit',
+    KioskNoticesFresh.longer => 'Zobrazit déle',
+    KioskNoticesFresh.both => 'Zvýraznit i zobrazit déle',
+  };
+
+  /// The note under „Čerstvé oznamy“ for the admin's [days] — one day in
+  /// its own form („před 1 dnem“, „před 3 dny“).
+  static String _freshNote(int days) =>
+      'Oznam vyvěšený před méně než '
+      '${days == 1 ? '1 dnem' : '$days dny'} dostane štítek NOVÉ, nebo '
+      'zůstane na obrazovce dvakrát déle.';
 
   /// The note under the two ranges: they are only where the list opens;
   /// [button] is the kiosk's own button for that direction.
@@ -572,12 +587,12 @@ class KioskSettingsScreen extends ConsumerWidget {
     );
   }
 
-  /// The header's layout (0081) — the default one until the settings row
+  /// The header's layout (0082) — the default one until the settings row
   /// exists.
   static KioskHeader _headerOf(ScheduleSettings? settings) =>
       settings?.kioskHeader ?? KioskHeader.defaults;
 
-  /// Writes the header's layout (0081) — the whole of it, as the panels':
+  /// Writes the header's layout (0082) — the whole of it, as the panels':
   /// the column's check validates it as one value — with [extra] columns
   /// in the same PATCH.
   Future<void> _header(
@@ -612,10 +627,10 @@ class KioskSettingsScreen extends ConsumerWidget {
     },
   );
 
-  /// At most this many characters: 0081's check on `kiosk_weather_title`.
+  /// At most this many characters: 0082's check on `kiosk_weather_title`.
   static const _weatherTitleMaxLength = 40;
 
-  /// The weather module's title (0081), typed in a dialog starting from
+  /// The weather module's title (0082), typed in a dialog starting from
   /// the one shown; saved trimmed, the default as none — the kiosk shows
   /// [kioskWeatherDefaultTitle] then.
   Future<void> _editWeatherTitle(
@@ -644,7 +659,7 @@ class KioskSettingsScreen extends ConsumerWidget {
   /// list and for „Vlevo, vždy první“.
   static const _headerSideWidth = 170.0;
 
-  /// „Záhlaví“ (0081): the table that puts the header's modules left or
+  /// „Záhlaví“ (0082): the table that puts the header's modules left or
   /// right of the centre and orders them — the clock and today's matches
   /// with their fixed places as its first and last rows — then the
   /// weather's place and title while the weather is in the header.
@@ -1289,7 +1304,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   'v Záhlaví, do panelu vlevo nebo vpravo v Panelech (výš).',
               [
                 if (_headerOf(settings).isOn(KioskHeaderModule.notices) ||
-                    _placed(settings, KioskModule.notices))
+                    _placed(settings, KioskModule.notices)) ...[
                   _number(
                     context,
                     settings,
@@ -1303,6 +1318,56 @@ class KioskSettingsScreen extends ConsumerWidget {
                         'Po kolika sekundách se ukáže další oznam '
                         '(v záhlaví i v panelu).',
                   ),
+                  // What a notice up for less than a few days gets on the
+                  // kiosk (0081) — and those days, unless it gets nothing.
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskNoticesFresh>(
+                      initialValue:
+                          settings?.kioskNoticesFresh ??
+                          KioskNoticesFresh.highlight,
+                      decoration: InputDecoration(
+                        labelText: 'Čerstvé oznamy',
+                        helperText: _freshNote(
+                          settings?.kioskNoticesFreshDays ?? 3,
+                        ),
+                        helperMaxLines: 3,
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final f in KioskNoticesFresh.values)
+                          DropdownMenuItem(
+                            value: f,
+                            child: Text(_freshLabel(f)),
+                          ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (f) => f == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_notices_fresh_mode': f.name,
+                                  }),
+                    ),
+                  ),
+                  if ((settings?.kioskNoticesFresh ??
+                          KioskNoticesFresh.highlight) !=
+                      KioskNoticesFresh.off)
+                    _number(
+                      context,
+                      settings,
+                      'Čerstvý je do',
+                      settings?.kioskNoticesFreshDays ?? 3,
+                      'kiosk_notices_fresh_days',
+                      // „do 1 dne“, „do 2 dní“: the stored days, so the
+                      // unit follows the echo of what was written.
+                      unit: (settings?.kioskNoticesFreshDays ?? 3) == 1
+                          ? 'dne'
+                          : 'dní',
+                      min: 1,
+                      max: 14,
+                    ),
+                ],
               ],
             ),
             _section(

@@ -17,6 +17,7 @@ import 'core/web/page_background.dart';
 import 'core/theme_choice.dart';
 import 'data/local_prefs.dart';
 import 'features/auth/auth_gate.dart';
+import 'features/feedback/feedback_screen.dart';
 import 'features/kiosk/kiosk_login_screen.dart';
 import 'features/public/public_schedule_screen.dart';
 import 'push/pending_link.dart';
@@ -112,6 +113,15 @@ final _router = GoRouter(
       builder: (_, state) => AppConfig.hasSupabase
           ? PublicScheduleScreen(slug: state.pathParameters['slug']!)
           : const _NotConfigured(),
+    ),
+    // Napište nám with no sign-in: where the kiosk's QR code leads
+    // (`?z=kiosk`). Needs no backend — the message goes to Sentry — so no
+    // _NotConfigured either.
+    GoRoute(
+      path: '/napiste-nam',
+      builder: (_, state) => FeedbackScreen(
+        source: feedbackSourceFromQuery(state.uri.queryParameters['z']),
+      ),
     ),
     // Deep links (0051) from the e-mails (and any later Android app link):
     // the signed-in app as usual, with the message or notice opened on

@@ -15,7 +15,7 @@ void main() {
   String on(KioskHeader h, PanelSide side) =>
       [for (final m in h.modulesOn(side)) m.id].join(' ');
 
-  /// What 0081's `kiosk_header_valid` asks of a layout: an object whose
+  /// What 0082's `kiosk_header_valid` asks of a layout: an object whose
   /// `modules` is a list of objects, each with a non-empty string id (no
   /// two alike) and a side off, left or right.
   bool valid(Object? json) {
@@ -64,11 +64,11 @@ void main() {
       expect(on(KioskHeader.defaults, PanelSide.left), '');
     });
 
-    test('is 0081\'s column default, value for value', () {
-      // Every alley without a saved layout gets 0081's default; the app's
+    test('is 0082\'s column default, value for value', () {
+      // Every alley without a saved layout gets 0082's default; the app's
       // fallback must be the same layout.
       final sql = File(
-        'supabase/migrations/0081_kiosk_header.sql',
+        'supabase/migrations/0082_kiosk_header.sql',
       ).readAsStringSync();
       final column = RegExp(
         r"kiosk_header\s+jsonb[^;']*?default\s+'(\{[^']*\})'",
@@ -341,7 +341,7 @@ void main() {
     });
   });
 
-  group('kioskHeaderFromLegacy (0081\'s conversion)', () {
+  group('kioskHeaderFromLegacy (0082\'s conversion)', () {
     String legacy({
       bool weather = false,
       bool nameday = false,
