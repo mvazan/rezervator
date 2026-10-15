@@ -54,17 +54,29 @@ const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
 
 /// Asks the server for a fresh score of the match [id] (refresh_match,
-/// forced: the kiosk's own clock decides how often). Errors are swallowed —
-/// a failed ask leaves the score as it was, and the age line says how old.
-final kioskRefreshMatchProvider = Provider<Future<void> Function(String id)>(
+/// forced: the kiosk's own clock decides how often) and hands back its
+/// answer — `queued` (a fetch is on its way), `fresh` or `not_live`
+/// (nothing will come). Errors are swallowed into null — a failed ask
+/// leaves the score as it was, and the age line says how old.
+final kioskRefreshMatchProvider =
+    Provider<Future<String?> Function(String id)>(
   (ref) => (id) async {
     try {
-      await Api.refreshMatch(id, force: true);
+      return await Api.refreshMatch(id, force: true);
     } catch (e) {
       debugPrint('Kiosk: refresh of $id failed: $e');
+      return null;
     }
   },
 );
+
+/// The longest the ⟳ of the live view turns for one ask: a fetch the
+/// server queued lands well within it; one that does not is given up on.
+const kioskRefreshWait = Duration(seconds: 30);
+
+/// The shortest it turns: an answer that comes at once (`fresh`) would
+/// otherwise stop it before it ever started, and a tap would show nothing.
+const kioskRefreshMinSpin = Duration(milliseconds: 800);
 
 /// The matches being played whose players the site has delivered — empty
 /// with live mode off. A match marked as playing but without data is not
@@ -1233,22 +1245,52 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   Timer? _refresh;
   Duration? _refreshEvery;
 
+  /// The matches a fresh score is being asked for — by the clock or by a
+  /// tap on the age line — each with the fetch time on screen when asked:
+  /// their ⟳ turns until that time moves on, the answer says nothing will
+  /// come, or [kioskRefreshWait] runs out.
+  final _asking = <String, DateTime?>{};
+  final _askTimeouts = <String, Timer>{};
+
   void _armRefresh(Duration every) {
     if (_refreshEvery == every) return;
     _refreshEvery = every;
     _refresh?.cancel();
-    void ask() {
-      final ask = ref.read(kioskRefreshMatchProvider);
+    void askAll() {
       for (final m in widget.matches) {
-        unawaited(ask(m.id));
+        unawaited(_ask(m.id));
       }
     }
 
-    _refresh = Timer.periodic(every, (_) => ask());
+    _refresh = Timer.periodic(every, (_) => askAll());
     // And once now: the score on screen is as old as it is.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ask();
+      if (mounted) askAll();
     });
+  }
+
+  /// One ask for [id]'s score; a second while one is out waits for it.
+  Future<void> _ask(String id) async {
+    if (_asking.containsKey(id)) return;
+    final asked = ref.read(kioskRefreshMatchProvider);
+    setState(() {
+      _asking[id] = ref.read(matchResultsProvider).value?[id]?.fetchedAt;
+    });
+    _askTimeouts[id] = Timer(kioskRefreshWait, () => _asked(id));
+    final (status, _) = await (
+      asked(id),
+      Future<void>.delayed(kioskRefreshMinSpin),
+    ).wait;
+    // Queued: the fetch's arrival ends the wait (build's listener). Fresh,
+    // not live, or failed: nothing more is coming.
+    if (status != 'queued') _asked(id);
+  }
+
+  void _asked(String id) {
+    _askTimeouts.remove(id)?.cancel();
+    if (mounted && _asking.containsKey(id)) {
+      setState(() => _asking.remove(id));
+    }
   }
 
   @override
@@ -1296,6 +1338,9 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   void dispose() {
     _timer?.cancel();
     _refresh?.cancel();
+    for (final t in _askTimeouts.values) {
+      t.cancel();
+    }
     super.dispose();
   }
 
@@ -1307,6 +1352,13 @@ class _LiveViewState extends ConsumerState<_LiveView> {
       seconds: ref.watch(settingsProvider).value?.kioskLiveRefreshSeconds ?? 60,
     );
     _armRefresh(refreshEvery);
+    // A fetch landed: the ⟳ of its match stops.
+    ref.listen(matchResultsProvider, (_, next) {
+      final results = next.value ?? const {};
+      for (final MapEntry(key: id, value: asked) in [..._asking.entries]) {
+        if (results[id]?.fetchedAt != asked) _asked(id);
+      }
+    });
     // A locked match stays on screen wherever the list puts it.
     final lockedAt = _locked
         ? matches.indexWhere((m) => m.id == _lockedId)
@@ -1416,7 +1468,13 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Flexible(child: _LiveAge(slot: slot)),
+                          Flexible(
+                            child: _LiveAge(
+                              slot: slot,
+                              refreshing: _asking.containsKey(slot.id),
+                              onRefresh: () => unawaited(_ask(slot.id)),
+                            ),
+                          ),
                           // The live badge everywhere else has: the pulsing
                           // red camera — still with the admin's animations
                           // off.
@@ -1490,34 +1548,118 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   }
 }
 
-/// How old the score on screen is: „⟳ před 3 min“.
-class _LiveAge extends ConsumerWidget {
-  const _LiveAge({required this.slot});
+/// How old the score on screen is — „⟳ před 3 min“ — and the button that
+/// asks for a fresh one: a tap does what the kiosk's clock does every
+/// refresh interval. The ⟳ turns while a fresh score is on its way, asked
+/// for by either.
+class _LiveAge extends ConsumerStatefulWidget {
+  const _LiveAge({
+    required this.slot,
+    required this.refreshing,
+    required this.onRefresh,
+  });
 
   final PrioritySlot slot;
+  final bool refreshing;
+  final VoidCallback onRefresh;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LiveAge> createState() => _LiveAgeState();
+}
+
+class _LiveAgeState extends ConsumerState<_LiveAge>
+    with SingleTickerProviderStateMixin {
+  late final _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 1),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.refreshing) _spin.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_LiveAge old) {
+    super.didUpdateWidget(old);
+    if (widget.refreshing && !_spin.isAnimating) {
+      _spin.repeat();
+    } else if (!widget.refreshing && old.refreshing) {
+      // Finishes the turn it is in rather than jump back upright.
+      _spin.animateTo(1).then((_) {
+        if (mounted && !widget.refreshing) _spin.value = 0;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final fetched = ref.watch(
-      matchResultsProvider.select((r) => r.value?[slot.id]?.fetchedAt),
+      matchResultsProvider.select((r) => r.value?[widget.slot.id]?.fetchedAt),
     );
     if (fetched == null) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.refresh, size: 14, color: scheme.onSurfaceVariant),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            freshnessLabel(fetched, now),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+    final age = freshnessLabel(fetched, now);
+    return Semantics(
+      button: true,
+      label: widget.refreshing
+          ? 'Obnovuji výsledky, $age'
+          : 'Obnovit výsledky, $age',
+      excludeSemantics: true,
+      // Its own Material: the ripple would paint on the Scaffold's, under
+      // the drawer's opaque background.
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          // While one is out, a tap would only ask again for the same.
+          onTap: widget.refreshing ? null : widget.onRefresh,
+          borderRadius: BorderRadius.circular(8),
+          child: ConstrainedBox(
+            // A finger's worth on a wall display, however short the text.
+            constraints: const BoxConstraints(minHeight: 48),
+            // Room to the left only: the text still ends flush with the
+            // header's right edge (or against the live badge).
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RotationTransition(
+                    turns: _spin,
+                    child: Icon(
+                      Icons.refresh,
+                      size: 18,
+                      color: widget.refreshing
+                          ? scheme.primary
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      age,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-      ],
+      ),
     );
   }
 }

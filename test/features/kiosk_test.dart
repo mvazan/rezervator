@@ -1826,6 +1826,8 @@ void main() {
       bool followBoard = true,
       bool Function()? socketOpen,
       void Function(String id)? onRefresh,
+      // refresh_match's answer; a Completer's future holds it back.
+      Future<String?> Function(String id)? refreshAnswer,
       int liveRefresh = 60,
       MatchLayout liveLayout = MatchLayout.full,
       int visibleDays = 7,
@@ -1931,9 +1933,10 @@ void main() {
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
         kioskSocketOpenProvider.overrideWithValue(socketOpen ?? () => true),
-        kioskRefreshMatchProvider.overrideWithValue(
-          (id) async => onRefresh?.call(id),
-        ),
+        kioskRefreshMatchProvider.overrideWithValue((id) async {
+          onRefresh?.call(id);
+          return refreshAnswer == null ? 'fresh' : await refreshAnswer(id);
+        }),
         matchResultsProvider.overrideWith(
           (ref) => resultsStream ?? Stream.value(results),
         ),
@@ -2624,12 +2627,15 @@ void main() {
           closeTo(tester.getTopLeft(badge).dx - 4, 0.5),
         );
         // The dots' tap target (the lock and the dots, padded) ends where
-        // the age begins.
+        // the age's own (the refresh button, padded on its left) begins.
         final dotsTarget = find
             .ancestor(of: dots, matching: find.byType(GestureDetector))
             .first;
+        final ageTarget = find
+            .ancestor(of: age, matching: find.byType(InkWell))
+            .first;
         expect(
-          tester.getTopLeft(age).dx,
+          tester.getTopLeft(ageTarget).dx,
           closeTo(tester.getTopRight(dotsTarget).dx, 0.5),
         );
         await finish(tester);
@@ -4501,6 +4507,143 @@ void main() {
       expect(liveView, findsOneWidget);
 
       await finish(tester);
+    });
+
+    group('the score\'s age is a refresh button (⟳ turns while asking)', () {
+      // The ⟳ of the live view's header and whether it is turning.
+      Finder spinner() => find
+          .ancestor(
+            of: find.descendant(
+              of: find.byType(KioskDrawer),
+              matching: find.byIcon(Icons.refresh),
+            ),
+            matching: find.byType(RotationTransition),
+          )
+          .first;
+      bool turning(WidgetTester tester) =>
+          (tester.widget<RotationTransition>(spinner()).turns
+                  as AnimationController)
+              .isAnimating;
+      Finder ageButton() => find
+          .ancestor(of: spinner(), matching: find.byType(InkWell))
+          .first;
+
+      testWidgets('a tap asks for a fresh score; the ⟳ turns until it '
+          'arrives — no second ask meanwhile — or gives up after 30 s', (
+        tester,
+      ) async {
+        fullHd(tester);
+        final asked = <String>[];
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        MatchResult at(String fetched) =>
+            res('m', 'in_progress', 2, 1, fetched: fetched);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            resultsStream: results.stream,
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            onRefresh: asked.add,
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        results.add({'m': at('2026-10-08T09:50:00+00:00')});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        // The ask on opening runs after the first frame; this one shows it.
+        await tester.pump();
+        expect(liveView, findsOneWidget);
+        // Asked on opening: turning until the fetch lands.
+        expect(asked, ['m']);
+        expect(turning(tester), isTrue);
+        results.add({'m': at('2026-10-08T09:59:00+00:00')});
+        await tester.pump();
+        // It finishes the turn it is in.
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+
+        // A tap: asked again, turning; a tap meanwhile asks nothing more.
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(asked, ['m', 'm']);
+        expect(turning(tester), isTrue);
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 10));
+        expect(asked, ['m', 'm']);
+        expect(turning(tester), isTrue);
+        results.add({'m': at('2026-10-08T10:00:00+00:00')});
+        await tester.pump();
+        // It finishes the turn it is in.
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+
+        // Queued, but nothing lands: given up on after 30 s.
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 29));
+        expect(turning(tester), isTrue);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        expect(asked, ['m', 'm', 'm']);
+        await finish(tester);
+      });
+
+      testWidgets('an answer that nothing will come (fresh, not live, or a '
+          'failure) stops it — after a short turn, so a tap shows', (
+        tester,
+      ) async {
+        fullHd(tester);
+        for (final answer in ['fresh', 'not_live', null]) {
+          await tester.pumpWidget(
+            app(
+              slots: [fed('m', day, 'Hrají')],
+              results: {'m': res('m', 'in_progress', 2, 1)},
+              lineups: {'m': lineup},
+              liveRefresh: 600,
+              refreshAnswer: (_) async => answer,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(turning(tester), isFalse, reason: '$answer');
+          await tester.tap(ageButton());
+          await tester.pump(const Duration(milliseconds: 500));
+          expect(turning(tester), isTrue, reason: '$answer');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pump(const Duration(seconds: 2));
+          expect(turning(tester), isFalse, reason: '$answer');
+          await finish(tester);
+        }
+      });
+
+      testWidgets('the clock\'s ask turns it too', (tester) async {
+        fullHd(tester);
+        final asked = <String>[];
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            liveRefresh: 30,
+            idleSeconds: 600,
+            onRefresh: asked.add,
+            // The ask on opening: answered at once; the clock's: queued.
+            refreshAnswer: (_) async => asked.length < 2 ? 'fresh' : 'queued',
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(asked, ['m']);
+        expect(turning(tester), isFalse);
+        while (asked.length < 2) {
+          await tester.pump(const Duration(seconds: 1));
+        }
+        await tester.pump();
+        expect(turning(tester), isTrue);
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        await finish(tester);
+      });
     });
 
     testWidgets('a swipe turns the live matches', (tester) async {
