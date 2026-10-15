@@ -3506,6 +3506,37 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('neither a centre nor the notices: the right modules stay '
+          'on the right, before „Rezervovat“', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.right)
+            .withSide(KioskHeaderModule.nameday, PanelSide.right)
+            .withSide(KioskHeaderModule.notices, PanelSide.off);
+        // An open day without a match: no info line, nothing in the centre.
+        await tester.pumpWidget(app(header: header, forecast: forecast));
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskHeadline), findsNothing);
+        expect(find.byType(Wrap), findsNothing);
+        expect(findEmojiTextContaining('Další trénink'), findsNothing);
+        final button = tester.getRect(find.byType(GradientButton));
+        expect(
+          rectOf(tester, KioskNameDayModule).right,
+          closeTo(button.left - 16, 0.5),
+        );
+        expect(
+          rectOf(tester, KioskNameDayModule).left -
+              rectOf(tester, KioskWeatherModule).right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+        // Not right after the clock.
+        expect(
+          rectOf(tester, KioskWeatherModule).left,
+          greaterThan(clockOf(tester).right + 200),
+        );
+        await finish(tester);
+      });
+
       testWidgets('the weather module: the admin\'s title, „Počasí“ without '
           'one; a tap shows the source in its place', (tester) async {
         fullHd(tester);
