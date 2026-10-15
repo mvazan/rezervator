@@ -32,6 +32,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/upcoming.dart';
+import '../../core/widgets/shown_names.dart';
 
 class MatchExceptionsScreen extends ConsumerStatefulWidget {
   const MatchExceptionsScreen({super.key, this.setMatchException});
@@ -253,7 +254,9 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
                         _markIcon(shown),
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      title: Text(slot.title),
+                      title: ShownNames(
+                        builder: (context, names) => Text(names.title(slot)),
+                      ),
                       subtitle: Text(
                         '${dayLabel(slot.date)} · '
                         '${shown ? 'přidáno' : 'skryto'}',
@@ -302,7 +305,9 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
                 semanticLabel: exception ? 'přidáno' : 'skryto',
               ),
       ),
-      title: Text(slot.title),
+      title: ShownNames(
+        builder: (context, names) => Text(names.title(slot)),
+      ),
       subtitle: Text(_when(slot)),
       // Ticking back to what the teams say stores nothing: the exception is
       // dropped instead, so an untouched decision never becomes a row.

@@ -18,6 +18,7 @@ import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/week_players.dart';
 import 'kiosk_info_panel.dart' show KioskCard;
+import '../../core/widgets/shown_names.dart';
 
 const _blockTitleStyle = TextStyle(fontSize: 15, fontWeight: FontWeight.w800);
 const _entryStyle = TextStyle(fontSize: 17, fontWeight: FontWeight.w700);
@@ -228,11 +229,13 @@ class _CardBlock extends StatelessWidget {
               ),
             ],
           ),
-          Text(
-            '${line.teamName} · ${_where(line)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: _entryTeamStyle.copyWith(color: scheme.onSurfaceVariant),
+          ShownNames(
+            builder: (context, names) => Text(
+              '${names.team(line.teamName)} · ${_where(line)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _entryTeamStyle.copyWith(color: scheme.onSurfaceVariant),
+            ),
           ),
         ],
       ],
@@ -500,7 +503,8 @@ class _GroupColumn extends StatelessWidget {
                   ],
                   Expanded(
                     child: Text(
-                      group.title,
+                      // The club's nickname (0080) for its name.
+                      shownNamesNow(context).team(group.title),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -589,7 +593,9 @@ class _DetailRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: placeWidth),
               child: Text(
-                '${line.teamName} – ${line.opponent} · ${_where(line)}',
+                '${shownNamesNow(context).team(line.teamName)} – '
+                '${shownNamesNow(context).team(line.opponent)} · '
+                '${_where(line)}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: _entryTeamStyle.copyWith(

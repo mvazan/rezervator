@@ -35,13 +35,16 @@ List<(String? clubName, List<Profile> members)> playersByClub(
 
 /// Club sections alphabetically, 'Bez oddílu' last; players alphabetically
 /// within a section (the count column carries the ranking, the list stays
-/// findable by name like every other list in the app).
+/// findable by name like every other list in the app). [names] turns the
+/// club's full name into its nickname (0080) — header and order alike.
 List<(String header, List<AttendanceRow> members)> attendanceByClub(
-  List<AttendanceRow> rows,
-) {
+  List<AttendanceRow> rows, {
+  NameDisplay? names,
+}) {
   final groups = <String, List<AttendanceRow>>{};
   for (final r in rows) {
-    groups.putIfAbsent(r.club, () => []).add(r);
+    final club = r.club.isEmpty ? '' : names?.team(r.club) ?? r.club;
+    groups.putIfAbsent(club, () => []).add(r);
   }
   for (final members in groups.values) {
     members.sort((a, b) => compareCzech(a.displayName, b.displayName));

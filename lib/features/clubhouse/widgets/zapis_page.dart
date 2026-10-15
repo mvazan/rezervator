@@ -55,6 +55,9 @@ class ZapisPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // The teams as the app shows them: a club's nickname (0080). The
+    // lookups below go by the match's id, never by these names.
+    final shown = ref.watch(nameDisplayProvider).shown(slot);
     final slug = competitionSlug;
     final MatchResult? result;
     final AsyncValue<List<MatchPlayerResult>> lineup;
@@ -77,7 +80,7 @@ class ZapisPage extends ConsumerWidget {
     var players = lineup.value ?? const <MatchPlayerResult>[];
     if (players.isEmpty) {
       return _NoSheet(
-        slot: slot,
+        slot: shown,
         result: result,
         closeButton: closeButton || backButton,
         backButton: backButton,
@@ -98,7 +101,7 @@ class ZapisPage extends ConsumerWidget {
       players = [for (final p in players) p.withRegnum(regnums[p.playerSlug])];
     }
     return LegacyScoreSheetPage(
-      slot: slot,
+      slot: shown,
       result: result,
       players: players,
       showCloseButton: closeButton || backButton,

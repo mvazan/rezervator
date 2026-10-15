@@ -337,6 +337,16 @@ class NameDisplay {
     return team;
   }
 
+  /// [slot] with its teams' names as shown — for a widget that draws them
+  /// and keys nothing by them; [slot] itself when nothing changes.
+  PrioritySlot shown(PrioritySlot slot) {
+    final home = team(slot.homeTeam);
+    final away = team(slot.awayTeam);
+    return home == slot.homeTeam && away == slot.awayTeam
+        ? slot
+        : slot.withTeams(home: home, away: away);
+  }
+
   /// [slot]'s title ([PrioritySlot.title]) with the teams' names as shown.
   String title(PrioritySlot slot) => !slot.type.isMatch
       ? slot.title
@@ -1311,6 +1321,33 @@ class PrioritySlot {
       : type.name;
 
   bool coversLane(int lane) => type.coversLane(lane);
+
+  /// This slot with other team names — the names as the app shows them
+  /// ([NameDisplay.shown]), for a widget that only draws them.
+  PrioritySlot withTeams({required String home, required String away}) =>
+      PrioritySlot(
+        id: id,
+        date: date,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        type: type,
+        homeTeam: home,
+        awayTeam: away,
+        prepMinutes: prepMinutes,
+        description: description,
+        parentId: parentId,
+        isAway: isAway,
+        importKey: importKey,
+        handEdited: handEdited,
+        videoUrl: videoUrl,
+        competition: competition,
+        round: round,
+        siteSlug: siteSlug,
+        siteMatchId: siteMatchId,
+        venue: venue,
+        venueSlug: venueSlug,
+        timeKnown: timeKnown,
+      );
 
   /// [type] is resolved by the caller (the provider joins the types stream);
   /// an unknown type_id falls back to a built-in-match placeholder so a
@@ -2500,5 +2537,7 @@ class CalendarLink {
 /// "Žádný tým" / the teams joined — the profile card's one-line summary.
 /// Not "Žádné": the reminders line right above says that, and the two rows
 /// must read apart at a glance.
-String matchTeamsSummary(List<String> teams) =>
-    teams.isEmpty ? 'Žádný tým' : teams.join(' · ');
+String matchTeamsSummary(List<String> teams, {NameDisplay? names}) =>
+    teams.isEmpty
+        ? 'Žádný tým'
+        : [for (final t in teams) names?.team(t) ?? t].join(' · ');

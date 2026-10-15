@@ -6,6 +6,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_scaffold.dart';
 import 'widgets/match_dialog.dart';
+import '../../core/widgets/shown_names.dart';
 
 /// Admin: manage MATCHES. A match blocks the whole alley for its window;
 /// its lane prep is the linked "Úklid před zápasem" child slot the server
@@ -18,7 +19,8 @@ class MatchesScreen extends ConsumerWidget {
       confirmDelete(
         context,
         title: 'Smazat zápas?',
-        message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
+        message: 'Opravdu smazat „${shownNamesNow(context).title(slot)}" '
+            '(${dayLabel(slot.date)})?',
         action: () => Api.deletePrioritySlot(slot.id),
       );
 
@@ -31,7 +33,7 @@ class MatchesScreen extends ConsumerWidget {
       title: Text(
         '${dayLabel(slot.date)} · '
         '${slot.startsAt.display()}–${slot.endsAt.display()} · '
-        '${slot.title}',
+        '${shownNamesNow(context).title(slot)}',
       ),
       subtitle: switch ([
         // Whose row this is: the federation's own results service, the old
