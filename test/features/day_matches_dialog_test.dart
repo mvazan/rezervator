@@ -237,7 +237,7 @@ void main() {
       final league = find.text('Jihomoravská divize · 5. kolo');
       final points = find.text('5');
       final pins = find.text('3460');
-      final colons = find.text(' : ');
+      final colons = find.text(':');
       for (final f in [title, where, league, points, pins]) {
         expect(f, findsOneWidget);
       }
@@ -255,6 +255,15 @@ void main() {
       expect(
         tester.getCenter(colons.at(0)).dx,
         closeTo(tester.getCenter(colons.at(1)).dx, 0.5),
+      );
+      // The points' colon as far from either number.
+      final colon = colons.at(0);
+      expect(
+        tester.getTopLeft(colon).dx - tester.getTopRight(points).dx,
+        closeTo(
+          tester.getTopLeft(find.text('3')).dx - tester.getTopRight(colon).dx,
+          0.5,
+        ),
       );
       expect(
         tester.getTopRight(points).dx,
@@ -493,7 +502,7 @@ void main() {
         final emphasised = Theme.of(
           tester.element(find.text('5')),
         ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800);
-        for (final digit in ['5', ' : ', '3']) {
+        for (final digit in ['5', ':', '3']) {
           expect(tester.widget<Text>(find.text(digit)).style, emphasised);
         }
 

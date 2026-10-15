@@ -250,11 +250,16 @@ class _ScoreBlock extends StatelessWidget {
     final r = result;
     final noPoints = r.homePoints == null && r.awayPoints == null;
     final pins = pinsLabel(r.homeTotal, r.awayTotal);
+    // The colon padded rather than spaced: a trailing space does not count
+    // when a line is centred, and „ : “ stood off its centre.
     TableRow line(String home, String colon, String away, TextStyle? style) =>
         TableRow(
           children: [
             Text(home, style: style, textAlign: TextAlign.right),
-            Text(colon, style: style, textAlign: TextAlign.center),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Text(colon, style: style, textAlign: TextAlign.center),
+            ),
             Text(away, style: style, textAlign: TextAlign.left),
           ],
         );
@@ -275,12 +280,12 @@ class _ScoreBlock extends StatelessWidget {
                   ? line('', '–', '', pointsStyle)
                   : line(
                       numLabel(r.homePoints),
-                      ' : ',
+                      ':',
                       numLabel(r.awayPoints),
                       pointsStyle,
                     ),
             if (pins.isNotEmpty)
-              line(side(r.homeTotal), ' : ', side(r.awayTotal), pinsStyle),
+              line(side(r.homeTotal), ':', side(r.awayTotal), pinsStyle),
           ],
         ),
       ),
