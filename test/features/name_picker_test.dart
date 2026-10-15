@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/palette.dart';
+import 'package:rezervator/domain/picker_clubs.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 
 /// The kiosk picker's LAYOUT and COLOUR, measured. Both used to be wrong in
@@ -229,5 +230,190 @@ void main() {
     final (bg, fg) = ClubColors.of(clubIndex, Brightness.light)!;
     expect(decorationOf(tester, 'Světlý Hráč').color, bg);
     expect(tester.widget<Text>(find.text('Světlý Hráč')).style?.color, fg);
+  });
+
+  group('by club (0076)', () {
+    const veverky = Club(id: 'v', name: 'TJ Veverky', colorIndex: 3);
+    const sokol = Club(id: 's', name: 'Sokol Čáslav', colorIndex: 7);
+    // 26 Veverky (over capacity: their letters), 3 Sokol (their names) and
+    // 2 without a club.
+    final roster = [
+      for (var i = 0; i < 26; i++)
+        PlayerName(
+          id: 'v$i',
+          displayName:
+              '${String.fromCharCode(65 + i)}${String.fromCharCode(65 + i)} Veverka',
+          clubId: 'v',
+          clubColor: 3,
+        ),
+      for (final n in ['Petr Sokol', 'Pavel Sokol', 'Jana Sokolová'])
+        PlayerName(id: n, displayName: n, clubId: 's', clubColor: 7),
+      const PlayerName(id: 'x1', displayName: 'Xaver Bezklubý'),
+      const PlayerName(id: 'x2', displayName: 'Yveta Bezklubá'),
+    ];
+
+    Widget clubPicker(
+      KioskPickerMode mode, {
+      List<PlayerName>? players,
+      List<Club> clubs = const [veverky, sokol],
+      String? note,
+    }) =>
+        ProviderScope(
+          overrides: [
+            playersProvider.overrideWith((ref) async => players ?? roster),
+            clubsProvider.overrideWith((ref) => Stream.value(clubs)),
+            settingsProvider.overrideWith(
+              (ref) => Stream.value(
+                ScheduleSettings(
+                  laneCount: 4,
+                  trainingWeekdays: const {1, 2, 4},
+                  bookingHorizonDays: 14,
+                  maxActiveReservations: 3,
+                  kioskPickerMode: mode,
+                  kioskPickerNote: note,
+                ),
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: NamePicker()),
+        );
+
+    testWidgets('clubs: the first page is the club tiles in their colour, '
+        '„Ostatní“ last, the note under them — no letters', (tester) async {
+      surface(tester, const Size(1920, 1080));
+      await tester.pumpWidget(
+        clubPicker(KioskPickerMode.clubs, note: 'Odhlásit se tu nedá.'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(clubHint), findsOneWidget);
+      expect(find.text(firstLetterHint), findsNothing);
+      expect(find.text('A'), findsNothing);
+      final tiles = ['Sokol Čáslav', 'TJ Veverky', pickerOthersName];
+      for (final t in tiles) {
+        expect(find.text(t), findsOneWidget);
+      }
+      // Czech-alphabetical, „Ostatní“ last: left to right on one row.
+      final lefts = [for (final t in tiles) tester.getRect(tileOf(t)).left];
+      expect(lefts, orderedEquals([...lefts]..sort()));
+      final (bg, fg) = ClubColors.of(3, Brightness.dark)!;
+      expect(decorationOf(tester, 'TJ Veverky').color, bg);
+      expect(tester.widget<Text>(find.text('TJ Veverky')).style?.color, fg);
+      expect(
+        tester.getRect(find.text('Odhlásit se tu nedá.')).top,
+        greaterThan(tester.getRect(tileOf('TJ Veverky')).bottom),
+      );
+    });
+
+    testWidgets('clubs: a big club drills into its own letters, a small one '
+        'lists its names; Zpět goes a letter back, then out of the club',
+        (tester) async {
+      surface(tester, const Size(1920, 1080));
+      await tester.pumpWidget(clubPicker(KioskPickerMode.clubs));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('TJ Veverky'));
+      await tester.pumpAndSettle();
+      expect(find.text('TJ Veverky'), findsOneWidget, reason: 'where you are');
+      expect(find.text(firstLetterHint), findsOneWidget);
+      // Only the Veverky's letters: nobody else is filed under them.
+      await tester.tap(find.text('P'));
+      await tester.pumpAndSettle();
+      expect(find.text('TJ Veverky · P…'), findsOneWidget);
+      expect(find.text('PP Veverka'), findsOneWidget);
+      expect(find.text('Petr Sokol'), findsNothing);
+
+      await tester.tap(find.text('Zpět'));
+      await tester.pumpAndSettle();
+      expect(find.text('TJ Veverky'), findsOneWidget);
+      expect(find.text(clubHint), findsNothing);
+      await tester.tap(find.text('Zpět'));
+      await tester.pumpAndSettle();
+      expect(find.text(clubHint), findsOneWidget);
+      expect(find.text('Zpět'), findsNothing);
+
+      await tester.tap(find.text('Sokol Čáslav'));
+      await tester.pumpAndSettle();
+      for (final n in ['Petr Sokol', 'Pavel Sokol', 'Jana Sokolová']) {
+        expect(find.text(n), findsOneWidget);
+      }
+      expect(find.text('AA Veverka'), findsNothing);
+
+      await tester.tap(find.text('Zpět'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(pickerOthersName));
+      await tester.pumpAndSettle();
+      expect(find.text('Xaver Bezklubý'), findsOneWidget);
+      expect(find.text('Yveta Bezklubá'), findsOneWidget);
+    });
+
+    testWidgets('both: the club tiles, then the letters of everyone',
+        (tester) async {
+      surface(tester, const Size(1920, 1080));
+      await tester.pumpWidget(clubPicker(KioskPickerMode.both));
+      await tester.pumpAndSettle();
+
+      expect(find.text(clubOrHint), findsOneWidget);
+      expect(find.text(orFirstLetterHint), findsOneWidget);
+      expect(find.text(firstLetterHint), findsNothing);
+      expect(
+        tester.getRect(find.text(orFirstLetterHint)).top,
+        greaterThan(tester.getRect(tileOf('TJ Veverky')).bottom),
+      );
+      // A letter goes across the clubs.
+      await tester.tap(find.text('P'));
+      await tester.pumpAndSettle();
+      expect(find.text('PP Veverka'), findsOneWidget);
+      expect(find.text('Petr Sokol'), findsOneWidget);
+      expect(find.text('TJ Veverky'), findsNothing);
+
+      await tester.tap(find.text('Zpět'));
+      await tester.pumpAndSettle();
+      expect(find.text('TJ Veverky'), findsOneWidget);
+    });
+
+    testWidgets('both on a small alley: the club tiles, then everyone\'s '
+        'names', (tester) async {
+      surface(tester, const Size(1920, 1080));
+      await tester.pumpWidget(
+        clubPicker(KioskPickerMode.both, players: roster.sublist(26)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(clubOrHint), findsOneWidget);
+      expect(find.text(orNameHint), findsOneWidget);
+      expect(find.text('Sokol Čáslav'), findsOneWidget);
+      expect(find.text(pickerOthersName), findsOneWidget);
+      expect(find.text('Petr Sokol'), findsOneWidget);
+      expect(find.text('Xaver Bezklubý'), findsOneWidget);
+    });
+
+    testWidgets('letters (the default) shows no clubs, whatever the roster',
+        (tester) async {
+      surface(tester, const Size(1920, 1080));
+      await tester.pumpWidget(clubPicker(KioskPickerMode.letters));
+      await tester.pumpAndSettle();
+
+      expect(find.text(firstLetterHint), findsOneWidget);
+      expect(find.text('TJ Veverky'), findsNothing);
+      expect(find.text(clubHint), findsNothing);
+    });
+
+    testWidgets('one club and nobody without one: nothing to choose among, '
+        'the letters as without clubs', (tester) async {
+      surface(tester, const Size(1920, 1080));
+      await tester.pumpWidget(
+        clubPicker(
+          KioskPickerMode.clubs,
+          players: roster.sublist(0, 26),
+          clubs: const [veverky],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(firstLetterHint), findsOneWidget);
+      expect(find.text('TJ Veverky'), findsNothing);
+      expect(find.text('A'), findsOneWidget);
+    });
   });
 }

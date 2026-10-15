@@ -22,6 +22,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/name_index.dart';
 import '../../domain/palette.dart';
+import '../../domain/picker_clubs.dart';
 import 'kiosk_warning.dart';
 
 /// How many candidates the picker is willing to show as name tiles at once
@@ -50,10 +51,24 @@ const firstLetterHint =
     'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
     'přezdívku nemáš.';
 
-/// The widest the admin's note under the letters gets: a wide screen does
-/// not stretch it into one line nobody reads to the end (four lines of its
-/// default 22 px bold hold the column's 300 characters at this width).
-const _noteMaxWidth = 1000.0;
+/// Above the club tiles when the first page has nothing else (0076,
+/// clubs).
+const clubHint = 'Vyber svůj oddíl.';
+
+/// The club tiles and the letters on one first page (0076, both): one
+/// sentence over the two, the second half above the letters — or above
+/// the names of a small alley.
+const clubOrHint = 'Vyber svůj oddíl…';
+const orFirstLetterHint =
+    '…nebo první písmeno své přezdívky — nebo křestního jména, pokud '
+    'přezdívku nemáš.';
+const orNameHint = '…nebo své jméno.';
+
+/// The widest the admin's note under the letters gets: wide, so it takes
+/// few lines (about three of its default 22 px bold for the column's 300
+/// characters), yet not one line across a whole wall display that nobody
+/// reads to its end.
+const _noteMaxWidth = 1600.0;
 
 /// Lines the note may take before an ellipsis: its end says where to
 /// cancel, so a narrower screen gets more lines rather than a cut — the
@@ -93,6 +108,11 @@ class NamePicker extends ConsumerStatefulWidget {
 class _NamePickerState extends ConsumerState<NamePicker> {
   String _prefix = '';
 
+  /// The club tile tapped on the first page (0076); [_club] its id, null
+  /// for „Ostatní“. The letters and names then go by that club's players.
+  bool _inClub = false;
+  String? _club;
+
   @override
   void initState() {
     super.initState();
@@ -104,7 +124,21 @@ class _NamePickerState extends ConsumerState<NamePicker> {
 
   void _drillInto(String prefix) => setState(() => _prefix = prefix);
 
-  void _back() => setState(() => _prefix = nameIndexParent(_prefix));
+  void _enterClub(PickerClub club) => setState(() {
+        _inClub = true;
+        _club = club.id;
+        _prefix = '';
+      });
+
+  /// One step back: a letter of the prefix, then out of the club.
+  void _back() => setState(() {
+        if (_prefix.isNotEmpty) {
+          _prefix = nameIndexParent(_prefix);
+        } else {
+          _inClub = false;
+          _club = null;
+        }
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -183,8 +217,27 @@ class _NamePickerState extends ConsumerState<NamePicker> {
   }
 
   Widget _body(BuildContext context, List<PlayerName> allPlayers) {
+    // The clubs (0076) — none while the admin keeps the letters, or when
+    // the roster has fewer than two to choose among.
+    final mode = ref.watch(
+      settingsProvider.select(
+        (s) => s.value?.kioskPickerMode ?? KioskPickerMode.letters,
+      ),
+    );
+    final clubs = mode.showsClubs
+        ? pickerClubs(
+            allPlayers,
+            ref.watch(clubsProvider).value ?? const <Club>[],
+          )
+        : const <PickerClub>[];
+    // The club tapped — gone when the roster re-read no longer has it.
+    final club = _inClub
+        ? clubs.where((c) => c.id == _club).firstOrNull
+        : null;
+    final firstPage = club == null && _prefix.isEmpty;
+    final clubTiles = firstPage && clubs.isNotEmpty;
     final node = nameIndex(
-      players: allPlayers,
+      players: club?.players ?? allPlayers,
       prefix: _prefix,
       capacity: _capacity,
     );
@@ -206,7 +259,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
           // gets its own row above the grid instead of a tile inside it,
           // where it competed with the letters for the eye and moved every
           // time the letter count changed.
-          if (_prefix.isNotEmpty) _breadcrumb(context),
+          if (!firstPage) _breadcrumb(context, club),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) => SingleChildScrollView(
@@ -218,7 +271,17 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Center(
-                    child: switch (node) {
+                    child: clubTiles && !mode.showsLetters
+                        // Clubs only: the tiles, the note under them.
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ..._clubs(context, clubs, clubHint,
+                                  constraints.maxWidth),
+                              if (note != null) ..._note(note, noteSize),
+                            ],
+                          )
+                        : switch (node) {
                       PrefixesNode(:final prefixes, :final exactMatches) =>
                         Column(
                           mainAxisSize: MainAxisSize.min,
@@ -226,6 +289,11 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             // Someone whose whole name IS the prefix cannot
                             // be narrowed further — they are a choice, not a
                             // step.
+                            if (clubTiles) ...[
+                              ..._clubs(context, clubs, clubOrHint,
+                                  constraints.maxWidth),
+                              const SizedBox(height: 40),
+                            ],
                             if (exactMatches.isNotEmpty) ...[
                               _nameGrid(
                                   context, exactMatches, constraints.maxWidth),
@@ -236,15 +304,9 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             // name on the board (nameIndex), a nick when
                             // there is one, not by the surname.
                             if (_prefix.isEmpty) ...[
-                              Text(
-                                firstLetterHint,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
+                              _hint(
+                                context,
+                                clubTiles ? orFirstLetterHint : firstLetterHint,
                               ),
                               const SizedBox(height: 24),
                             ],
@@ -253,7 +315,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             // and the letters are what the page is for, the
                             // note is for whoever came to cancel. The later
                             // pages go without it.
-                            if (_prefix.isEmpty && note != null)
+                            if (firstPage && note != null)
                               ..._note(note, noteSize),
                           ],
                         ),
@@ -264,8 +326,15 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                       NamesNode(:final players) => Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (clubTiles) ...[
+                              ..._clubs(context, clubs, clubOrHint,
+                                  constraints.maxWidth),
+                              const SizedBox(height: 40),
+                              _hint(context, orNameHint),
+                              const SizedBox(height: 24),
+                            ],
                             _nameGrid(context, players, constraints.maxWidth),
-                            if (_prefix.isEmpty && note != null)
+                            if (firstPage && note != null)
                               ..._note(note, noteSize),
                           ],
                         ),
@@ -313,6 +382,35 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     );
   }
 
+  /// A line above tiles that says which one to tap.
+  Widget _hint(BuildContext context, String text) => Text(
+        text,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      );
+
+  /// The club tiles (0076) under their [hint], in the name grid's columns.
+  List<Widget> _clubs(
+    BuildContext context,
+    List<PickerClub> clubs,
+    String hint,
+    double width,
+  ) =>
+      [
+        _hint(context, hint),
+        const SizedBox(height: 24),
+        _grid(width, [
+          for (final club in clubs)
+            _ColouredTile(
+              label: club.name,
+              colorIndex: club.colorIndex,
+              onTap: () => _enterClub(club),
+            ),
+        ]),
+      ];
+
   /// The admin's note (0070) under the first page's tiles.
   List<Widget> _note(String note, int size) => [
         const SizedBox(height: 24),
@@ -326,7 +424,8 @@ class _NamePickerState extends ConsumerState<NamePicker> {
         ),
       ];
 
-  Widget _breadcrumb(BuildContext context) => Padding(
+  /// Zpět and where the visitor is: the club, the letters typed so far.
+  Widget _breadcrumb(BuildContext context, PickerClub? club) => Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Row(
           children: [
@@ -345,9 +444,15 @@ class _NamePickerState extends ConsumerState<NamePicker> {
               ),
             ),
             const SizedBox(width: 20),
-            Text(
-              '$_prefix…',
-              style: Theme.of(context).textTheme.headlineMedium,
+            Flexible(
+              child: Text(
+                [
+                  if (club != null) club.name,
+                  if (_prefix.isNotEmpty) '$_prefix…',
+                ].join(' · '),
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
             ),
           ],
         ),
@@ -356,7 +461,21 @@ class _NamePickerState extends ConsumerState<NamePicker> {
   /// Name tiles in as many columns as [width] affords, each column an equal
   /// share of it — a ragged Wrap of content-sized buttons reads as a pile,
   /// a grid as a list you can scan down.
-  Widget _nameGrid(BuildContext context, List<PlayerName> players, double width) {
+  Widget _nameGrid(BuildContext context, List<PlayerName> players, double width) =>
+      _grid(width, [
+        for (final player in players)
+          _ColouredTile(
+            // The player's own nick, when they set one — the same label
+            // their reservations wear on the board behind this dialog, and
+            // the bar once they are picked.
+            label: player.boardName,
+            colorIndex: player.clubColor,
+            onTap: () => Navigator.pop(context, player),
+          ),
+      ]);
+
+  /// [tiles] in as many equal columns as [width] affords.
+  Widget _grid(double width, List<Widget> tiles) {
     final columns =
         (width / _nameTileMinWidth).floor().clamp(1, _maxNameColumns);
     final tileWidth = (width - (columns - 1) * _tileGap) / columns;
@@ -364,14 +483,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
       spacing: _tileGap,
       runSpacing: _tileGap,
       children: [
-        for (final player in players)
-          SizedBox(
-            width: tileWidth,
-            child: _NameTile(
-              player: player,
-              onTap: () => Navigator.pop(context, player),
-            ),
-          ),
+        for (final tile in tiles) SizedBox(width: tileWidth, child: tile),
       ],
     );
   }
@@ -412,11 +524,19 @@ class _LetterTile extends StatelessWidget {
 
 /// The pick itself: the player's name on their CLUB's colour — the same
 /// pair the board tints their reservations with, so a player looking for
-/// themselves can go by colour first and text second.
-class _NameTile extends StatelessWidget {
-  const _NameTile({required this.player, required this.onTap});
+/// themselves can go by colour first and text second. A club's own tile
+/// (0076) is the same: its name on its colour.
+class _ColouredTile extends StatelessWidget {
+  const _ColouredTile({
+    required this.label,
+    required this.colorIndex,
+    required this.onTap,
+  });
 
-  final PlayerName player;
+  final String label;
+
+  /// Palette index of the club, -1 = none (the neutral surface).
+  final int colorIndex;
   final VoidCallback onTap;
 
   @override
@@ -425,7 +545,7 @@ class _NameTile extends StatelessWidget {
     // The palette's own background/foreground pair (or the derived shades
     // of a hand-picked colour); a player with no club gets the neutral
     // surface, like an unclubbed cell on the board.
-    final club = ClubColors.of(player.clubColor, scheme.brightness);
+    final club = ClubColors.of(colorIndex, scheme.brightness);
     final bg = club?.$1 ?? scheme.surfaceContainerHigh;
     final fg = club?.$2 ?? scheme.onSurface;
     return _Tile(
@@ -441,11 +561,7 @@ class _NameTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Text(
-          // The player's own nick, when they set one — the same label their
-          // reservations wear on the board behind this dialog. The full name
-          // still appears in the bar once they are picked, which is where a
-          // nick two people share gets caught.
-          player.boardName,
+          label,
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
