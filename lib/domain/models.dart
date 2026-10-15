@@ -942,8 +942,9 @@ class ScheduleSettings {
   final int kioskVisibleDays;
 
   /// The lane rows' font size in px while the day scrolls ([kioskFitDay]
-  /// off; 0064) — the rows grow with it. With the day on the screen the
-  /// font follows the rows instead (`kioskRowFont`).
+  /// off; 0064) — the rows are its line and a few pixels around it
+  /// (`kioskRowHeightFor`). With the day on the screen the font follows the
+  /// rows instead (`kioskRowFont`).
   final int kioskFontSize;
 
   /// A note on the first page of the kiosk's name picker (0070) — under
