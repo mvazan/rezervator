@@ -1572,16 +1572,19 @@ void main() {
   );
 
   testWidgets('q: kiosk_fit_day=false switches to the comfortable fixed scale '
-      '(60 min = laneCount × 40 px) instead of fit-to-screen', (tester) async {
+      '(60 min = laneCount rows for the font) instead of fit-to-screen', (
+    tester,
+  ) async {
     await tester.pumpWidget(kioskApp(kioskFitDay: false));
     await tester.pumpAndSettle();
 
-    // b1 is 61 minutes; at laneCount(2) × 40 / 60 px per minute the card
-    // is 61 × 1.333… ≈ 81.3px tall — independent of the viewport height.
+    // b1 is 61 minutes; at laneCount(2) rows of 11 px text (31.7 px) an
+    // hour the card is 61 × 1.058 ≈ 64.5 px tall — independent of the
+    // viewport height.
     final card = find.byKey(const ValueKey('cal-block-b1')).first;
     expect(
       tester.getSize(card).height,
-      closeTo(61 * settings.laneCount * 40.0 / 60, 0.7),
+      closeTo(61 * settings.laneCount * kioskRowHeightFor(11) / 60, 0.7),
     );
 
     await finish(tester);
@@ -1701,10 +1704,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(
-        find.descendant(of: dialog, matching: find.text('5 : 3')),
-        findsOneWidget,
-      );
+      // The score, side by side around its colon.
+      for (final part in ['5', '3']) {
+        expect(
+          find.descendant(of: dialog, matching: find.text(part)),
+          findsOneWidget,
+        );
+      }
       // A video the kiosk cannot play (not YouTube): no video control at
       // all — the fallback trophy instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
@@ -3303,8 +3309,10 @@ void main() {
       final at22 = await boardWith(22);
       expect(at11.scale, 1);
       expect(at22.scale, 2);
-      // Twice the text, about twice the rows.
-      expect(at22.day, greaterThan(at11.day * 1.5));
+      // Twice the text, taller rows — not twice as tall: the spacing
+      // around the text stays.
+      expect(at22.day, greaterThan(at11.day * 1.3));
+      expect(at22.day, lessThan(at11.day * 2));
     });
 
     testWidgets('with the day on the screen the font follows the rows: the '
@@ -3322,16 +3330,25 @@ void main() {
       final a = await scaleWith(9);
       final b = await scaleWith(24);
       expect(a, b);
-      // Within reason: 9 to 20 px.
-      expect(a * kioskRowFontRef, inInclusiveRange(9, 20));
+      // Within reason: 9 to 24 px.
+      expect(a * kioskRowFontRef, inInclusiveRange(9, 24));
     });
 
-    test('the row height follows the font, the fitted font follows the row', () {
-      expect(kioskRowHeightFor(11), 40);
-      expect(kioskRowHeightFor(22), 80);
-      expect(kioskRowFont(40), 11);
+    test('a row is its line of text and the same few pixels around it; the '
+        'fitted font is whatever the row leaves', () {
+      expect(kioskRowHeightFor(11), closeTo(31.7, 0.1));
+      expect(kioskRowHeightFor(22), closeTo(47.5, 0.1));
+      // The larger the text, the more of the row it fills — at 11 px about
+      // half (the old 40 px row: 0.39).
+      double share(int font) => font * 1.43 / kioskRowHeightFor(font);
+      expect(share(11), greaterThan(0.45));
+      expect(share(22), greaterThan(share(11)));
+      // Back and forth.
+      for (final font in [9, 11, 16, 24]) {
+        expect(kioskRowFont(kioskRowHeightFor(font)), closeTo(font, 0.001));
+      }
       expect(kioskRowFont(10), 9);
-      expect(kioskRowFont(400), 20);
+      expect(kioskRowFont(400), 24);
     });
 
     testWidgets('the day columns keep their width while the drawer slides', (
@@ -4924,18 +4941,19 @@ void main() {
       });
     }
 
-    testWidgets('a match band on the board stacks home, dash and away, so '
-        'no team name breaks in half', (tester) async {
+    testWidgets('a match band on the board stacks the cup with the time, '
+        'then home, x and away, so no team name breaks in half', (
+      tester,
+    ) async {
       fullHd(tester);
       await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
       await tester.pumpAndSettle();
       Finder inBand(Finder f) =>
           find.descendant(of: find.byType(CalendarEventBand), matching: f);
-      expect(inBand(findEmojiText('🏆')), findsOneWidget);
+      expect(inBand(findEmojiText('🏆 14:00–17:00')), findsOneWidget);
       expect(inBand(find.text('Domácí')), findsOneWidget);
-      expect(inBand(find.text('–')), findsOneWidget);
+      expect(inBand(find.text('x')), findsOneWidget);
       expect(inBand(find.text('Soupeř')), findsOneWidget);
-      expect(inBand(find.text('14:00–17:00')), findsOneWidget);
       await finish(tester);
     });
 
@@ -4991,7 +5009,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.text('6 : 2'),
+          matching: find.text('6'),
         ),
       );
       await tester.pumpAndSettle();

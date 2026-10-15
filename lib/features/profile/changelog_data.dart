@@ -58,12 +58,24 @@ const appChangelog = <Release>[
         'Upozornění při rezervaci je širší a má méně řádků.',
     'Kiosk, hraný zápas v panelu: ťuk na „⟳ před … min“ obnoví výsledky; '
         'ikona se po ťuknutí točí, dokud nová data nedorazí.',
-    'Kalendář po dnech: čas bloku je vždy začátek s pomlčkou nad koncem — '
-        'i při větším písmu se už pomlčka neodtrhne na vlastní řádek.',
+    'Kalendář a kiosk: zápas v rozvrhu má nahoře pohár a vedle něj čas, '
+        'pod volným řádkem domácí, „x“ a hosty pod sebou.',
+    'Zápasy dne (ťuk na záhlaví dne): pod zápasem čas a kuželna, kde se '
+        'hraje, pod tím soutěž a kolo. Výsledek vpravo je větší a výraznější '
+        'a kuželky stojí hned pod ním, dvojtečky pod sebou; pohár i výsledek '
+        'jsou na výšku uprostřed zápasu.',
+    'Kiosk: řádky drah na tabuli jsou jméno a pár pixelů kolem — nižší, '
+        'takže se vejde víc hodin, a při celém dni na obrazovce mají větší '
+        'písmo.',
+    'Kalendář po dnech: čas bloku je začátek, pomlčka a konec pod sebou — '
+        'v každém řádku stejně, i při větším písmu.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
-    'Kalendář po dnech: čas bloku vždy na dvou řádcích.',
+    'Zápas v rozvrhu: nahoře pohár s časem, pod ním domácí a hosté.',
+    'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
+    'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo.',
+    'Kalendář po dnech: čas bloku jednotně pod sebou.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

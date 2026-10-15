@@ -158,7 +158,8 @@ void main() {
 
       expect(find.byType(AlertDialog), findsOneWidget);
       // The score still renders non-interactively.
-      expect(find.text('5 : 3'), findsOneWidget);
+      expect(find.text('5'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
       // No video control at all, though the slot has a videoUrl — the
       // fallback trophy/block icon shows instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);

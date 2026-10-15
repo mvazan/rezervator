@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/widgets/emoji_text.dart';
-import 'package:rezervator/domain/labels.dart' show BandLine;
+import 'package:rezervator/domain/labels.dart' show BandLine, bandGap;
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
 import '../support/emoji_finders.dart';
@@ -11,10 +11,12 @@ void main() {
   const away = 'KK Orel Ivančice B';
   const time = '18:51–21:51';
   const oneLine = '🏆 SKK Veverky Brno C – KK Orel Ivančice B\n$time';
+  const cup = '🏆 $time';
   const lines = <BandLine>[
-    (text: '🏆', wraps: false),
+    (text: cup, wraps: true),
+    bandGap,
     (text: home, wraps: true),
-    (text: '–', wraps: false),
+    (text: 'x', wraps: false),
     (text: away, wraps: true),
   ];
 
@@ -34,7 +36,6 @@ void main() {
             foreground: Colors.white,
             text: oneLine,
             lines: lines,
-            time: time,
             bold: true,
             fontSize: fontSize,
           ),
@@ -48,15 +49,14 @@ void main() {
       .firstWhere((t) => t.text == text)
       .maxLines;
 
-  testWidgets('a tall band: the cup, home, dash, away and the time each on '
-      'a line of its own, in that order', (tester) async {
+  testWidgets('a tall band: the cup with the time, a blank line, then home, '
+      'x and away each on a line of its own, in that order', (tester) async {
     await tester.pumpWidget(band(width: 160, height: 300));
     final rows = [
-      findEmojiText('🏆'),
+      findEmojiText(cup),
       find.text(home),
-      find.text('–'),
+      find.text('x'),
       find.text(away),
-      find.text(time),
     ];
     for (final row in rows) {
       expect(row, findsOneWidget);
@@ -67,17 +67,23 @@ void main() {
         greaterThan(tester.getTopLeft(rows[i - 1]).dy),
       );
     }
+    // A whole line between the cup's line and home's.
+    final gap =
+        tester.getTopLeft(find.text(home)).dy -
+        tester.getBottomLeft(findEmojiText(cup)).dy;
+    expect(gap, greaterThanOrEqualTo(14));
     expect(findEmojiText(oneLine), findsNothing);
   });
 
-  testWidgets('the lines to spare go to the names: a long name may take '
-      'several; the cup, the dash and the time keep to one', (tester) async {
-    // 300 px of 14 px lines: 21; five rows leave 16, eight more a name.
+  testWidgets('the lines to spare go to the names and the cup\'s line: a '
+      'long name may take several; the x keeps to one', (tester) async {
+    // 300 px of 14 px lines: 21; five rows leave 16, five more each of the
+    // three that wrap.
     await tester.pumpWidget(band(width: 60, height: 300));
-    expect(maxLinesOf(tester, home), 9);
-    expect(maxLinesOf(tester, away), 9);
-    expect(maxLinesOf(tester, '🏆'), 1);
-    expect(maxLinesOf(tester, time), 1);
+    expect(maxLinesOf(tester, home), 6);
+    expect(maxLinesOf(tester, away), 6);
+    expect(maxLinesOf(tester, cup), 6);
+    expect(maxLinesOf(tester, 'x'), 1);
     // The narrow column wraps the name instead of cutting it.
     expect(tester.getSize(find.text(home)).height, greaterThan(20));
 
@@ -86,12 +92,26 @@ void main() {
     expect(maxLinesOf(tester, home), 1);
   });
 
+  testWidgets('a line short of the stack: the blank line goes first', (
+    tester,
+  ) async {
+    // Four lines: the cup's, home, x, away — no blank line between.
+    await tester.pumpWidget(band(width: 160, height: 60));
+    expect(findEmojiText(cup), findsOneWidget);
+    expect(find.text('x'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text(home)).dy -
+          tester.getBottomLeft(findEmojiText(cup)).dy,
+      lessThan(14),
+    );
+  });
+
   testWidgets('a band too short for the stack keeps the two-line label', (
     tester,
   ) async {
-    await tester.pumpWidget(band(width: 160, height: 60));
+    await tester.pumpWidget(band(width: 160, height: 45));
     expect(findEmojiText(oneLine), findsOneWidget);
-    expect(find.text('–'), findsNothing);
+    expect(find.text('x'), findsNothing);
   });
 
   testWidgets('a larger font: bigger text, and a taller band before it '
@@ -99,8 +119,11 @@ void main() {
     await tester.pumpWidget(band(width: 300, height: 300, fontSize: 18));
     expect(tester.widget<Text>(find.text(away)).style?.fontSize, 18);
 
-    // 18 px lines are about 25 px: 100 px holds four, not five.
-    await tester.pumpWidget(band(width: 300, height: 100, fontSize: 18));
+    // 18 px lines are about 26 px: 110 px holds four — the stack without
+    // its blank line — 90 px three, not enough for it.
+    await tester.pumpWidget(band(width: 300, height: 110, fontSize: 18));
+    expect(findEmojiText(oneLine), findsNothing);
+    await tester.pumpWidget(band(width: 300, height: 90, fontSize: 18));
     expect(findEmojiText(oneLine), findsOneWidget);
   });
 
