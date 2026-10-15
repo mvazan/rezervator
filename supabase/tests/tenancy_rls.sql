@@ -12862,4 +12862,94 @@ begin
 end $$;
 reset role;
 
+-- 0080: a fresh notice on the kiosk gets the „NOVÉ“ label for three days
+-- unless the admin says otherwise — on every alley, a new one too; only the
+-- four modes and 1–14 days go in, the admin saves both through the API's
+-- role, and both stay off the public overview. 0080 runs twice (it
+-- re-runs).
+\ir ../migrations/0080_kiosk_notices_fresh.sql
+\ir ../migrations/0080_kiosk_notices_fresh.sql
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000000080', 'Kuželna P (0080)');
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_p constant uuid := '00000000-0000-0000-0000-000000000080';
+begin
+  if (select count(*) from schedule_settings
+       where tenant_id in (v_a, v_p)
+         and kiosk_notices_fresh_mode = 'highlight'
+         and kiosk_notices_fresh_days = 3) <> 2 then
+    raise exception 'FAIL: an alley does not start with the label for three days (0080)';
+  end if;
+  update schedule_settings set kiosk_notices_fresh_mode = 'off' where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_mode = 'longer' where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_mode = 'both' where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_days = 1 where tenant_id = v_a;
+  update schedule_settings set kiosk_notices_fresh_days = 14 where tenant_id = v_a;
+  begin
+    update schedule_settings set kiosk_notices_fresh_mode = 'blink' where tenant_id = v_a;
+    raise exception 'FAIL: an unknown fresh notice mode was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_notices_fresh_mode = null where tenant_id = v_a;
+    raise exception 'FAIL: no fresh notice mode was accepted (0080)';
+  exception when not_null_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_notices_fresh_days = 0 where tenant_id = v_a;
+    raise exception 'FAIL: a notice fresh for 0 days was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_notices_fresh_days = 15 where tenant_id = v_a;
+    raise exception 'FAIL: a notice fresh for 15 days was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ?| array[
+       'kiosk_notices_fresh_mode', 'kiosk_notices_fresh_days'] then
+    raise exception 'FAIL: the public overview hands out a 0080 setting';
+  end if;
+  update schedule_settings set kiosk_notices_fresh_mode = 'highlight',
+                               kiosk_notices_fresh_days = 3
+   where tenant_id = v_a;
+  raise notice 'OK: a fresh notice gets the label for three days unless the admin says otherwise, one of four modes, 1–14 days, off the public overview (0080)';
+end $$;
+
+-- Alley A's admin saves both through the API's role (0017's table-wide
+-- UPDATE grant, the settings_update policy); the checks still hold.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  update schedule_settings
+     set kiosk_notices_fresh_mode = 'longer', kiosk_notices_fresh_days = 7
+   where tenant_id = '00000000-0000-0000-0000-00000000000a';
+  if not found then
+    raise exception 'FAIL: the admin could not save the fresh notices (0080)';
+  end if;
+  begin
+    update schedule_settings set kiosk_notices_fresh_days = 15
+     where tenant_id = '00000000-0000-0000-0000-00000000000a';
+    raise exception 'FAIL: the admin saved a notice fresh for 15 days (0080)';
+  exception when check_violation then null;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from schedule_settings
+                  where tenant_id = '00000000-0000-0000-0000-00000000000a'
+                    and kiosk_notices_fresh_mode = 'longer'
+                    and kiosk_notices_fresh_days = 7) then
+    raise exception 'FAIL: the admin''s fresh notices were not saved (0080)';
+  end if;
+  update schedule_settings set kiosk_notices_fresh_mode = 'highlight',
+                               kiosk_notices_fresh_days = 3
+   where tenant_id = '00000000-0000-0000-0000-00000000000a';
+  raise notice 'OK: an admin saves the fresh notices as authenticated (0080)';
+end $$;
+
 rollback;

@@ -5819,6 +5819,8 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
     "kiosk_panels" "jsonb" DEFAULT '{"left": {"days": 2, "open": false}, "right": {"days": 2, "open": false}, "modules": [{"id": "duty", "side": "off", "share": 30}, {"id": "notices", "side": "right", "share": 40}, {"id": "matches", "side": "right", "share": 60}, {"id": "guide", "side": "off", "share": 45}, {"id": "week", "side": "off", "share": 55}]}'::"jsonb" NOT NULL,
     "kiosk_notices_header" boolean DEFAULT true NOT NULL,
+    "kiosk_notices_fresh_mode" "text" DEFAULT 'highlight'::"text" NOT NULL,
+    "kiosk_notices_fresh_days" smallint DEFAULT 3 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
@@ -5831,6 +5833,8 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_notices_fresh_days_check" CHECK ((("kiosk_notices_fresh_days" >= 1) AND ("kiosk_notices_fresh_days" <= 14))),
+    CONSTRAINT "schedule_settings_kiosk_notices_fresh_mode_check" CHECK (("kiosk_notices_fresh_mode" = ANY (ARRAY['off'::"text", 'highlight'::"text", 'longer'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_panels_check" CHECK ("public"."kiosk_panels_valid"("kiosk_panels")),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
@@ -5865,6 +5869,14 @@ COMMENT ON COLUMN "public"."schedule_settings"."kiosk_panels" IS 'The kiosk''s t
 
 
 COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_header" IS 'Nástěnka''s line in the kiosk''s status bar, one notice title at a time (0077: the header half of the dropped kiosk_notices_mode). Default on.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_fresh_mode" IS 'What a fresh notice gets on the kiosk (0080): off | highlight (the NOVÉ label) | longer (twice kiosk_notices_rotation_seconds) | both. Default highlight.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."kiosk_notices_fresh_days" IS 'A notice is fresh on the kiosk while it has been up (visible_from, else created_at) for fewer days than this (0080), 1–14, default 3.';
 
 
 
