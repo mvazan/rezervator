@@ -8,8 +8,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/week_players.dart';
+import 'package:rezervator/features/kiosk/kiosk_connection.dart';
+import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
+import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_week.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart'
     show calendarRulerWidth;
@@ -405,6 +409,186 @@ void main() {
       await tester.tap(find.text('Venku'));
       await tester.pumpAndSettle();
       expect(find.text('Žádné výsledky pro tento výběr.'), findsOneWidget);
+    });
+  });
+
+  group('in the panels', () {
+    const settings = ScheduleSettings(
+      laneCount: 2,
+      trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
+      bookingHorizonDays: 14,
+      maxActiveReservations: 3,
+      kioskVisibleDays: 8,
+      kioskPanels: KioskPanels(
+        left: KioskPanel(days: 2, open: true),
+        right: KioskPanel(days: 2, open: false),
+        modules: [
+          KioskModulePlacement(id: 'duty', side: PanelSide.off, share: 30),
+          KioskModulePlacement(id: 'notices', side: PanelSide.off, share: 40),
+          KioskModulePlacement(id: 'matches', side: PanelSide.off, share: 60),
+          KioskModulePlacement(id: 'guide', side: PanelSide.left, share: 45),
+          KioskModulePlacement(id: 'week', side: PanelSide.left, share: 55),
+        ],
+      ),
+    );
+
+    Future<KioskPanelContent?> leftContent(List<WeekLine> lines) async {
+      final container = ProviderContainer(
+        overrides: [
+          ...overrides(lines),
+          settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        ],
+      );
+      addTearDown(container.dispose);
+      final sub = container.listen(
+        kioskPanelContentProvider(PanelSide.left),
+        (_, _) {},
+      );
+      addTearDown(sub.close);
+      await container.read(settingsProvider.future);
+      await container.read(nowProvider.future);
+      await container.read(weekPlayersProvider.future);
+      return container.read(kioskPanelContentProvider(PanelSide.left));
+    }
+
+    test('the module takes room only while the week has lines', () async {
+      final empty = await leftContent(const []);
+      expect([for (final e in empty!.entries) e.module], [KioskModule.guide]);
+      final full = await leftContent(week);
+      expect(
+        [for (final e in full!.entries) (e.module, e.share)],
+        [(KioskModule.guide, 45), (KioskModule.week, 55)],
+      );
+    });
+
+    testWidgets('KioskPanelView: the card takes its share and opens the '
+        'week on a tap', (tester) async {
+      fullHd(tester);
+      var opened = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ...overrides(week),
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+          ],
+          child: MaterialApp(
+            theme: buildTheme(Brightness.dark),
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  height: panelHeight,
+                  child: KioskPanelView(
+                    side: PanelSide.left,
+                    width: 2 * column,
+                    open: true,
+                    content: const KioskPanelContent(
+                      side: PanelSide.left,
+                      entries: [KioskPanelEntry(KioskModule.week, 55)],
+                    ),
+                    onOpenNotice: (_) {},
+                    onOpenMatch: (_) {},
+                    onOpenWeek: () => opened++,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final card = find.byType(KioskWeekCard);
+      // Alone in the panel: all of it.
+      final want = cardSize(days: 2, share: 100);
+      expect(tester.getSize(card).width, closeTo(want.width, 1e-6));
+      expect(tester.getSize(card).height, closeTo(want.height, 1e-6));
+      await tester.tap(card);
+      expect(opened, 1);
+    });
+
+    Future<void> pumpShell(WidgetTester tester, List<WeekLine> lines) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ...overrides(lines),
+            settingsProvider.overrideWith(
+              (ref) => Stream.value(
+                ScheduleSettings(
+                  laneCount: 2,
+                  trainingWeekdays: const {1, 2, 3, 4, 5, 6, 7},
+                  bookingHorizonDays: 14,
+                  maxActiveReservations: 3,
+                  kioskVisibleDays: 8,
+                  // The week alone on the left: without lines, no panel.
+                  kioskPanels: KioskPanels.defaults
+                      .withSide(KioskModule.notices, PanelSide.off)
+                      .withSide(KioskModule.matches, PanelSide.off)
+                      .withSide(KioskModule.week, PanelSide.left)
+                      .withPanel(PanelSide.left, open: true),
+                ),
+              ),
+            ),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => const []),
+            messagesProvider.overrideWith((ref) => Stream.value(const [])),
+            kioskSocketOpenProvider.overrideWithValue(() => true),
+            matchResultsProvider.overrideWith((ref) => Stream.value(const {})),
+            matchPlayerResultsProvider.overrideWith(
+              (ref, id) => Stream.value(const []),
+            ),
+            dutyPeriodsProvider.overrideWith((ref) => Stream.value(const [])),
+            dutyAssignmentsProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
+          ],
+          // The app's light theme around the kiosk's dark one: the detail
+          // is dark only through the shell's wrap.
+          child: MaterialApp(
+            theme: buildTheme(Brightness.light),
+            home: const KioskShell(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the shell: no line in the week, no left panel', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await pumpShell(tester, const []);
+      expect(find.byType(KioskPanelView), findsNothing);
+      expect(find.byType(KioskWeekCard), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('the shell: the week in the left panel, a tap opens it full '
+        'screen in the kiosk\'s theme, the idle reset closes it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await pumpShell(tester, week);
+      final card = find.byType(KioskWeekCard);
+      expect(card, findsOneWidget);
+      expect(tester.getSize(find.byType(KioskPanelView)).width, 2 * column);
+
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      final page = find.byType(KioskWeekPlayersPage);
+      expect(page, findsOneWidget);
+      expect(Theme.of(tester.element(page)).brightness, Brightness.dark);
+
+      // A minute without a touch: the kiosk starts over, the week shut.
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(page, findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
     });
   });
 }

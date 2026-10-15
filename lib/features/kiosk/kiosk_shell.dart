@@ -33,6 +33,7 @@ import 'kiosk_guide.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_warning.dart';
 import 'kiosk_stream_window.dart';
+import 'kiosk_week.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
@@ -236,6 +237,12 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// panel.
   void _openGuide() => unawaited(showKioskGuide(context, wrap: _touchable));
 
+  /// „Hráči týdne“ full screen (0078) — a tap on its card in a panel; a tap
+  /// on a line there opens that match's Zápis over it.
+  void _openWeek() => unawaited(
+    showKioskWeekPlayers(context, wrap: _touchable, onOpenMatch: _openMatch),
+  );
+
   /// The ▶ handed to everything that has one — the drawer's matches, the
   /// live badge, the Zápis, a day's matches, a tap on a match without a
   /// score — or null while the admin has the streams off (0072): then none
@@ -404,6 +411,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
           onOpenNotice: _openNotice,
           onOpenMatch: _openMatch,
           onOpenGuide: _openGuide,
+          onOpenWeek: _openWeek,
           onPlay: play,
           resetToken: _resets,
           showLive: !(holdsMatches && _liveHidden),

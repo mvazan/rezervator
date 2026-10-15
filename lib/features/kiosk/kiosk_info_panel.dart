@@ -37,6 +37,7 @@ import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
 import 'kiosk_guide.dart' show KioskGuideCard;
+import 'kiosk_week.dart' show KioskWeekCard;
 
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
@@ -118,6 +119,11 @@ final kioskPanelContentProvider =
       final duty = plan != null && (plan.now != null || plan.next.isNotEmpty)
           ? plan
           : null;
+      // The previous week's lines of ours (0078) are read only with their
+      // card here; a week without a line has nothing to rank.
+      final hasWeek =
+          here(KioskModule.week) &&
+          (ref.watch(weekPlayersProvider).value?.isNotEmpty ?? false);
       final entries = <KioskPanelEntry>[];
       for (final placement in placed) {
         final module = placement.module!;
@@ -129,8 +135,7 @@ final kioskPanelContentProvider =
           KioskModule.matches => hasMatches || live.isNotEmpty,
           // A fixed text: always something to show.
           KioskModule.guide => true,
-          // Nothing to show yet: it takes no room.
-          KioskModule.week => false,
+          KioskModule.week => hasWeek,
         };
         if (shows) entries.add(KioskPanelEntry(module, placement.share));
       }
@@ -196,6 +201,7 @@ class KioskPanelView extends ConsumerWidget {
     required this.onOpenNotice,
     required this.onOpenMatch,
     this.onOpenGuide,
+    this.onOpenWeek,
     this.onPlay,
     this.resetToken = 0,
     this.boardDays,
@@ -240,6 +246,10 @@ class KioskPanelView extends ConsumerWidget {
   /// A tap on „Jak začít“: the whole guide with the large QR code; null =
   /// a tap does nothing.
   final VoidCallback? onOpenGuide;
+
+  /// A tap on „Hráči týdne“: the whole week full screen; null = a tap does
+  /// nothing.
+  final VoidCallback? onOpenWeek;
 
   /// ▶ at a match with a video: its stream (0072); null while the admin
   /// has the streams off — no ▶ and no live badge.
@@ -287,7 +297,12 @@ class KioskPanelView extends ConsumerWidget {
             : () => onShowLive!(true),
       ),
       KioskModule.guide => KioskGuideCard(onOpen: () => onOpenGuide?.call()),
-      KioskModule.week => const SizedBox.shrink(),
+      // A new key after every idle reset, as the other cards of the
+      // panel: the card starts over.
+      KioskModule.week => KioskWeekCard(
+        key: ValueKey(resetToken),
+        onOpen: () => onOpenWeek?.call(),
+      ),
     };
     final showsLive =
         content.live.isNotEmpty && (showLive || !content.hasMatches);
