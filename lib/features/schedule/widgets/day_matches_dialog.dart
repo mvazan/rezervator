@@ -148,6 +148,10 @@ Widget _eventRow(
   final pins = result == null
       ? ''
       : pinsLabel(result.homeTotal, result.awayTotal);
+  final league = _league(m);
+  final small = theme.textTheme.bodySmall?.copyWith(
+    color: scheme.onSurfaceVariant,
+  );
   final row = Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -169,38 +173,44 @@ Widget _eventRow(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (!showScore)
-              MatchTitle(slot: m, style: theme.textTheme.titleSmall)
-            else
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: MatchTitle(
-                      slot: m,
-                      winner: winner,
-                      style: theme.textTheme.titleSmall,
-                    ),
+            // The match, its points at the end — bolder and larger than
+            // the names, the day's headline.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Expanded(
+                  child: MatchTitle(
+                    slot: m,
+                    winner: showScore ? winner : null,
+                    style: theme.textTheme.titleSmall,
                   ),
+                ),
+                if (showScore) ...[
                   const SizedBox(width: 8),
                   Text(
                     pointsLabel(result!.homePoints, result.awayPoints),
-                    style: theme.textTheme.titleSmall,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ],
-              ),
-            Text(
-              _meta(m),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+              ],
             ),
-            if (pins.isNotEmpty)
-              Text(
-                pins,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+            Text(_where(m), style: small),
+            // The competition and the round, the pins at the end — under
+            // the points.
+            if (league.isNotEmpty || pins.isNotEmpty)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Expanded(child: Text(league, style: small)),
+                  if (pins.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(pins, style: small),
+                  ],
+                ],
               ),
           ],
         ),
@@ -213,12 +223,27 @@ Widget _eventRow(
   );
 }
 
-/// Time, then doma/venku for a match (a blockage has no side), then its note.
-String _meta(PrioritySlot m) {
+/// Time, then where: „Kuželna {venue}“ once the site named the alley, else
+/// doma/venku for a match (a blockage has no side).
+String _where(PrioritySlot m) {
+  final venue = m.venue ?? '';
   final parts = [
     '${m.startsAt.display()}–${m.endsAt.display()}',
-    if (m.type.isMatch) m.isAway ? 'venku' : 'doma',
-    if (m.description.isNotEmpty) m.description,
+    if (venue.isNotEmpty)
+      'Kuželna $venue'
+    else if (m.type.isMatch)
+      m.isAway ? 'venku' : 'doma',
   ];
   return parts.join(' · ');
+}
+
+/// A federation match's competition and round; anything else its note (a
+/// federation match's own note only repeats them, with the venue).
+String _league(PrioritySlot m) {
+  final parts = [
+    if ((m.competition ?? '').isNotEmpty) m.competition!,
+    if (m.round != null) '${m.round}. kolo',
+  ];
+  if (parts.isNotEmpty) return parts.join(' · ');
+  return m.fromFederation ? '' : m.description;
 }

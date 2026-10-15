@@ -183,6 +183,115 @@ void main() {
       expect(find.text('3460 : 3349'), findsOneWidget);
     });
 
+    testWidgets('a federation match: the time with its kuželna, then the '
+        'competition and round with the pins at the end, under the points, '
+        'which stand out', (tester) async {
+      final finished = PrioritySlot(
+        id: 'm1',
+        date: date,
+        startsAt: const HourMinute(16, 30),
+        endsAt: const HourMinute(18, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'KK Vyškov B',
+        awayTeam: 'TJ Sokol Brno IV A',
+        isAway: true,
+        importKey: 'cka:m1',
+        competition: 'Jihomoravská divize',
+        round: 5,
+        venue: 'KK Vyškov',
+        description: 'Jihomoravská divize · 5. kolo · KK Vyškov',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm1',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'home_total': 3460,
+        'away_total': 3349,
+        'fetched_at': '2026-09-17T21:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showDayMatchesDialog(context, date, [finished]),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+          results: {'m1': result},
+          slots: [finished],
+          theme: buildTheme(Brightness.light),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      final title = find.text('KK Vyškov B – TJ Sokol Brno IV A');
+      final where = find.text('16:30–18:30 · Kuželna KK Vyškov');
+      final league = find.text('Jihomoravská divize · 5. kolo');
+      final points = find.text('5 : 3');
+      final pins = find.text('3460 : 3349');
+      for (final f in [title, where, league, points, pins]) {
+        expect(f, findsOneWidget);
+      }
+      // Three lines, in that order; the note (which repeats them) is not
+      // shown.
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(top(where), greaterThan(top(title)));
+      expect(top(league), greaterThan(top(where)));
+      expect(find.textContaining('venku'), findsNothing);
+      // The points end the first line, the pins the third — right-aligned
+      // under them.
+      expect(top(pins), closeTo(top(league), 2));
+      expect(
+        tester.getTopRight(pins).dx,
+        closeTo(tester.getTopRight(points).dx, 0.5),
+      );
+      expect(top(pins), greaterThan(tester.getBottomLeft(where).dy - 1));
+      // Bolder and larger than the names.
+      final pointsStyle = tester.widget<Text>(points).style!;
+      expect(pointsStyle.fontWeight, FontWeight.w800);
+      expect(
+        pointsStyle.fontSize,
+        greaterThan(
+          Theme.of(tester.element(points)).textTheme.titleSmall!.fontSize!,
+        ),
+      );
+    });
+
+    testWidgets('a hand-entered match keeps doma/venku and shows its note on '
+        'the third line', (tester) async {
+      final manual = PrioritySlot(
+        id: 'x',
+        date: date,
+        startsAt: const HourMinute(16, 30),
+        endsAt: const HourMinute(18, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'A',
+        awayTeam: 'B',
+        description: 'přátelák',
+      );
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, [manual]),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('16:30–18:30 · doma'), findsOneWidget);
+      expect(find.text('přátelák'), findsOneWidget);
+    });
+
     testWidgets(
       'a scheduled result shows only the title — no score, hours before '
       'kickoff (well outside isLive\'s own refresh window, which does not '
@@ -353,13 +462,14 @@ void main() {
         await tester.tap(find.text('open'));
         await tester.pumpAndSettle();
 
-        // The score is a single plain Text(pointsLabel(...), style: ...) — no
+        // The score is a single Text(pointsLabel(...), style: ...) — no
         // per-side branching to test; both digits necessarily share the one
-        // style. Confirm it's exactly the base style, nothing conditional.
+        // style, the emphasised titleMedium, whoever won.
         final scoreText = tester.widget<Text>(find.text('5 : 3'));
         expect(
           scoreText.style,
-          Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleSmall,
+          Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w800),
         );
 
         final titleText = tester.widget<Text>(
