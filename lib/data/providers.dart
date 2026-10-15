@@ -26,6 +26,7 @@ import '../domain/groups.dart';
 import '../domain/messages.dart' show unreadCounts;
 import '../domain/models.dart';
 import '../domain/public_week.dart';
+import '../domain/week_players.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -961,6 +962,16 @@ class Api {
         if (force) 'p_force': true,
       }) as String;
 
+  /// „Hráči týdne“ (0078 `kiosk_week_players`): one row per line of the
+  /// alley's own players in the finished federation matches of the week
+  /// from [monday], computed by the server on every call. Approved members
+  /// and the kiosk only (`not_allowed` otherwise).
+  static Future<List<WeekLine>> kioskWeekPlayers(Day monday) async => [
+        for (final row in await _db.rpc('kiosk_week_players',
+            params: {'p_monday': monday.toSql()}) as List)
+          WeekLine.fromJson((row as Map).cast<String, dynamic>()),
+      ];
+
   static Future<void> updateTeam({
     required String id,
     required String name,
@@ -1116,9 +1127,8 @@ class Api {
     );
   }
 
-  /// Writes the kiosk drawer's options (0064) — the keys of
-  /// `schedule_settings` (`kiosk_notices_mode`, `kiosk_show_matches`,
-  /// `kiosk_matches_history_days`, `kiosk_drawer_open`). Optimistic, same
+  /// Writes kiosk settings — any columns of `schedule_settings`, the whole
+  /// panels' layout `kiosk_panels` (0077) among them. Optimistic, same
   /// reasoning as [setKioskFitDay].
   static Future<void> setKioskPanel(Map<String, Object?> changes,
       {required String tenantId}) {
@@ -2155,6 +2165,22 @@ class Api {
     );
   }
 
+  /// Asks the server to find in the ČKA register the genders the lines of
+  /// the week from [monday] lack (`regnum-lookup` week mode, 0078) — it
+  /// reads the lines as the caller, so the kiosk may ask. True: it ran out
+  /// of budget before every player — ask again. Gives up after
+  /// [weekGenderTimeout] (a TimeoutException): the register can hang.
+  static Future<bool> lookupWeekGenders(Day monday) async {
+    final response = await _db.functions
+        .invoke(
+          'regnum-lookup',
+          body: {'mode': 'week', 'monday': monday.toSql()},
+        )
+        .timeout(weekGenderTimeout);
+    final data = response.data;
+    return data is Map && data['more'] == true;
+  }
+
   /// The people of the caller's own name in the ČKA register, to pick himself
   /// from when his registration number could not be settled by name and club
   /// (`regnum-lookup`, 0059). Empty: nobody of that name — or he already has a
@@ -2431,6 +2457,38 @@ final profileRegnumsProvider = FutureProvider.autoDispose<int>(
   retry: (_, _) => null,
 );
 
+/// „Hráči týdne“ on the kiosk (0078): the lines of the alley's own players
+/// in the finished matches of the previous Monday–Sunday in Prague
+/// ([previousWeekMonday] of the app clock). Computed by the server on every
+/// read — a late fetch, a correction within 14 days or a gender found later
+/// all change a past week — and read again every hour, at the week's turn
+/// (Monday 00:00 is an hour's turn too) and when the app wakes. Each read
+/// shows its lines at once; while some lack a gender, it then lets the
+/// server look them up and reads again ([loadWeekLines]). A failed read
+/// keeps the lines shown before it — with the Monday they are of
+/// ([WeekLines]), which the titles name.
+final weekPlayersProvider = StreamProvider<WeekLines>((ref) {
+  // The minute clock reaches this provider only when the hour or the week
+  // turns.
+  final (monday, _) = ref.watch(
+    nowProvider.select((now) {
+      final t = now.value ?? DateTime.now();
+      return (previousWeekMonday(t), t.hour);
+    }),
+  );
+  if (ref.watch(_authUidProvider) == null) {
+    return Stream.value((monday: monday, lines: const <WeekLine>[]));
+  }
+  final wake = LiveRefresh.stream.listen((_) => ref.invalidateSelf());
+  ref.onDispose(wake.cancel);
+  return loadWeekLines(
+    monday,
+    read: Api.kioskWeekPlayers,
+    lookup: Api.lookupWeekGenders,
+    onError: (e) => debugPrint('Hráči týdne $monday: $e'),
+  );
+});
+
 /// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped
 /// stream fetched its rows under the OLD kuželna's RLS scope, so re-create
 /// them all — the fresh subscriptions read as the new kuželna.
@@ -2444,6 +2502,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(teamsProvider);
   ref.invalidate(federationSyncProvider);
   ref.invalidate(matchResultsProvider);
+  ref.invalidate(weekPlayersProvider);
   ref.invalidate(leagueMatchesProvider);
   ref.invalidate(leaguePlayerResultsProvider);
   ref.invalidate(venuesProvider);

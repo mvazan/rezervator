@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/data/open_meteo.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/kiosk_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,6 +26,15 @@ void main() {
     of: find.widgetWithText(ListTile, title),
     matching: find.text(text),
   );
+
+  /// The admin section titled [title] (keyed by its title) — „Nástěnka“
+  /// and „Zápasy“ are rows of the Panely table too, „V záhlaví“ is a
+  /// switch in two sections.
+  Finder section(String title) => find.byKey(ValueKey('section:$title'));
+
+  /// [finder] within the section titled [title].
+  Finder inSection(String title, Finder finder) =>
+      find.descendant(of: section(title), matching: finder);
 
   const admin = Profile(
     id: 'admin1',
@@ -68,7 +78,7 @@ void main() {
   // The page is long (the panel options sit above the address): a tall
   // window keeps every section built.
   void tall(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 5600);
+    tester.view.physicalSize = const Size(800, 6400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
   }
@@ -77,20 +87,10 @@ void main() {
     List<Profile> roster = const [admin],
     Future<String> Function(String)? resetPassword,
     ScheduleSettings? settings,
-    bool? panelEnabled,
     Venue? alleyVenue,
     http.Client? openMeteo,
   }) {
-    final shown = settings ??
-        (panelEnabled == null
-            ? defaults0
-            : ScheduleSettings(
-                laneCount: 4,
-                trainingWeekdays: const {1, 2, 4},
-                bookingHorizonDays: 14,
-                maxActiveReservations: 3,
-                kioskPanelEnabled: panelEnabled,
-              ));
+    final shown = settings ?? defaults0;
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
@@ -628,30 +628,554 @@ void main() {
     });
   });
 
-  testWidgets('the panel options PATCH their own columns', (tester) async {
+  testWidgets('the notices in the header: on by default, their own switch in '
+      'the Nástěnka section PATCHes kiosk_notices_header', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
+    final header = inSection(
+      'Nástěnka',
+      find.widgetWithText(SwitchListTile, 'V záhlaví'),
+    );
+    expect(tester.widget<SwitchListTile>(header).value, isTrue);
+    // Where in a panel the notices go is the Panely table's now.
+    expect(find.text('Kde se oznamy zobrazí'), findsNothing);
+
+    await tester.ensureVisible(header);
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+    expect(
+      jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+      {'kiosk_notices_header': false},
+    );
+  });
+
+  for (final (header, side, why) in [
+    (true, PanelSide.off, 'in the header only'),
+    (false, PanelSide.left, 'in a panel only'),
+  ]) {
+    testWidgets('the notices\' rotation shows with the notices $why', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: const {1},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskNoticesHeader: header,
+            kioskPanels: KioskPanels.defaults.withSide(
+              KioskModule.notices,
+              side,
+            ),
+            tenantId: 't',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        inSection(
+          'Nástěnka',
+          find.widgetWithText(TextField, 'Střídání oznamů'),
+        ),
+        findsOneWidget,
+      );
+    });
+  }
+
+  group('panels (0077)', () {
     Map<String, dynamic> lastPatch() => jsonDecode(
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
+    int patches() => requests.where((r) => r.method == 'PATCH').length;
 
-    await tester.ensureVisible(find.text('Kde se oznamy zobrazí'));
-    await tester.tap(find.text('V záhlaví i v panelu'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Jen v záhlaví').last);
-    await tester.pumpAndSettle();
-    expect(lastPatch(), {'kiosk_notices_mode': 'header'});
+    /// [panels] the way a PATCH carries it.
+    Object? patched(KioskPanels panels) =>
+        jsonDecode(jsonEncode(panels.toJson()));
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Zápasy v panelu'));
-    await tester.pumpAndSettle();
-    expect(lastPatch(), {'kiosk_show_matches': false});
+    /// The modules' entries of the last PATCH.
+    List<dynamic> patchedModules() =>
+        (lastPatch()['kiosk_panels'] as Map)['modules'] as List;
 
-    await tester.tap(
-        find.widgetWithText(SwitchListTile, 'Výchozně rozbalený'));
-    await tester.pumpAndSettle();
-    expect(lastPatch(), {'kiosk_drawer_open': true});
+    /// The settings with [panels], everything else the default.
+    ScheduleSettings laid(KioskPanels panels) => ScheduleSettings(
+      laneCount: 4,
+      trainingWeekdays: const {1, 2, 4},
+      bookingHorizonDays: 14,
+      maxActiveReservations: 3,
+      kioskPanels: panels,
+      tenantId: 't',
+    );
+
+    Finder moduleRow(KioskModule module) =>
+        find.byKey(ValueKey('kiosk-module:${module.name}'));
+    Finder panelRow(PanelSide side) =>
+        find.byKey(ValueKey('kiosk-panel:${side.name}'));
+    Finder inRow(Finder row, Finder finder) =>
+        find.descendant(of: row, matching: finder);
+    Finder share(KioskModule module) =>
+        inRow(moduleRow(module), find.widgetWithText(TextField, 'Podíl'));
+    Finder width(PanelSide side) =>
+        inRow(panelRow(side), find.widgetWithText(TextField, 'Šířka'));
+    IconButton arrow(WidgetTester tester, KioskModule module, IconData icon) =>
+        tester.widget<IconButton>(
+          inRow(moduleRow(module), find.widgetWithIcon(IconButton, icon)),
+        );
+    String shown(WidgetTester tester, Finder field) =>
+        tester.widget<TextField>(field).controller!.text;
+
+    /// Types [text] into [field] and presses Enter.
+    Future<void> type(WidgetTester tester, Finder field, String text) async {
+      await tester.ensureVisible(field);
+      await tester.enterText(field, text);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+    }
+
+    /// Opens the panel list of [module], now showing [now], and picks [to].
+    Future<void> place(
+      WidgetTester tester,
+      KioskModule module,
+      String now,
+      String to,
+    ) async {
+      final current = inRow(moduleRow(module), find.text(now));
+      await tester.ensureVisible(current);
+      await tester.tap(current);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(to).last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the default layout: every module in its order with its '
+        'panel, the placed ones with their share; only the right panel has '
+        'a row; the sum per panel', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(inSection('Panely', find.text('Panely')), findsOneWidget);
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final tops = <double>[];
+      for (final (module, name, side) in [
+        (KioskModule.duty, 'Služba na kantýně', 'Vypnuto'),
+        (KioskModule.notices, 'Nástěnka', 'Vpravo'),
+        (KioskModule.matches, 'Zápasy', 'Vpravo'),
+        (KioskModule.guide, 'Jak začít', 'Vypnuto'),
+        (KioskModule.week, 'Hráči týdne', 'Vypnuto'),
+      ]) {
+        final row = moduleRow(module);
+        expect(inSection('Panely', row), findsOneWidget, reason: name);
+        expect(inRow(row, find.text(name)), findsOneWidget, reason: name);
+        expect(inRow(row, find.text(side)), findsOneWidget, reason: name);
+        tops.add(top(row));
+      }
+      for (var i = 1; i < tops.length; i++) {
+        expect(tops[i - 1], lessThan(tops[i]), reason: 'row $i');
+      }
+      // Wide enough for one-line rows: the table's head above them, each
+      // label over its column.
+      final head = find.byKey(const ValueKey('kiosk-modules-header'));
+      expect(inSection('Panely', head), findsOneWidget);
+      for (final label in ['Modul', 'Panel', 'Podíl', 'Pořadí']) {
+        expect(inRow(head, find.text(label)), findsOneWidget, reason: label);
+      }
+      expect(top(head), lessThan(tops.first));
+      expect(
+        tester.getTopLeft(inRow(head, find.text('Panel'))).dx,
+        tester
+            .getTopLeft(
+              inRow(
+                moduleRow(KioskModule.notices),
+                find.byType(DropdownButtonFormField<PanelSide>),
+              ),
+            )
+            .dx,
+      );
+      expect(
+        tester.getTopLeft(inRow(head, find.text('Podíl'))).dx,
+        tester.getTopLeft(share(KioskModule.notices)).dx,
+      );
+      expect(shown(tester, share(KioskModule.notices)), '40');
+      expect(shown(tester, share(KioskModule.matches)), '60');
+      // An unplaced module has no share and no arrows.
+      for (final m in [KioskModule.duty, KioskModule.guide, KioskModule.week]) {
+        expect(inRow(moduleRow(m), find.byType(TextField)), findsNothing,
+            reason: m.name);
+        expect(inRow(moduleRow(m), find.byType(IconButton)), findsNothing,
+            reason: m.name);
+      }
+
+      // Only the right panel holds modules: only its row, above the table.
+      expect(panelRow(PanelSide.left), findsNothing);
+      expect(inRow(panelRow(PanelSide.right), find.text('Pravý panel')),
+          findsOneWidget);
+      expect(top(panelRow(PanelSide.right)),
+          lessThan(top(moduleRow(KioskModule.duty))));
+      expect(shown(tester, width(PanelSide.right)), '2');
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              inRow(panelRow(PanelSide.right), find.byType(SwitchListTile)),
+            )
+            .value,
+        isFalse,
+      );
+
+      expect(find.text('Vpravo 100 %'), findsOneWidget);
+      expect(find.text('Podíly se přepočítají na celou výšku panelu.'),
+          findsOneWidget);
+      // One place for the panels: the old section is gone.
+      expect(find.text('Postranní panel'), findsNothing);
+      expect(find.text('Panel zapnutý'), findsNothing);
+    });
+
+    // An IconButton is 48 wide where the platform pads tap targets (the test
+    // default, Android) but 40 on desktop, where the table is mostly seen:
+    // the columns must line up on both.
+    testWidgets('the table\'s columns line up with its head on every '
+        'platform, the placed rows with the unplaced ones', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      double left(Finder f) => tester.getTopLeft(f).dx;
+      final head = find.byKey(const ValueKey('kiosk-modules-header'));
+      final panelX = left(inRow(head, find.text('Panel')));
+      final shareX = left(inRow(head, find.text('Podíl')));
+      final orderX = tester.getCenter(inRow(head, find.text('Pořadí'))).dx;
+      Rect arrowRect(KioskModule m, IconData icon) => tester.getRect(
+        inRow(moduleRow(m), find.widgetWithIcon(IconButton, icon)),
+      );
+
+      for (final m in KioskModule.values) {
+        final panelList = inRow(
+          moduleRow(m),
+          find.byType(DropdownButtonFormField<PanelSide>),
+        );
+        expect(left(panelList), panelX, reason: '${m.name} panel list');
+      }
+      for (final m in [KioskModule.notices, KioskModule.matches]) {
+        expect(left(share(m)), shareX, reason: '${m.name} share');
+        // The pair of arrows sits in the middle of the „Pořadí“ column,
+        // whatever the size of the buttons.
+        final up = arrowRect(m, Icons.arrow_upward);
+        final down = arrowRect(m, Icons.arrow_downward);
+        expect((up.left + down.right) / 2, closeTo(orderX, 0.5),
+            reason: '${m.name} arrows');
+      }
+    },
+        variant: TargetPlatformVariant({
+          TargetPlatform.android,
+          TargetPlatform.macOS,
+          TargetPlatform.windows,
+        }));
+
+    testWidgets('a module goes into a panel from its list: the PATCH is the '
+        'whole layout', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await place(tester, KioskModule.guide, 'Vypnuto', 'Vlevo');
+      expect(lastPatch().keys, ['kiosk_panels']);
+      expect(
+        lastPatch()['kiosk_panels'],
+        patched(
+          KioskPanels.defaults.withSide(KioskModule.guide, PanelSide.left),
+        ),
+      );
+      expect((lastPatch()['kiosk_panels'] as Map)['left'],
+          {'days': 2, 'open': false});
+      expect((lastPatch()['kiosk_panels'] as Map)['right'],
+          {'days': 2, 'open': false});
+      expect(patchedModules(), hasLength(5));
+      expect(
+        patchedModules(),
+        contains(equals({'id': 'guide', 'side': 'left', 'share': 45})),
+      );
+
+      await place(tester, KioskModule.notices, 'Vpravo', 'Vypnuto');
+      expect(lastPatch(), {
+        'kiosk_panels': patched(
+          KioskPanels.defaults.withSide(KioskModule.notices, PanelSide.off),
+        ),
+      });
+      expect(
+        patchedModules(),
+        contains(equals({'id': 'notices', 'side': 'off', 'share': 40})),
+      );
+    });
+
+    testWidgets('a placed module\'s share: 5–95 %, the PATCH is the whole '
+        'layout', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await type(tester, share(KioskModule.notices), '96');
+      expect(find.text('Zadej číslo od 5 do 95.'), findsOneWidget);
+      await type(tester, share(KioskModule.notices), '4');
+      expect(find.text('Zadej číslo od 5 do 95.'), findsOneWidget);
+      expect(patches(), 0);
+
+      await type(tester, share(KioskModule.notices), '30');
+      expect(lastPatch(), {
+        'kiosk_panels': patched(
+          KioskPanels.defaults.withShare(KioskModule.notices, 30),
+        ),
+      });
+      expect(
+        patchedModules(),
+        contains(equals({'id': 'notices', 'side': 'right', 'share': 30})),
+      );
+    });
+
+    testWidgets('↑↓ move a module among the placed ones of its panel: the '
+        'first cannot go up, the last cannot go down', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(arrow(tester, KioskModule.notices, Icons.arrow_upward).onPressed,
+          isNull);
+      expect(
+          arrow(tester, KioskModule.notices, Icons.arrow_downward).onPressed,
+          isNotNull);
+      expect(arrow(tester, KioskModule.matches, Icons.arrow_upward).onPressed,
+          isNotNull);
+      expect(
+          arrow(tester, KioskModule.matches, Icons.arrow_downward).onPressed,
+          isNull);
+
+      final up =
+          inRow(moduleRow(KioskModule.matches), find.byTooltip('Posunout výš'));
+      await tester.ensureVisible(up);
+      await tester.tap(up);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_panels': patched(
+          KioskPanels.defaults.moved(KioskModule.matches, -1),
+        ),
+      });
+      // The matches now come first on the right.
+      expect(
+        [
+          for (final m in patchedModules().cast<Map>())
+            if (m['side'] == 'right') m['id'],
+        ],
+        ['matches', 'notices'],
+      );
+
+      await tester.tap(
+        inRow(moduleRow(KioskModule.notices), find.byTooltip('Posunout níž')),
+      );
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_panels': patched(
+          KioskPanels.defaults.moved(KioskModule.notices, 1),
+        ),
+      });
+    });
+
+    testWidgets('modules on both sides: both panels\' rows, left first; the '
+        'width 1–13 and the start PATCH the whole layout; the sum per '
+        'panel', (tester) async {
+      tall(tester);
+      final both = KioskPanels.defaults
+          .withSide(KioskModule.guide, PanelSide.left)
+          .withSide(KioskModule.week, PanelSide.left);
+      await tester.pumpWidget(app(settings: laid(both)));
+      await tester.pumpAndSettle();
+
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(inRow(panelRow(PanelSide.left), find.text('Levý panel')),
+          findsOneWidget);
+      expect(inRow(panelRow(PanelSide.right), find.text('Pravý panel')),
+          findsOneWidget);
+      expect(top(panelRow(PanelSide.left)),
+          lessThan(top(panelRow(PanelSide.right))));
+      expect(find.text('Vlevo 100 % · Vpravo 100 %'), findsOneWidget);
+
+      await type(tester, width(PanelSide.left), '14');
+      expect(find.text('Zadej číslo od 1 do 13.'), findsOneWidget);
+      await type(tester, width(PanelSide.left), '0');
+      expect(patches(), 0);
+      await type(tester, width(PanelSide.left), '3');
+      expect(lastPatch(), {
+        'kiosk_panels': patched(both.withPanel(PanelSide.left, days: 3)),
+      });
+
+      final open =
+          inRow(panelRow(PanelSide.left), find.byType(SwitchListTile));
+      await tester.ensureVisible(open);
+      await tester.tap(open);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_panels': patched(both.withPanel(PanelSide.left, open: true)),
+      });
+    });
+
+    testWidgets('the match list follows the matches to either panel; a sum '
+        'other than 100 shows as it is; alone in its panel a module has '
+        'nowhere to move', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: laid(
+          KioskPanels.defaults.withSide(KioskModule.matches, PanelSide.left),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(panelRow(PanelSide.left), findsOneWidget);
+      expect(panelRow(PanelSide.right), findsOneWidget);
+      expect(find.text('Vlevo 60 % · Vpravo 40 %'), findsOneWidget);
+      expect(
+        inSection(
+          'Zápasy',
+          find.widgetWithText(SwitchListTile, 'I budoucí zápasy'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        inSection(
+          'Hraný zápas',
+          find.widgetWithText(SwitchListTile, 'Hraný zápas přes celý panel'),
+        ),
+        findsOneWidget,
+      );
+      expect(arrow(tester, KioskModule.matches, Icons.arrow_upward).onPressed,
+          isNull);
+      expect(
+          arrow(tester, KioskModule.matches, Icons.arrow_downward).onPressed,
+          isNull);
+    });
+
+    testWidgets('no module in a panel: no panel rows and no sums; the match '
+        'list\'s and the live match\'s sections go with the matches', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: laid(
+          KioskPanels.defaults
+              .withSide(KioskModule.notices, PanelSide.off)
+              .withSide(KioskModule.matches, PanelSide.off),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(panelRow(PanelSide.left), findsNothing);
+      expect(panelRow(PanelSide.right), findsNothing);
+      expect(find.textContaining(RegExp(r'^(Vlevo|Vpravo) \d+ %')),
+          findsNothing);
+      expect(find.text('Podíly se přepočítají na celou výšku panelu.'),
+          findsNothing);
+      for (final m in KioskModule.values) {
+        expect(inRow(moduleRow(m), find.text('Vypnuto')), findsOneWidget,
+            reason: m.name);
+      }
+      expect(section('Zápasy'), findsNothing);
+      expect(section('Hraný zápas'), findsNothing);
+      expect(find.widgetWithText(SwitchListTile, 'I budoucí zápasy'),
+          findsNothing);
+      expect(
+        find.widgetWithText(SwitchListTile, 'Hraný zápas přes celý panel'),
+        findsNothing,
+      );
+      expect(section('Nástěnka'), findsOneWidget);
+      expect(section('Služby na kantýně'), findsOneWidget);
+    });
+
+    testWidgets('„Zápasy“: the list\'s options of the old side panel, in '
+        'order, each PATCHing its own column', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(
+        inSection('Zápasy', find.textContaining('Seznam zápasů kuželny')),
+        findsOneWidget,
+      );
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final options = [
+        find.widgetWithText(SwitchListTile, 'I budoucí zápasy'),
+        find.widgetWithText(SwitchListTile, 'Seznam sleduje tabuli'),
+        find.widgetWithText(TextField, 'Odehrané zápasy: týdnů zpět'),
+        find.widgetWithText(TextField, 'Budoucí zápasy: týdnů dopředu'),
+      ];
+      for (var i = 0; i < options.length; i++) {
+        expect(inSection('Zápasy', options[i]), findsOneWidget,
+            reason: 'option $i');
+        if (i > 0) {
+          expect(top(options[i - 1]), lessThan(top(options[i])),
+              reason: 'option $i');
+        }
+      }
+      await tester.ensureVisible(options[1]);
+      await tester.tap(options[1]);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_follow_board': false});
+    });
+
+    testWidgets('a module of a newer app is not listed and goes back '
+        'unchanged with every PATCH', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: laid(
+          KioskPanels.fromJson({
+            'left': {'days': 2, 'open': false},
+            'right': {'days': 2, 'open': false},
+            'modules': [
+              {'id': 'duty', 'side': 'off', 'share': 30},
+              {'id': 'notices', 'side': 'right', 'share': 40},
+              {'id': 'matches', 'side': 'right', 'share': 60},
+              {'id': 'guide', 'side': 'off', 'share': 45},
+              {'id': 'week', 'side': 'off', 'share': 55},
+              {'id': 'radar', 'side': 'left', 'share': 50},
+            ],
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DropdownButtonFormField<PanelSide>), findsNWidgets(5));
+      // Nothing this app shows is on the left: no row for that panel.
+      expect(panelRow(PanelSide.left), findsNothing);
+
+      await type(tester, width(PanelSide.right), '3');
+      expect(
+        patchedModules(),
+        contains(equals({'id': 'radar', 'side': 'left', 'share': 50})),
+      );
+    });
+
+    testWidgets('on a phone a placed module\'s share and arrows go under its '
+        'name and its list', (tester) async {
+      // Narrower than the table's one-line width (520 inside the page's
+      // padding) — and wide enough for the other lists in the test font.
+      tester.view.physicalSize = const Size(500, 8000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      final row = moduleRow(KioskModule.notices);
+      await tester.ensureVisible(row);
+      final list =
+          inRow(row, find.byType(DropdownButtonFormField<PanelSide>));
+      expect(
+        tester.getTopLeft(share(KioskModule.notices)).dy,
+        greaterThan(tester.getBottomLeft(list).dy),
+      );
+      expect(inRow(row, find.byTooltip('Posunout níž')), findsOneWidget);
+      // No head on two-line rows: each control says what it is.
+      expect(find.byKey(const ValueKey('kiosk-modules-header')), findsNothing);
+      expect(inRow(row, find.text('Panel')), findsOneWidget);
+    });
   });
 
   testWidgets('the performance options PATCH their own columns: the breathing '
@@ -743,7 +1267,7 @@ void main() {
     );
     expect(
       tester.getTopLeft(todays).dy,
-      lessThan(tester.getTopLeft(find.text('Nástěnka')).dy),
+      lessThan(tester.getTopLeft(section('Panely')).dy),
     );
 
     await tester.ensureVisible(todays);
@@ -831,23 +1355,27 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    testWidgets('three places, each its own switch, all off by default: '
-        'each PATCHes its own column', (tester) async {
+    testWidgets('two places in its section, each its own switch, both off '
+        'by default: each PATCHes its own column; the card in a panel is '
+        'the Panely table\'s', (tester) async {
       tall(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
 
-      expect(find.text('Služby na kantýně'), findsOneWidget);
+      expect(inSection('Služby na kantýně', find.text('Služby na kantýně')),
+          findsOneWidget);
       expect(
-        find.textContaining('Správě → Služby. Každé místo se zapíná zvlášť.'),
+        find.textContaining('Správě → Služby. Každé místo se zapíná zvlášť'),
         findsOneWidget,
       );
       for (final (title, column) in [
         ('V záhlaví', 'kiosk_duty_header'),
         ('V kalendáři', 'kiosk_duty_board'),
-        ('V panelu', 'kiosk_duty_drawer'),
       ]) {
-        final tile = find.widgetWithText(SwitchListTile, title);
+        final tile = inSection(
+          'Služby na kantýně',
+          find.widgetWithText(SwitchListTile, title),
+        );
         await tester.ensureVisible(tile);
         expect(tester.widget<SwitchListTile>(tile).value, isFalse,
             reason: title);
@@ -860,12 +1388,13 @@ void main() {
           'ukáže plán.'), findsOneWidget);
       expect(find.text('Pás se jmény přes dny služby v hlavičkách dnů '
           'tabule.'), findsOneWidget);
-      expect(find.text('Karta se službou a plánem v postranním panelu.'),
-          findsOneWidget);
-      // Without the card there is no share of the drawer to set, without
-      // the band no place for it.
+      // The card's place and share are a row of the Panely table.
+      expect(find.widgetWithText(SwitchListTile, 'V panelu'), findsNothing);
       expect(find.widgetWithText(TextField, 'Podíl karty v panelu'),
           findsNothing);
+      expect(inSection('Panely', find.text('Služba na kantýně')),
+          findsOneWidget);
+      // Without the band no place for it.
       expect(find.text('Kde je pás'), findsNothing);
     });
 
@@ -896,10 +1425,7 @@ void main() {
         top(field),
         greaterThan(top(find.widgetWithText(SwitchListTile, 'V kalendáři'))),
       );
-      expect(
-        top(field),
-        lessThan(top(find.widgetWithText(SwitchListTile, 'V panelu'))),
-      );
+      expect(inSection('Služby na kantýně', field), findsOneWidget);
 
       await tester.ensureVisible(field);
       await tester.tap(find.text('Mezi datem a zápasy'));
@@ -941,54 +1467,6 @@ void main() {
         findsOneWidget,
       );
     });
-
-    testWidgets('with the card in the drawer its share shows: 30 % by '
-        'default, 10–90, PATCHes kiosk_duty_share', (tester) async {
-      tall(tester);
-      await tester.pumpWidget(app(
-        settings: const ScheduleSettings(
-          laneCount: 4,
-          trainingWeekdays: {1},
-          bookingHorizonDays: 14,
-          maxActiveReservations: 3,
-          kioskDutyDrawer: true,
-          tenantId: 't',
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.widget<SwitchListTile>(
-          find.widgetWithText(SwitchListTile, 'V panelu'),
-        ).value,
-        isTrue,
-      );
-      final share = find.widgetWithText(TextField, 'Podíl karty v panelu');
-      expect(tester.widget<TextField>(share).controller!.text, '30');
-      expect(find.text('Kolik výšky panelu karta zabere; zbytek si dělí '
-          'nástěnka a zápasy.'), findsOneWidget);
-      // Right under its switch, still in the duty's section.
-      expect(
-        tester.getTopLeft(share).dy,
-        greaterThan(
-            tester.getTopLeft(find.widgetWithText(SwitchListTile, 'V panelu'))
-                .dy),
-      );
-      expect(
-        tester.getTopLeft(share).dy,
-        lessThan(tester.getTopLeft(find.text('Postranní panel')).dy),
-      );
-
-      await enter(tester, 'Podíl karty v panelu', '95');
-      expect(find.text('Zadej číslo od 10 do 90.'), findsOneWidget);
-      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
-      await enter(tester, 'Podíl karty v panelu', '50');
-      expect(lastPatch(), {'kiosk_duty_share': 50});
-
-      await tester.tap(find.widgetWithText(SwitchListTile, 'V panelu'));
-      await tester.pumpAndSettle();
-      expect(lastPatch(), {'kiosk_duty_drawer': false});
-    });
   });
 
   testWidgets('the numbers are typed in: each PATCHes its own column on '
@@ -1001,22 +1479,17 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    // The defaults are in the fields: 60 s, 2 columns, 2 weeks back.
+    // The defaults are in the fields: 60 s, 2 weeks back.
     String shown(String label) =>
         tester.widget<TextField>(find.widgetWithText(TextField, label))
             .controller!.text;
     expect(shown('Doba nečinnosti'), '60');
-    expect(shown('Šířka panelu'), '2');
     expect(shown('Odehrané zápasy: týdnů zpět'), '2');
 
     await enter(tester, 'Doba nečinnosti', '300');
     expect(lastPatch(), {'kiosk_idle_seconds': 300});
     await enter(tester, 'Střídání oznamů', '20');
     expect(lastPatch(), {'kiosk_notices_rotation_seconds': 20});
-    await enter(tester, 'Šířka panelu', '3');
-    expect(lastPatch(), {'kiosk_drawer_columns': 3});
-    await enter(tester, 'Podíl nástěnky na výšce panelu', '60');
-    expect(lastPatch(), {'kiosk_notices_share': 60});
     await enter(tester, 'Odehrané zápasy: týdnů zpět', '0');
     expect(lastPatch(), {'kiosk_weeks_back': 0});
     await enter(tester, 'Budoucí zápasy: týdnů dopředu', '3');
@@ -1062,7 +1535,7 @@ void main() {
       top(find.text('Celý den na obrazovku')),
       top(find.widgetWithText(TextField, 'Dní na obrazovce')),
       top(find.text('Posun tabule do minulosti')),
-      top(find.text('Nástěnka')),
+      top(section('Stavový řádek')),
     ];
     for (var i = 1; i < order.length; i++) {
       expect(order[i - 1], lessThan(order[i]), reason: 'option $i');
@@ -1331,35 +1804,62 @@ void main() {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    final field = find.widgetWithText(TextField, 'Šířka panelu');
+    final field = find.descendant(
+      of: find.byKey(const ValueKey('kiosk-panel:right')),
+      matching: find.widgetWithText(TextField, 'Šířka'),
+    );
     await tester.ensureVisible(field);
     await tester.enterText(field, '3');
-    // Focus moves on to another field: the first one commits.
+    // Focus moves on to another field: the first one commits — the whole
+    // layout, with the right panel three days wide.
     await tester.tap(find.widgetWithText(TextField, 'Doba nečinnosti'));
     await tester.pumpAndSettle();
-    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
-        {'kiosk_drawer_columns': 3});
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body), {
+      'kiosk_panels': {
+        'left': {'days': 2, 'open': false},
+        'right': {'days': 3, 'open': false},
+        'modules': [
+          {'id': 'duty', 'side': 'off', 'share': 30},
+          {'id': 'notices', 'side': 'right', 'share': 40},
+          {'id': 'matches', 'side': 'right', 'share': 60},
+          {'id': 'guide', 'side': 'off', 'share': 45},
+          {'id': 'week', 'side': 'off', 'share': 55},
+        ],
+      },
+    });
   });
 
-  testWidgets('the options come in sections: screen, notices, canteen duty, '
-      'panel, live match, then the address and the accounts', (tester) async {
+  testWidgets('the options come in sections: screen, status line, panels, '
+      'notices, canteen duty, matches, live match, stream, performance, then '
+      'the address and the accounts', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    double top(String text) => tester.getTopLeft(find.text(text)).dy;
+    double top(Finder f) => tester.getTopLeft(f).dy;
+    const sections = [
+      'Obrazovka kiosku',
+      'Stavový řádek',
+      'Panely',
+      'Nástěnka',
+      'Služby na kantýně',
+      'Zápasy',
+      'Hraný zápas',
+      'Stream zápasu',
+      'Optimalizace výkonu',
+    ];
+    for (final title in sections) {
+      expect(inSection(title, find.text(title)), findsOneWidget,
+          reason: title);
+    }
     final order = [
-      top('Obrazovka kiosku'),
-      top('Stavový řádek'),
-      top('Nástěnka'),
-      top('Služby na kantýně'),
-      top('Postranní panel'),
-      top('Hraný zápas'),
-      top('Adresa pro tablet'),
-      top('Kioskové účty'),
+      for (final title in sections) top(section(title)),
+      top(find.text('Adresa pro tablet')),
+      top(find.text('Kioskové účty')),
     ];
     for (var i = 1; i < order.length; i++) {
       expect(order[i - 1], lessThan(order[i]), reason: 'section $i');
     }
+    expect(find.text('Postranní panel'), findsNothing);
   });
 
   testWidgets('the live match\'s drawing is chosen from a list', (tester) async {
@@ -1391,45 +1891,19 @@ void main() {
     expect(find.textContaining('(„Zobrazit další“)'), findsOneWidget);
   });
 
-  testWidgets('the panel switch comes first, and what needs it hides with it',
-      (tester) async {
-    tall(tester);
-    await tester.pumpWidget(app(panelEnabled: false));
-    await tester.pumpAndSettle();
-
-    expect(find.widgetWithText(SwitchListTile, 'Panel zapnutý'), findsOneWidget);
-    for (final dependent in [
-      'Výchozně rozbalený',
-      'Zápasy v panelu',
-      'Hraný zápas přes celý panel',
-      // The duty's card has no drawer to go to; header and board stay.
-      'V panelu',
-    ]) {
-      expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
-    }
-    expect(find.text('Šířka panelu'), findsNothing);
-    expect(find.text('Podíl karty v panelu'), findsNothing);
-    expect(find.text('Hraný zápas'), findsNothing);
-    expect(find.widgetWithText(SwitchListTile, 'V záhlaví'), findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'V kalendáři'), findsOneWidget);
-    // The notices can still go to the status bar without the panel.
-    expect(find.text('Kde se oznamy zobrazí'), findsOneWidget);
-
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Panel zapnutý'));
-    await tester.pumpAndSettle();
-    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
-        {'kiosk_panel_enabled': true});
-  });
-
   testWidgets('a rotation shows only with what it rotates', (tester) async {
     tall(tester);
     await tester.pumpWidget(app(
-      settings: const ScheduleSettings(
+      settings: ScheduleSettings(
         laneCount: 4,
-        trainingWeekdays: {1},
+        trainingWeekdays: const {1},
         bookingHorizonDays: 14,
         maxActiveReservations: 3,
-        kioskNoticesMode: KioskNoticesMode.off,
+        kioskNoticesHeader: false,
+        kioskPanels: KioskPanels.defaults.withSide(
+          KioskModule.notices,
+          PanelSide.off,
+        ),
         kioskLiveMode: false,
         tenantId: 't',
       ),
@@ -1438,8 +1912,6 @@ void main() {
     expect(find.text('Střídání oznamů'), findsNothing);
     expect(find.text('Střídání hraných zápasů'), findsNothing);
     expect(find.text('Kontrola výsledků'), findsNothing);
-    // Without the notices the notices' share has nothing to share either.
-    expect(find.text('Podíl nástěnky na výšce panelu'), findsNothing);
     // The Zápis size is not the live match's alone: a finished match in the
     // list opens one too.
     expect(find.text('Velikost zápisu'), findsOneWidget);
@@ -1499,5 +1971,50 @@ void main() {
         SwitchListTile, 'Hraný zápas přes celý panel'));
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_live_mode': false});
+  });
+
+  testWidgets('the texts speak of two panels', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    for (final text in [
+      // Doba nečinnosti.
+      'Po tolika sekundách bez dotyku kiosk zapomene vybraného hráče, zavře '
+          'okna i zápis, vrátí tabuli na dnešek a panely do výchozího stavu.',
+      // Dní na obrazovce.
+      'Kolik dní (sloupců) je na celé obrazovce najednou; další jsou o kus '
+          'vedle. Rozbalené panely z nich zakryjí tolik, kolik je jejich '
+          'šířka.',
+      // Kde se okno objeví.
+      'Okno překryje panel na své straně; vyber roh na straně bez panelu. '
+          'Další okna do dalších rohů — nejdřív na stejné straně.',
+      // Opakující se animace.
+      'Tlačítka panelů se každé čtyři sekundy rozzáří a ikona živého '
+          'přenosu pulzuje; při tom se překresluje celá obrazovka, i když se '
+          'kiosku nikdo nedotýká. Vypnuto = obojí je v klidu.',
+      // Hraný zápas přes celý panel.
+      'Souboje hraného zápasu zaberou celý panel se zápasy a ten zůstane '
+          'rozbalený — i když ho návštěvník zavře, po době nečinnosti se '
+          'rozbalí znovu. Vypnuto = hraný zápas je jen řádek v seznamu.',
+    ]) {
+      expect(find.text(text), findsOneWidget, reason: text);
+    }
+    // The duty's card is placed in the Panely table.
+    expect(
+      inSection(
+        'Služby na kantýně',
+        find.text(
+          'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu ve '
+          'Správě → Služby. Každé místo se zapíná zvlášť; kartu do panelu '
+          'dáš v Panelech (výš).',
+        ),
+      ),
+      findsOneWidget,
+    );
+    // Nothing says the panel is on the right, or that there is one button.
+    expect(find.textContaining('Panel je vpravo'), findsNothing);
+    expect(find.textContaining('Tlačítko panelu'), findsNothing);
+    expect(find.textContaining('a panel do výchozího stavu'), findsNothing);
   });
 }

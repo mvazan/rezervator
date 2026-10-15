@@ -4,8 +4,10 @@
 // ?fulltext=<name>` answers `{ data: [...] }` — and the WHOLE register, every
 // member, without a filter. (Until October 2026 it was a PHP page with a
 // filter cookie; that page is gone.) Each row carries more than a number;
-// only the name, club, age category, state, number and the register's own row
-// id are ever read, and nothing else is kept, logged or returned.
+// only the name, club, age category, gender, state, number and the register's
+// own row id are ever read, and nothing else is kept, logged or returned. Of
+// those, the number and (since 0078, for the kiosk's „Hráči týdne“) the
+// gender are kept.
 //
 // Who is who: the results service (vysledky.kuzelky.cz) and the register share
 // no id, and the results service publishes no number. Its player page does
@@ -64,6 +66,8 @@ export function ageFits(category: number, age: number): boolean {
   return age >= c.from - AGE_TOLERANCE && age <= c.to + AGE_TOLERANCE;
 }
 
+export type Gender = "m" | "f";
+
 export type RegisterRow = {
   /** The register's own row id: opaque, only to point at one candidate. */
   id: string;
@@ -74,12 +78,17 @@ export type RegisterRow = {
   category: number | null;
   /** The register's own label of it, for a player to recognise himself. */
   categoryName: string;
+  /** The register's ♂ / ♀, null when it gives neither ([genderOf]). */
+  gender: Gender | null;
 };
 
+/** A match player's answer. A found one carries the gender of his rows; an
+ * ambiguous one the gender all its candidates share (one of two namesakes
+ * of one gender is that gender either way); null when they differ. */
 export type Resolved =
-  | { status: "found"; regnum: string }
+  | { status: "found"; regnum: string; gender: Gender | null }
   | { status: "none" }
-  | { status: "ambiguous" };
+  | { status: "ambiguous"; gender: Gender | null };
 
 /** What the results service's player page says about a player. */
 export type SitePlayer = { club: string | null; age: number | null };
@@ -113,6 +122,22 @@ export function named(rows: RegisterRow[], name: string): RegisterRow[] {
 }
 
 const regnumsOf = (rows: RegisterRow[]) => new Set(rows.map((r) => r.regnum));
+
+/** The register's gender codes, as its JSON gives them (read off Tomáš and
+ * Jana Pavlů of SKK Veverky Brno, October 2026): 1 a man, 2 a woman. Any
+ * other value, or none, is unknown. */
+function genderOf(value: unknown): Gender | null {
+  if (value === 1) return "m";
+  if (value === 2) return "f";
+  return null;
+}
+
+/** The gender every one of [rows] has; null when they differ, one of them
+ * has none, or there are no rows. */
+function commonGender(rows: RegisterRow[]): Gender | null {
+  const first = rows[0]?.gender ?? null;
+  return rows.every((r) => r.gender === first) ? first : null;
+}
 
 /** The folded names that more than one of [names] has: profiles of one alley
  * that bear the same name (a parent and a child) cannot be told apart by name
@@ -150,14 +175,73 @@ export function pickForSitePlayer(
   if (regnumsOf(candidates).size === 1) {
     // Without an age to check, one namesake of another club proves nothing.
     if (age === null && !clubFits(candidates, site.club, team)) {
-      return { status: "ambiguous" };
+      return { status: "ambiguous", gender: commonGender(candidates) };
     }
-    return { status: "found", regnum: candidates[0].regnum };
+    return {
+      status: "found",
+      regnum: candidates[0].regnum,
+      gender: commonGender(candidates),
+    };
   }
   const ofClub = candidates.filter((r) => clubFits([r], site.club, team));
   return regnumsOf(ofClub).size === 1
-    ? { status: "found", regnum: ofClub[0].regnum }
-    : { status: "ambiguous" };
+    ? { status: "found", regnum: ofClub[0].regnum, gender: commonGender(ofClub) }
+    : { status: "ambiguous", gender: commonGender(candidates) };
+}
+
+/** Days after which the register is asked again for a gender it did not
+ * give. */
+export const GENDER_RETRY_DAYS = 7;
+
+/** Whether a cached match player's gender is worth a question: it is
+ * unknown, and the register was never asked for it or not in the last
+ * [GENDER_RETRY_DAYS] — whatever the row's status. */
+export function needsGender(
+  row: { gender: string | null; gender_checked_at: string | null },
+  now: Date,
+): boolean {
+  if (row.gender !== null) return false;
+  if (row.gender_checked_at === null) return true;
+  const checked = Date.parse(row.gender_checked_at);
+  return Number.isNaN(checked) ||
+    now.getTime() - checked >= GENDER_RETRY_DAYS * 24 * 3600e3;
+}
+
+/** The gender of a player found earlier, from a search of his name alone:
+ * the rows that bear his stored number. Null when the number is gone from
+ * the answer or its rows disagree. */
+export function genderForFound(
+  rows: RegisterRow[],
+  regnum: string,
+): Gender | null {
+  return commonGender(rows.filter((r) => r.regnum === regnum));
+}
+
+/** What the week's players need from the sites for a gender, by one cached
+ * row (undefined = none yet): `skip` while the gender is known or was asked
+ * for lately ([needsGender]), and for a `none` / `ambiguous` row younger than
+ * [retryAfterMs] (it is settled for now); `gender` for a `found` row, whose
+ * number and status stay — the register by name alone ([genderForFound]);
+ * `resolve` for no row, or a `none` / `ambiguous` one past [retryAfterMs] —
+ * the Zápis's resolve, which keeps the gender with the answer. */
+export function genderAction(
+  row:
+    | {
+      status: string;
+      looked_up_at: string;
+      gender: string | null;
+      gender_checked_at: string | null;
+    }
+    | undefined,
+  now: Date,
+  retryAfterMs: number,
+): "skip" | "gender" | "resolve" {
+  if (row === undefined) return "resolve";
+  if (!needsGender(row, now)) return "skip";
+  if (row.status === "found") return "gender";
+  return now.getTime() - Date.parse(row.looked_up_at) >= retryAfterMs
+    ? "resolve"
+    : "skip";
 }
 
 /** Whether a row's club is the player's club by his page, else his team. */
@@ -214,6 +298,7 @@ export function parseRows(json: unknown): RegisterRow[] {
       regnum,
       category: categoryOf(categoryName),
       categoryName,
+      gender: genderOf(r.gender),
     });
   }
   return rows;

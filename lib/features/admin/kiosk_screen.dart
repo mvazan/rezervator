@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/kiosk_url.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/kiosk_layout.dart';
 import '../../domain/models.dart';
 import '../../domain/weather.dart' show WeatherPlace;
 import '../auth/update_screen.dart' show UpdateScreen;
@@ -100,11 +101,18 @@ class KioskSettingsScreen extends ConsumerWidget {
     );
   }
 
-  static String _noticesLabel(KioskNoticesMode m) => switch (m) {
-    KioskNoticesMode.off => 'Nezobrazovat',
-    KioskNoticesMode.drawer => 'Jen v panelu',
-    KioskNoticesMode.header => 'Jen v záhlaví',
-    KioskNoticesMode.both => 'V záhlaví i v panelu',
+  static String _sideLabel(PanelSide side) => switch (side) {
+    PanelSide.off => 'Vypnuto',
+    PanelSide.left => 'Vlevo',
+    PanelSide.right => 'Vpravo',
+  };
+
+  static String _moduleLabel(KioskModule module) => switch (module) {
+    KioskModule.duty => 'Služba na kantýně',
+    KioskModule.notices => 'Nástěnka',
+    KioskModule.matches => 'Zápasy',
+    KioskModule.guide => 'Jak začít',
+    KioskModule.week => 'Hráči týdne',
   };
 
   static String _pickerLabel(KioskPickerMode m) => switch (m) {
@@ -126,12 +134,15 @@ class KioskSettingsScreen extends ConsumerWidget {
       '(„$button“).';
 
   /// A section: its title, a line on what it is about, and its options.
+  /// Keyed by its title: „Nástěnka“ and „Zápasy“ are rows of the Panely
+  /// table too, and „V záhlaví“ is a switch in two sections.
   Widget _section(
     BuildContext context,
     String title,
     String about,
     List<Widget> children,
   ) => Padding(
+    key: ValueKey('section:$title'),
     padding: const EdgeInsets.only(bottom: 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,6 +215,316 @@ class KioskSettingsScreen extends ConsumerWidget {
     () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
     errorText: friendlyDbError,
   );
+
+  /// Writes the panels' layout (0077) — always the whole of it: the
+  /// column's check validates it as one value and the kiosk reads it as
+  /// one, so moving or resizing one module is a new layout.
+  Future<void> _layout(
+    BuildContext context,
+    ScheduleSettings settings,
+    KioskPanels panels,
+  ) => _panel(context, settings, {'kiosk_panels': panels.toJson()});
+
+  /// The panels' layout — the default one until the settings row exists.
+  static KioskPanels _panels(ScheduleSettings? settings) =>
+      settings?.kioskPanels ?? KioskPanels.defaults;
+
+  /// Whether [module] sits in a panel.
+  static bool _placed(ScheduleSettings? settings, KioskModule module) =>
+      _panels(settings).sideOf(module) != PanelSide.off;
+
+  /// „Panely“: the width and the start of each panel that holds a module
+  /// (an empty one is not on the kiosk at all), then the table that puts
+  /// the modules into the panels, then the shares' sum per panel.
+  Widget _panelsSection(BuildContext context, ScheduleSettings? settings) {
+    final panels = _panels(settings);
+    final used = [
+      for (final side in const [PanelSide.left, PanelSide.right])
+        if (panels.modulesOn(side).isNotEmpty) side,
+    ];
+    return _section(
+      context,
+      'Panely',
+      'Panely vlevo a vpravo vedle tabule. Návštěvník je rozbalí a sbalí '
+          'tlačítkem na okraji obrazovky; po době nečinnosti se vrátí do '
+          'výchozího stavu.',
+      [
+        for (final side in used) _panelRow(context, settings, panels, side),
+        if (used.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Šířka = kolik sloupců dní rozbalený panel zakryje; oba panely '
+              'dohromady nejvýš o jeden méně, než je dní na obrazovce, takže '
+              'tabule ukáže vždy celé dny. Panel, který není výchozně '
+              'rozbalený, je po době nečinnosti skrytý a čeká na tlačítko.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= _moduleRowWidth;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // The table's head over the one-line rows; on a phone each
+                // control carries its own label instead.
+                if (wide) _moduleHeader(context),
+                for (final placement in panels.modules)
+                  // A module of a newer app is not listed; the layout keeps
+                  // it and every write hands it back unchanged.
+                  if (placement.module case final module?)
+                    _moduleRow(context, settings, panels, module, wide: wide),
+              ],
+            );
+          },
+        ),
+        if (used.isNotEmpty) ...[
+          Text(
+            [
+              for (final side in used)
+                '${_sideLabel(side)} ${_sum(panels, side)} %',
+            ].join(' · '),
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Podíly se přepočítají na celou výšku panelu.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The shares' sum of the modules on [side] — it need not be 100, the
+  /// kiosk takes the shares as weights of the panel's height.
+  static int _sum(KioskPanels panels, PanelSide side) =>
+      panels.modulesOn(side).fold(0, (sum, p) => sum + p.share);
+
+  /// The width and the start of the panel on [side].
+  Widget _panelRow(
+    BuildContext context,
+    ScheduleSettings? settings,
+    KioskPanels panels,
+    PanelSide side,
+  ) {
+    final panel = panels.panel(side);
+    return Padding(
+      key: ValueKey('kiosk-panel:${side.name}'),
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            side == PanelSide.left ? 'Levý panel' : 'Pravý panel',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: NumberSettingField(
+                  key: ValueKey('kiosk_panels.${side.name}.days'),
+                  label: 'Šířka',
+                  value: panel.days,
+                  unit: 'dní',
+                  min: 1,
+                  max: 13,
+                  onChanged: settings == null
+                      ? null
+                      : (n) => _layout(
+                          context,
+                          settings,
+                          panels.withPanel(side, days: n),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 3,
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Výchozně rozbalený'),
+                  value: panel.open,
+                  onChanged: settings == null
+                      ? null
+                      : (on) => _layout(
+                          context,
+                          settings,
+                          panels.withPanel(side, open: on),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// From this width on a module's row is one line of the table; below it
+  /// (a phone) a placed module's share and arrows go under its name.
+  static const _moduleRowWidth = 520.0;
+
+  /// The columns of a one-line row after the module's name: its panel's
+  /// list, its share, its two arrows. The arrows get a fixed 2 x 48 column:
+  /// an [IconButton] is only 48 wide where the platform pads tap targets
+  /// (phones) and 40 on desktop, where the row would end short.
+  static const _panelWidth = 150.0;
+  static const _shareWidth = 120.0;
+  static const _arrowsWidth = 2 * 48.0;
+
+  /// What a placed module adds to its row: the share and the two arrows.
+  static const _placedWidth = _shareWidth + 4 + _arrowsWidth;
+
+  /// The table's head over the one-line rows, as in the spec's sketch:
+  /// „Modul“, „Panel“, „Podíl“, „Pořadí“, each over its column.
+  Widget _moduleHeader(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelMedium?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    return Padding(
+      key: const ValueKey('kiosk-modules-header'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(child: Text('Modul', style: style)),
+          SizedBox(
+            width: _panelWidth,
+            child: Text('Panel', style: style),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: _shareWidth,
+            child: Text('Podíl', style: style),
+          ),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: _arrowsWidth,
+            child: Text('Pořadí', style: style, textAlign: TextAlign.center),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The table's row of [module]: its panel and — once placed — its share
+  /// and the arrows that move it among the placed modules of its panel.
+  Widget _moduleRow(
+    BuildContext context,
+    ScheduleSettings? settings,
+    KioskPanels panels,
+    KioskModule module, {
+    required bool wide,
+  }) {
+    final side = panels.sideOf(module);
+    final onSide = side == PanelSide.off
+        ? const <KioskModulePlacement>[]
+        : panels.modulesOn(side);
+    final at = onSide.indexWhere((p) => p.module == module);
+    void write(KioskPanels next) {
+      if (settings != null) _layout(context, settings, next);
+    }
+
+    final name = Text(
+      _moduleLabel(module),
+      style: Theme.of(context).textTheme.bodyLarge,
+    );
+    final panel = SizedBox(
+      width: _panelWidth,
+      child: DropdownButtonFormField<PanelSide>(
+        initialValue: side,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'Panel',
+          border: OutlineInputBorder(),
+        ),
+        items: [
+          for (final s in PanelSide.values)
+            DropdownMenuItem(value: s, child: Text(_sideLabel(s))),
+        ],
+        onChanged: settings == null
+            ? null
+            : (s) {
+                if (s != null && s != side) {
+                  write(panels.withSide(module, s));
+                }
+              },
+      ),
+    );
+    final placed = <Widget>[
+      SizedBox(
+        width: _shareWidth,
+        child: NumberSettingField(
+          key: ValueKey('kiosk_panels.${module.name}.share'),
+          label: 'Podíl',
+          value: panels.shareOf(module),
+          unit: '%',
+          min: 5,
+          max: 95,
+          onChanged: settings == null
+              ? null
+              : (n) => write(panels.withShare(module, n)),
+        ),
+      ),
+      const SizedBox(width: 4),
+      SizedBox(
+        width: _arrowsWidth,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Posunout výš',
+              icon: const Icon(Icons.arrow_upward),
+              onPressed: settings == null || at <= 0
+                  ? null
+                  : () => write(panels.moved(module, -1)),
+            ),
+            IconButton(
+              tooltip: 'Posunout níž',
+              icon: const Icon(Icons.arrow_downward),
+              onPressed: settings == null || at >= onSide.length - 1
+                  ? null
+                  : () => write(panels.moved(module, 1)),
+            ),
+          ],
+        ),
+      ),
+    ];
+    return Padding(
+      key: ValueKey('kiosk-module:${module.name}'),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: wide
+          ? Row(
+              children: [
+                Expanded(child: name),
+                panel,
+                const SizedBox(width: 12),
+                // An unplaced module keeps the columns in line.
+                if (side == PanelSide.off)
+                  const SizedBox(width: _placedWidth)
+                else
+                  ...placed,
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [Expanded(child: name), panel]),
+                if (side != PanelSide.off)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: placed,
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
 
   /// The warning's text, typed in a dialog (0068); saved trimmed.
   Future<void> _editWarning(
@@ -471,7 +792,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   helper:
                       'Po tolika sekundách bez dotyku kiosk zapomene '
                       'vybraného hráče, zavře okna i zápis, vrátí tabuli na '
-                      'dnešek a panel do výchozího stavu.',
+                      'dnešek a panely do výchozího stavu.',
                 ),
                 _number(
                   context,
@@ -562,8 +883,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                   max: 14,
                   helper:
                       'Kolik dní (sloupců) je na celé obrazovce najednou; '
-                      'další jsou o kus vedle. Rozbalený panel z nich zakryje '
-                      'tolik, kolik je jeho šířka.',
+                      'další jsou o kus vedle. Rozbalené panely z nich '
+                      'zakryjí tolik, kolik je jejich šířka.',
                 ),
                 _switch(
                   context,
@@ -649,43 +970,25 @@ class KioskSettingsScreen extends ConsumerWidget {
                 ),
               ],
             ),
+            _panelsSection(context, settings),
             _section(
               context,
               'Nástěnka',
               'Oznamy z nástěnky klubu. Který oznam se na kiosku ukáže, '
                   'volíš přímo na nástěnce (⋮ u oznamu).',
               [
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 12),
-                  child: DropdownButtonFormField<KioskNoticesMode>(
-                    initialValue:
-                        settings?.kioskNoticesMode ?? KioskNoticesMode.both,
-                    decoration: const InputDecoration(
-                      labelText: 'Kde se oznamy zobrazí',
-                      helperText:
-                          'Záhlaví = stavový řádek nahoře, nadpis jednoho '
-                          'oznamu. Panel = postranní panel vpravo (níž).',
-                      helperMaxLines: 3,
-                      border: OutlineInputBorder(),
-                    ),
-                    items: [
-                      for (final m in KioskNoticesMode.values)
-                        DropdownMenuItem(
-                          value: m,
-                          child: Text(_noticesLabel(m)),
-                        ),
-                    ],
-                    onChanged: settings == null
-                        ? null
-                        : (m) => m == null
-                              ? null
-                              : _panel(context, settings, {
-                                  'kiosk_notices_mode': m.name,
-                                }),
-                  ),
+                _switch(
+                  context,
+                  settings,
+                  'V záhlaví',
+                  settings?.kioskNoticesHeader ?? true,
+                  'kiosk_notices_header',
+                  subtitle:
+                      'Nadpis jednoho oznamu ve stavovém řádku nahoře. Do '
+                      'panelu vlevo nebo vpravo dáš nástěnku v Panelech (výš).',
                 ),
-                if ((settings?.kioskNoticesMode ?? KioskNoticesMode.both) !=
-                    KioskNoticesMode.off)
+                if ((settings?.kioskNoticesHeader ?? true) ||
+                    _placed(settings, KioskModule.notices))
                   _number(
                     context,
                     settings,
@@ -705,7 +1008,8 @@ class KioskSettingsScreen extends ConsumerWidget {
               context,
               'Služby na kantýně',
               'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu '
-                  've Správě → Služby. Každé místo se zapíná zvlášť.',
+                  've Správě → Služby. Každé místo se zapíná zvlášť; kartu '
+                  'do panelu dáš v Panelech (výš).',
               [
                 _switch(
                   context,
@@ -754,151 +1058,65 @@ class KioskSettingsScreen extends ConsumerWidget {
                                   }),
                     ),
                   ),
-                // The card lives in the drawer: with the drawer off there is
-                // nowhere to put it (like the live match's section).
-                if (settings?.kioskPanelEnabled ?? true)
-                  _switch(
-                    context,
-                    settings,
-                    'V panelu',
-                    settings?.kioskDutyDrawer ?? false,
-                    'kiosk_duty_drawer',
-                    subtitle: 'Karta se službou a plánem v postranním panelu.',
-                  ),
-                if ((settings?.kioskPanelEnabled ?? true) &&
-                    (settings?.kioskDutyDrawer ?? false))
-                  _number(
-                    context,
-                    settings,
-                    'Podíl karty v panelu',
-                    settings?.kioskDutyShare ?? 30,
-                    'kiosk_duty_share',
-                    unit: '%',
-                    min: 10,
-                    max: 90,
-                    helper:
-                        'Kolik výšky panelu karta zabere; zbytek si dělí '
-                        'nástěnka a zápasy.',
-                  ),
               ],
             ),
-            _section(
-              context,
-              'Postranní panel',
-              'Panel vpravo vedle tabule s nástěnkou a zápasy (a službou na '
-                  'kantýně, je-li zapnutá). Návštěvník '
-                  'ho rozbalí a sbalí tlačítkem na okraji obrazovky; po době '
-                  'nečinnosti se vrátí do výchozího stavu.',
-              [
-                _switch(
-                  context,
-                  settings,
-                  'Panel zapnutý',
-                  settings?.kioskPanelEnabled ?? true,
-                  'kiosk_panel_enabled',
-                  subtitle: 'Vypnuto = kiosk ukazuje jen tabuli.',
-                ),
-                if (settings?.kioskPanelEnabled ?? true) ...[
+            // The match list's options — only with the list in a panel.
+            if (_placed(settings, KioskModule.matches))
+              _section(
+                context,
+                'Zápasy',
+                'Seznam zápasů kuželny v panelu. Klepnutím na odehraný zápas '
+                    'se otevře jeho zápis.',
+                [
                   _switch(
                     context,
                     settings,
-                    'Výchozně rozbalený',
-                    settings?.kioskDrawerOpen ?? false,
-                    'kiosk_drawer_open',
+                    'I budoucí zápasy',
+                    settings?.kioskShowUpcoming ?? true,
+                    'kiosk_show_upcoming',
+                    subtitle: 'Vypnuto = jen odehrané a dnešní zápasy.',
+                  ),
+                  _switch(
+                    context,
+                    settings,
+                    'Seznam sleduje tabuli',
+                    settings?.kioskFollowBoard ?? true,
+                    'kiosk_follow_board',
                     subtitle:
-                        'Vypnuto = po době nečinnosti je panel skrytý a '
-                        'čeká na tlačítko.',
+                        'Když návštěvník posune tabuli, seznam se posune '
+                        'jen o zápasy dnů, které přibyly.',
                   ),
                   _number(
                     context,
                     settings,
-                    'Šířka panelu',
-                    settings?.kioskDrawerColumns ?? 2,
-                    'kiosk_drawer_columns',
-                    unit: 'dní',
-                    min: 1,
-                    max: 13,
+                    'Odehrané zápasy: týdnů zpět',
+                    settings?.kioskWeeksBack ?? 2,
+                    'kiosk_weeks_back',
+                    unit: 'týdnů',
+                    min: 0,
+                    max: 52,
                     helper:
-                        'Kolik sloupců dní rozbalený panel zakryje; nejvýš o '
-                        'jeden méně, než je dní na obrazovce. Zavřený i '
-                        'otevřený panel tak nechá na tabuli jen celé dny.',
+                        'Kolik týdnů před tím aktuálním seznam otevře. '
+                        '${_rangeNote('Zobrazit předchozí')}',
                   ),
-                  if ((settings?.kioskShowNotices ?? true) &&
-                      (settings?.kioskShowMatches ?? true))
+                  if (settings?.kioskShowUpcoming ?? true)
                     _number(
                       context,
                       settings,
-                      'Podíl nástěnky na výšce panelu',
-                      settings?.kioskNoticesShare ?? 40,
-                      'kiosk_notices_share',
-                      unit: '%',
-                      min: 10,
-                      max: 90,
-                      helper:
-                          'Kolik výšky panelu dostanou oznamy; zbytek mají '
-                          'zápasy. Karta služby si bere svůj podíl napřed.',
-                    ),
-                  _switch(
-                    context,
-                    settings,
-                    'Zápasy v panelu',
-                    settings?.kioskShowMatches ?? true,
-                    'kiosk_show_matches',
-                    subtitle:
-                        'Seznam zápasů kuželny. Klepnutím na odehraný '
-                        'zápas se otevře jeho zápis.',
-                  ),
-                  if (settings?.kioskShowMatches ?? true) ...[
-                    _switch(
-                      context,
-                      settings,
-                      'I budoucí zápasy',
-                      settings?.kioskShowUpcoming ?? true,
-                      'kiosk_show_upcoming',
-                      subtitle: 'Vypnuto = jen odehrané a dnešní zápasy.',
-                    ),
-                    _switch(
-                      context,
-                      settings,
-                      'Seznam sleduje tabuli',
-                      settings?.kioskFollowBoard ?? true,
-                      'kiosk_follow_board',
-                      subtitle:
-                          'Když návštěvník posune tabuli, seznam se posune '
-                          'jen o zápasy dnů, které přibyly.',
-                    ),
-                    _number(
-                      context,
-                      settings,
-                      'Odehrané zápasy: týdnů zpět',
-                      settings?.kioskWeeksBack ?? 2,
-                      'kiosk_weeks_back',
+                      'Budoucí zápasy: týdnů dopředu',
+                      settings?.kioskWeeksAhead ?? 1,
+                      'kiosk_weeks_ahead',
                       unit: 'týdnů',
                       min: 0,
                       max: 52,
                       helper:
-                          'Kolik týdnů před tím aktuálním seznam otevře. '
-                          '${_rangeNote('Zobrazit předchozí')}',
+                          'Kolik týdnů po tom aktuálním seznam otevře. '
+                          '${_rangeNote('Zobrazit další')}',
                     ),
-                    if (settings?.kioskShowUpcoming ?? true)
-                      _number(
-                        context,
-                        settings,
-                        'Budoucí zápasy: týdnů dopředu',
-                        settings?.kioskWeeksAhead ?? 1,
-                        'kiosk_weeks_ahead',
-                        unit: 'týdnů',
-                        min: 0,
-                        max: 52,
-                        helper:
-                            'Kolik týdnů po tom aktuálním seznam otevře. '
-                            '${_rangeNote('Zobrazit další')}',
-                      ),
-                  ],
                 ],
-              ],
-            ),
-            if (settings?.kioskPanelEnabled ?? true)
+              ),
+            // The match being played takes over the panel with the list.
+            if (_placed(settings, KioskModule.matches))
               _section(
                 context,
                 'Hraný zápas',
@@ -912,10 +1130,10 @@ class KioskSettingsScreen extends ConsumerWidget {
                     settings?.kioskLiveMode ?? true,
                     'kiosk_live_mode',
                     subtitle:
-                        'Souboje hraného zápasu zaberou celý panel a panel '
-                        'zůstane rozbalený — i když ho návštěvník zavře, po '
-                        'době nečinnosti se rozbalí znovu. Vypnuto = hraný '
-                        'zápas je jen řádek v seznamu.',
+                        'Souboje hraného zápasu zaberou celý panel se zápasy '
+                        'a ten zůstane rozbalený — i když ho návštěvník '
+                        'zavře, po době nečinnosti se rozbalí znovu. Vypnuto '
+                        '= hraný zápas je jen řádek v seznamu.',
                   ),
                   if (settings?.kioskLiveMode ?? true) ...[
                     Padding(
@@ -1024,9 +1242,10 @@ class KioskSettingsScreen extends ConsumerWidget {
                       decoration: const InputDecoration(
                         labelText: 'Kde se okno objeví',
                         helperText:
-                            'Panel je vpravo; vlevo dole mu okno nepřekáží. '
-                            'Další okna do dalších rohů — nejdřív na stejné '
-                            'straně.',
+                            'Okno překryje panel na své straně; vyber roh na '
+                            'straně bez panelu. Další okna do dalších rohů — '
+                            'nejdřív na stejné straně.',
+                        helperMaxLines: 3,
                         border: OutlineInputBorder(),
                       ),
                       items: const [
@@ -1102,7 +1321,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   settings?.kioskAnimations ?? true,
                   'kiosk_animations',
                   subtitle:
-                      'Tlačítko panelu se každé čtyři sekundy rozzáří a ikona '
+                      'Tlačítka panelů se každé čtyři sekundy rozzáří a ikona '
                       'živého přenosu pulzuje; při tom se překresluje celá '
                       'obrazovka, i když se kiosku nikdo nedotýká. Vypnuto = '
                       'obojí je v klidu.',
