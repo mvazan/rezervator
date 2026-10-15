@@ -4412,6 +4412,61 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('a notice posted after the kiosk\'s minute clock (which runs '
+        'behind) is fresh at once: „NOVÉ“ and the stripe — and with fresh '
+        'ones shown longer, its first turn is two', (tester) async {
+      fullHd(tester);
+      final bar = find.byType(KioskHeadline);
+      Finder inBar(Finder f) => find.descendant(of: bar, matching: f);
+      final before = [notice('1', 'Brigáda'), notice('2', 'Zámek')];
+      // The server stamps it 30 s after the minute the kiosk's clock holds.
+      final posted = [
+        ...before,
+        notice('3', 'Turnaj', posted: nowAt.add(const Duration(seconds: 30))),
+      ];
+      Future<void> post(KioskNoticesFresh fresh) async {
+        final up = StreamController<List<Message>>();
+        addTearDown(up.close);
+        await tester.pumpWidget(
+          app(noticesStream: up.stream, drawerOpen: true, noticesFresh: fresh),
+        );
+        up.add(before);
+        await tester.pumpAndSettle();
+        expect(drawerText('Zámek'), findsOneWidget);
+        up.add(posted);
+        await tester.pumpAndSettle();
+        expect(drawerText('Turnaj'), findsOneWidget);
+        expect(inBar(find.text('Turnaj')), findsOneWidget);
+      }
+
+      await post(KioskNoticesFresh.highlight);
+      final primary = Theme.of(
+        tester.element(find.byType(KioskPanelView)),
+      ).colorScheme.primary;
+      expect(
+        find.descendant(of: noticesCard, matching: find.byType(KioskNewChip)),
+        findsOneWidget,
+      );
+      expect(tester.widget<KioskCard>(noticesCard).stripe, primary);
+      expect(inBar(find.byType(KioskNewChip)), findsOneWidget);
+      await finish(tester);
+
+      await post(KioskNoticesFresh.longer);
+      expect(find.byType(KioskNewChip), findsNothing);
+      // One turn (12 s) on: still the new one, in both places.
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(drawerText('Turnaj'), findsOneWidget);
+      expect(inBar(find.text('Turnaj')), findsOneWidget);
+      // Its second turn over: the next one.
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(drawerText('Zámek'), findsOneWidget);
+      expect(inBar(find.text('Zámek')), findsOneWidget);
+
+      await finish(tester);
+    });
+
     testWidgets('notices taken down while the last one shows: the card shows '
         'the last one left, its dot lit', (tester) async {
       fullHd(tester);

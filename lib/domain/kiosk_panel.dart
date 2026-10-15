@@ -3,7 +3,7 @@
 /// `KioskInfoPanel` only renders it.
 library;
 
-import 'messages.dart' show noticePostedAt, splitNotices;
+import 'messages.dart' show isScheduled, noticePostedAt, splitNotices;
 import 'models.dart';
 import 'results.dart' show isLive;
 import 'youtube.dart' show youtubeVideoId;
@@ -18,13 +18,13 @@ List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
 
 /// Whether [m] is a fresh notice on the kiosk (0080): up for less than
 /// [days] days at [now], counted from when it went up ([noticePostedAt]).
-/// A posting time still ahead of [now] is never fresh — the notice is not
-/// up yet.
-bool isFreshNotice(Message m, DateTime now, int days) {
-  final posted = noticePostedAt(m);
-  return !posted.isAfter(now) &&
-      now.difference(posted) < Duration(days: days);
-}
+/// A notice scheduled for later ([isScheduled]) is never fresh — it is not
+/// up yet. A notice posted after [now] is fresh: the kiosk's minute clock
+/// runs up to ~75 s behind, so a notice that has just gone up is usually
+/// „ahead“ of it.
+bool isFreshNotice(Message m, DateTime now, int days) =>
+    !isScheduled(m, now) &&
+    now.difference(noticePostedAt(m)) < Duration(days: days);
 
 /// How long [m] stays on the kiosk — the panel's card and the status bar —
 /// before the next notice: twice [turn] when fresh notices linger

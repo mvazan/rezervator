@@ -29,7 +29,7 @@ Re-runnable (`add column if not exists`, checks guarded). `public_week` is an al
 
 `lib/domain/kiosk_panel.dart` (pure, unit-tested):
 
-- `bool isFreshNotice(Message m, DateTime now, int days)` — `now.difference(noticePostedAt(m)) < Duration(days: days)` (and never for a posting time in the future).
+- `bool isFreshNotice(Message m, DateTime now, int days)` — `now.difference(noticePostedAt(m)) < Duration(days: days)`, never for a notice scheduled for later (`visibleFrom` ahead of `now`). A posting time after `now` otherwise counts as just posted (a negative difference is fresh): the kiosk's minute clock runs up to ~75 s behind, so a notice that has just gone up is usually ahead of it.
 - `Duration kioskNoticeTurn(Message m, {required DateTime now, required Duration turn, required KioskNoticesFresh fresh, required int days})` — `turn × 2` when `fresh.lingers` and the notice is fresh, else `turn`.
 
 ### Card and status bar
@@ -52,7 +52,7 @@ Under „Střídání oznamů“ (shown when the notices are in the header or a 
 
 ## Testing
 
-- **Unit:** `splitNotices` newest first (ties, expired newest first, scheduled ascending); `noticePostedAt`; `isFreshNotice` (edges: exactly N days, future); `kioskNoticeTurn`; `KioskNoticesFresh.parse` and `ScheduleSettings` parsing/defaults.
+- **Unit:** `splitNotices` newest first (ties, expired newest first, scheduled ascending); `noticePostedAt`; `isFreshNotice` (edges: exactly N days, scheduled for later, posted just after the kiosk's clock); `kioskNoticeTurn`; `KioskNoticesFresh.parse` and `ScheduleSettings` parsing/defaults.
 - **Widget (kiosk):** the card and the status bar start on the newest; a fresh notice with highlight shows „NOVÉ“ (and the stripe), an old one does not; with `longer` the fresh notice stays twice the turn, an old one the turn; a newly posted notice is shown at once; the existing rotation tests updated to the new order.
 - **Widget (admin):** the two controls PATCH `kiosk_notices_fresh_mode` / `kiosk_notices_fresh_days`, the days field hidden when off.
 - **Widget (app):** the board lists newest first; the notices unread on opening show „Nové“ for the visit (also after the optimistic read), not the read ones, not the author's own; a notice that arrives while the board is open and is marked read on this visit is new too; reopening shows none.

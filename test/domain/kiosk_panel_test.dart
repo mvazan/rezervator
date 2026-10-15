@@ -114,16 +114,17 @@ void main() {
       final ahead = notice('ahead',
           createdAt: DateTime(2026, 9, 1), visibleFrom: DateTime(2026, 10, 7, 8));
       expect(isFreshNotice(ahead, now, 3), isTrue);
-      // A posting time still ahead of now is never fresh: it is not up.
+      // Scheduled for later is never fresh: it is not up.
       expect(
         isFreshNotice(
             notice('later', visibleFrom: DateTime(2026, 10, 9, 8)), now, 3),
         isFalse,
       );
+      // Posted after the kiosk's lagging minute clock: just posted, fresh.
       expect(
         isFreshNotice(
             notice('skew', createdAt: DateTime(2026, 10, 8, 12, 0, 5)), now, 3),
-        isFalse,
+        isTrue,
       );
     });
 
