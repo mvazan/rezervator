@@ -1,32 +1,37 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/open_meteo.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/kiosk_header.dart';
+import 'package:rezervator/domain/kiosk_layout.dart' show PanelSide;
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/namedays.dart';
 import 'package:rezervator/domain/weather.dart';
 import 'package:rezervator/features/kiosk/kiosk_day_info.dart';
+import 'package:rezervator/features/kiosk/kiosk_header_module.dart';
 
 void main() {
   // Saturday 3 January 2026, 10:00 — Radmila.
   final now = DateTime(2026, 1, 3, 10);
 
   ScheduleSettings settings({
-    bool weather = false,
-    bool nameday = false,
+    PanelSide weather = PanelSide.off,
     bool place = true,
   }) => ScheduleSettings(
     laneCount: 4,
     trainingWeekdays: const {1, 2, 3, 4, 5, 6, 7},
     bookingHorizonDays: 14,
     maxActiveReservations: 3,
-    kioskWeather: weather,
-    kioskNameday: nameday,
+    kioskHeader: KioskHeader.defaults.withSide(
+      KioskHeaderModule.weather,
+      weather,
+    ),
     kioskWeatherPlace: place ? 'Brno, Jihomoravský' : null,
     kioskWeatherLat: place ? 49.19522 : null,
     kioskWeatherLon: place ? 16.60796 : null,
@@ -35,7 +40,6 @@ void main() {
   KioskWeather weather({
     double t = -3.4,
     int? chance = 10,
-    DateTime? at,
     bool isDay = true,
   }) => KioskWeather(
     temperature: t,
@@ -44,50 +48,53 @@ void main() {
     max: 1.2,
     min: -6.8,
     precipitationChance: chance,
-    fetchedAt: at ?? now.subtract(const Duration(minutes: 10)),
+    fetchedAt: now.subtract(const Duration(minutes: 10)),
   );
 
-  Widget app(
-    ScheduleSettings s, {
-    KioskWeather? w,
-    DateTime? at,
-    Widget home = const Scaffold(body: Center(child: KioskDayInfo())),
-  }) => ProviderScope(
-    overrides: [
-      settingsProvider.overrideWith((ref) => Stream.value(s)),
-      nowProvider.overrideWith((ref) => Stream.value(at ?? now)),
-      kioskWeatherProvider.overrideWith((ref) => Stream.value(w)),
-    ],
-    child: MaterialApp(home: home),
-  );
+  Widget app(Widget module, {Size? size, double textScale = 1}) =>
+      MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              size: size,
+              textScaler: TextScaler.linear(textScale),
+            ),
+            child: Scaffold(
+              body: Align(alignment: Alignment.topLeft, child: module),
+            ),
+          ),
+        ),
+      );
 
-  testWidgets('both off: nothing at all', (tester) async {
-    await tester.pumpWidget(app(settings(), w: weather()));
-    await tester.pumpAndSettle();
-    expect(find.byType(Text), findsNothing);
-    expect(tester.getSize(find.byType(KioskDayInfo)), Size.zero);
-  });
+  final title = find.text('Dnes v Brně');
 
-  testWidgets('the weather: icon, now, today\'s high and low; the name day '
-      'under it', (tester) async {
+  testWidgets('the weather: the admin\'s title over the icon, now, today\'s '
+      'high and low', (tester) async {
     await tester.pumpWidget(
-      app(settings(weather: true, nameday: true), w: weather()),
+      app(KioskWeatherModule(weather: weather(), title: 'Dnes v Brně')),
     );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.cloudy_snowing), findsOneWidget);
     expect(find.text('−3°'), findsOneWidget);
     expect(find.text('1° / −7°'), findsOneWidget);
     expect(find.byIcon(Icons.umbrella), findsNothing);
-    expect(find.text('Svátek: Radmila'), findsOneWidget);
+    expect(title, findsOneWidget);
+    // One tap target, read as the title and then the weather.
     expect(
       find.bySemanticsLabel(
+        'Dnes v Brně\n'
         'Počasí: Sněžení, −3°, dnes nejvýš 1°, nejníž −7°. $weatherSource',
       ),
       findsOneWidget,
     );
+    // The title over the value, both at the module's left.
     expect(
-      tester.getTopLeft(find.text('Svátek: Radmila')).dy,
-      greaterThan(tester.getTopLeft(find.text('−3°')).dy),
+      tester.getRect(title).bottom,
+      lessThanOrEqualTo(tester.getRect(find.text('−3°')).top),
+    );
+    expect(
+      tester.getRect(title).left,
+      tester.getRect(find.byIcon(Icons.cloudy_snowing)).left,
     );
   });
 
@@ -95,101 +102,118 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      app(settings(weather: true), w: weather(chance: 30)),
+      app(KioskWeatherModule(weather: weather(chance: 30), title: 'Počasí')),
     );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.umbrella), findsOneWidget);
     expect(find.text('30 %'), findsOneWidget);
-    expect(find.text('Svátek: Radmila'), findsNothing);
-  });
-
-  testWidgets('weather older than three hours is not shown; the name day '
-      'still is', (tester) async {
-    await tester.pumpWidget(
-      app(
-        settings(weather: true, nameday: true),
-        w: weather(at: now.subtract(const Duration(hours: 3))),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('−3°'), findsNothing);
-    expect(find.text('Svátek: Radmila'), findsOneWidget);
   });
 
   testWidgets('no source in the header; a tap on the weather shows it in '
-      'place of the name day for a while', (tester) async {
+      'place of the title for a while', (tester) async {
     await tester.pumpWidget(
-      app(settings(weather: true, nameday: true), w: weather()),
+      app(KioskWeatherModule(weather: weather(), title: 'Dnes v Brně')),
     );
     await tester.pumpAndSettle();
     expect(find.text(weatherSource), findsNothing);
     expect(find.textContaining('Open-Meteo'), findsNothing);
-    expect(find.text('Svátek: Radmila'), findsOneWidget);
+    final at = tester.getRect(title).topLeft;
 
     await tester.tap(find.text('−3°'));
     await tester.pump();
     expect(find.text(weatherSource), findsOneWidget);
-    expect(find.text('Svátek: Radmila'), findsNothing);
+    expect(title, findsNothing);
+    // Where the title was.
+    expect(tester.getRect(find.text(weatherSource)).topLeft, at);
 
-    await tester.pump(KioskDayInfo.sourceFor);
+    await tester.pump(KioskWeatherModule.sourceFor);
     expect(find.text(weatherSource), findsNothing);
-    expect(find.text('Svátek: Radmila'), findsOneWidget);
-  });
-
-  testWidgets('a narrow kiosk with large text: the column keeps to a quarter '
-      'of the screen and the status bar does not overflow', (tester) async {
-    tester.view.physicalSize = const Size(1024, 600);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    // The status bar's shape: the clock, this column, the middle, the
-    // button — the longest name day of the year, the umbrella on.
-    await tester.pumpWidget(
-      MediaQuery(
-        data: const MediaQueryData(
-          size: Size(1024, 600),
-          textScaler: TextScaler.linear(2),
-        ),
-        child: app(
-          settings(weather: true, nameday: true),
-          w: weather(t: -12.4, chance: 100),
-          at: DateTime(2026, 1, 6, 10),
-          home: const Scaffold(
-            body: Row(
-              children: [
-                SizedBox(width: 120, height: 60),
-                KioskDayInfo(),
-                Expanded(child: SizedBox(height: 60)),
-                SizedBox(width: 260, height: 60),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(find.text('Svátek: Kašpar, Melichar a Baltazar'), findsOneWidget);
-    expect(
-      tester.getSize(find.byType(KioskDayInfo)).width,
-      lessThanOrEqualTo(1024 * kioskDayInfoShare),
-    );
+    expect(title, findsOneWidget);
   });
 
   testWidgets('a clear night shows the moon', (tester) async {
     await tester.pumpWidget(
       app(
-        settings(weather: true),
-        w: KioskWeather(
-          temperature: 4,
-          kind: WeatherKind.clear,
-          isDay: false,
-          fetchedAt: now,
+        KioskWeatherModule(
+          weather: KioskWeather(
+            temperature: 4,
+            kind: WeatherKind.clear,
+            isDay: false,
+            fetchedAt: now,
+          ),
+          title: 'Počasí',
         ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.nightlight_round), findsOneWidget);
     expect(find.byIcon(Icons.wb_sunny), findsNothing);
+  });
+
+  testWidgets('the name day: its title over the names', (tester) async {
+    await tester.pumpWidget(
+      app(
+        KioskNameDayModule(
+          day: nameDayHeader(czechNameDay(Day(2026, 1, 3)))!,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final name = find.text('Radmila');
+    expect(find.text('Dnes má svátek'), findsOneWidget);
+    expect(name, findsOneWidget);
+    expect(
+      tester.getRect(find.text('Dnes má svátek')).bottom,
+      lessThanOrEqualTo(tester.getRect(name).top),
+    );
+    expect(
+      tester.getRect(find.text('Dnes má svátek')).left,
+      tester.getRect(name).left,
+    );
+  });
+
+  testWidgets('a narrow kiosk with large text: each module keeps to a fifth '
+      'of the screen — the weather scales down, the names are cut', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1024, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      app(
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            KioskWeatherModule(
+              weather: weather(t: -12.4, chance: 100),
+              title: 'Dnes v Brně',
+            ),
+            KioskNameDayModule(
+              day: nameDayHeader(czechNameDay(Day(2026, 1, 6)))!,
+            ),
+          ],
+        ),
+        size: const Size(1024, 600),
+        textScale: 2,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final names = find.text('Kašpar, Melichar a Baltazar');
+    expect(names, findsOneWidget);
+    for (final module in [
+      find.byType(KioskWeatherModule),
+      find.byType(KioskNameDayModule),
+    ]) {
+      expect(
+        tester.getSize(module).width,
+        lessThanOrEqualTo(1024 * kioskHeaderModuleShare),
+      );
+    }
+    final paragraph = tester.renderObject<RenderParagraph>(
+      find.descendant(of: names, matching: find.byType(RichText)),
+    );
+    expect(paragraph.didExceedMaxLines, isTrue);
   });
 
   group('kioskWeatherProvider', () {
@@ -228,7 +252,7 @@ void main() {
 
     test('asks for the admin\'s place', () async {
       final asked = <Uri>[];
-      final w = await first(settings(weather: true), asked: asked);
+      final w = await first(settings(weather: PanelSide.left), asked: asked);
       expect(w?.temperature, 7.6);
       expect(w?.kind, WeatherKind.overcast);
       expect(asked.single.queryParameters['latitude'], '49.1952');
@@ -238,10 +262,21 @@ void main() {
       final asked = <Uri>[];
       expect(await first(settings(), asked: asked), isNull);
       expect(
-        await first(settings(weather: true, place: false), asked: asked),
+        await first(
+          settings(weather: PanelSide.left, place: false),
+          asked: asked,
+        ),
         isNull,
       );
       expect(asked, isEmpty);
+    });
+
+    test('on either side: asked', () async {
+      for (final side in [PanelSide.left, PanelSide.right]) {
+        final asked = <Uri>[];
+        expect(await first(settings(weather: side), asked: asked), isNotNull);
+        expect(asked, hasLength(1));
+      }
     });
   });
 }

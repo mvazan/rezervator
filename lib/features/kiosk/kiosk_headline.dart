@@ -18,11 +18,20 @@ class KioskHeadline extends StatefulWidget {
     required this.notices,
     required this.turn,
     required this.onOpen,
+    this.alignment = Alignment.center,
+    this.padding = const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
   });
 
   final List<Message> notices;
   final Duration turn;
   final void Function(Message notice) onOpen;
+
+  /// Where each line stands across the width: centred on its own, or
+  /// (the header's „Nástěnka“ module, 0081) at the left, under its title.
+  final AlignmentGeometry alignment;
+
+  /// Around the line, inside the tap target.
+  final EdgeInsetsGeometry padding;
 
   @override
   State<KioskHeadline> createState() => _KioskHeadlineState();
@@ -67,10 +76,11 @@ class _KioskHeadlineState extends State<KioskHeadline> {
       onTap: () => widget.onOpen(m),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        // The whole line fades — icon, title and counter — each centred on
-        // its own across the full width: the last one fades out where it
-        // was, the next one in where it stays. Nothing jumps after the fade.
+        padding: widget.padding,
+        // The whole line fades — icon, title and counter — each placed on
+        // its own across the full width ([alignment]): the last one fades
+        // out where it was, the next one in where it stays. Nothing jumps
+        // after the fade.
         child: SizedBox(
           width: double.infinity,
           child: AnimatedSwitcher(
@@ -78,7 +88,7 @@ class _KioskHeadlineState extends State<KioskHeadline> {
             switchInCurve: Curves.easeOut,
             switchOutCurve: Curves.easeIn,
             layoutBuilder: (current, previous) => Stack(
-              alignment: Alignment.center,
+              alignment: widget.alignment,
               children: [...previous, ?current],
             ),
             child: Row(

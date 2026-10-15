@@ -16,13 +16,16 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../domain/kiosk_header.dart';
 import '../../domain/kiosk_layout.dart';
 import '../../domain/kiosk_panel.dart'
     show hasKioskVideo, kioskNotices, kioskStreamLabel;
 import '../../domain/models.dart';
+import '../../domain/namedays.dart' show czechNameDay, nameDayHeader;
 import '../../domain/results.dart' show hasScoreData;
 import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
+import '../../domain/weather.dart' show freshWeather;
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
@@ -30,6 +33,7 @@ import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
 import 'kiosk_duty.dart';
 import 'kiosk_guide.dart';
+import 'kiosk_header_module.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_warning.dart';
 import 'kiosk_stream_window.dart';
@@ -569,8 +573,21 @@ class _KioskShellState extends ConsumerState<KioskShell>
   }
 }
 
-/// Clock + today's headline. Watches [nowProvider] itself, so a minute tick
-/// repaints this strip only — never the shell or the board beneath it.
+/// The least the header's centre (today's matches, the info line, the
+/// warning) or the notices keep when the modules beside them have to
+/// shrink, at text scale 1.
+const _centreRoom = 200.0;
+
+/// [text] with its first letter upper-cased: „Čtvrtek 8. 10.“ over the
+/// clock.
+String _capitalized(String text) =>
+    text.isEmpty ? text : text[0].toUpperCase() + text.substring(1);
+
+/// The header: the clock, the admin's modules left and right of the centre
+/// (0081, each a title over its value — [KioskHeaderModuleFrame]), today's
+/// matches or the info line in the centre, „Rezervace tréninku“ last.
+/// Watches [nowProvider] itself, so a minute tick repaints this strip only
+/// — never the shell or the board beneath it.
 class _StatusBar extends ConsumerWidget {
   const _StatusBar({
     required this.selected,
@@ -590,7 +607,7 @@ class _StatusBar extends ConsumerWidget {
   /// stream before that when it has a video.
   final void Function(PrioritySlot match) onOpenMatch;
 
-  /// A tap on the canteen duty's line: the plan.
+  /// A tap on the canteen duty's module: the plan.
   final VoidCallback onOpenDuty;
 
   /// Today's matches the bar lists, start-ordered; Úklid children are
@@ -649,17 +666,77 @@ class _StatusBar extends ConsumerWidget {
     return '';
   }
 
+  /// What lies between the clock and „Rezervace tréninku“, [width] wide:
+  /// the [left] modules, the [centre], the [right] modules. A module with
+  /// a short value takes at most a fifth of the screen — and on a narrow
+  /// kiosk with large text no more than its part of what the clock and
+  /// the button leave, keeping [_centreRoom] for the centre or the
+  /// notices: the names are cut and the weather shrinks, the button is
+  /// never pushed off the screen.
+  List<Widget> _middle({
+    required double width,
+    required TextScaler textScaler,
+    required List<Widget> left,
+    required Widget? centre,
+    required List<Widget> right,
+    required bool flexible,
+  }) {
+    final gaps = <double>[
+      for (final _ in left) kioskHeaderGap,
+      if (centre != null) 24,
+      for (var i = 0; i < right.length; i++)
+        i == 0 && centre != null ? 24 : kioskHeaderGap,
+    ];
+    final short = [...left, ...right].where((w) => w is! Expanded).length;
+    final room = centre != null || flexible
+        ? math.min(width / 3, textScaler.scale(_centreRoom))
+        : 0.0;
+    final share = short == 0
+        ? double.infinity
+        : math.max(
+            0.0,
+            (width - gaps.fold(0.0, (a, b) => a + b) - room) / short,
+          );
+    Widget capped(Widget w) => w is Expanded
+        ? w
+        : ConstrainedBox(
+            key: w.key,
+            constraints: BoxConstraints(maxWidth: share),
+            child: w,
+          );
+    var gap = 0;
+    return [
+      for (final w in left) ...[
+        SizedBox(width: gaps[gap++]),
+        capped(w),
+      ],
+      if (centre != null) ...[
+        SizedBox(width: gaps[gap++]),
+        Expanded(flex: 2, child: centre),
+      ]
+      // Neither a centre nor the notices: the right modules stay on the
+      // right.
+      else if (!flexible)
+        const Spacer(),
+      for (final w in right) ...[
+        SizedBox(width: gaps[gap++]),
+        capped(w),
+      ],
+    ];
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
+    final settings = ref.watch(settingsProvider).value;
+    final header = settings?.kioskHeader ?? KioskHeader.defaults;
     // The admin's warning (0068): while it hangs, it is all the bar says
-    // beside the clock — today's matches, the info line and the notices
-    // step aside, so nobody reads past it.
-    final warning = ref.watch(settingsProvider).value?.kioskWarning;
-    final warningFontSize =
-        ref.watch(settingsProvider).value?.kioskWarningFontSize ?? 22;
+    // beside the clock — every other module, today's matches and the info
+    // line step aside, so nobody reads past it.
+    final warning = settings?.kioskWarning;
+    final warningFontSize = settings?.kioskWarningFontSize ?? 22;
     final info = warning != null ? '' : _infoLine(ref, todayDay);
     final todays = warning != null
         ? const <PrioritySlot>[]
@@ -668,19 +745,124 @@ class _StatusBar extends ConsumerWidget {
     // is a Zápis, and with the drawer closed nothing else may hold it.
     ref.watch(matchResultsProvider);
     final infoStyle = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
-    final notices =
-        warning == null &&
-            (ref.watch(settingsProvider).value?.kioskNoticesHeader ?? true)
-        ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
-        : const <Message>[];
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    // Who serves today (0073) — the plan is read only with the line on.
-    // The canteen duty's line (0073) steps aside for the warning too.
-    final duty =
-        warning == null &&
-            (ref.watch(settingsProvider).value?.kioskDutyHeader ?? false)
+
+    // Each module's data, read only while the admin has it in the header
+    // (0081) and no warning hangs.
+    bool on(KioskHeaderModule m) => warning == null && header.isOn(m);
+    final notices = on(KioskHeaderModule.notices)
+        ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
+        : const <Message>[];
+    // Who serves today (0073).
+    final duty = on(KioskHeaderModule.duty)
         ? ref.watch(kioskDutyPlanProvider.select((plan) => plan.now))
+        : null;
+    final weather = on(KioskHeaderModule.weather)
+        ? freshWeather(ref.watch(kioskWeatherProvider).value, now)
+        : null;
+    final nameDay = on(KioskHeaderModule.nameday)
+        ? nameDayHeader(czechNameDay(todayDay))
+        : null;
+
+    // A module as the bar lays it out — null when it has nothing to say
+    // today, so the others close up. Keyed: a module keeps its state (the
+    // weather's source on a tap) while others come and go around it.
+    Widget? module(KioskHeaderModule m) => switch (m) {
+      KioskHeaderModule.weather =>
+        weather == null
+            ? null
+            : KioskWeatherModule(
+                key: ValueKey(m),
+                weather: weather,
+                title: settings?.kioskWeatherTitle ?? kioskWeatherDefaultTitle,
+              ),
+      KioskHeaderModule.nameday =>
+        nameDay == null
+            ? null
+            : KioskNameDayModule(key: ValueKey(m), day: nameDay),
+      KioskHeaderModule.duty =>
+        duty == null
+            ? null
+            : KioskDutyModule(key: ValueKey(m), entry: duty, onTap: onOpenDuty),
+      // One notice's title at a time, in what is left.
+      KioskHeaderModule.notices =>
+        notices.isEmpty
+            ? null
+            : Expanded(
+                key: ValueKey(m),
+                flex: 3,
+                child: KioskHeaderModuleFrame(
+                  title: 'Nástěnka',
+                  child: KioskHeadline(
+                    notices: notices,
+                    turn: Duration(
+                      seconds: settings?.kioskNoticesRotationSeconds ?? 12,
+                    ),
+                    onOpen: onOpenNotice,
+                    alignment: Alignment.centerLeft,
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+    };
+    List<Widget> modulesOn(PanelSide side) => [
+      for (final p in header.modulesOn(side)) ?module(p.module!),
+    ];
+    final left = modulesOn(PanelSide.left);
+    final right = modulesOn(PanelSide.right);
+    // The notices take the room left, like the centre.
+    final flexible = [...left, ...right].any((w) => w is Expanded);
+
+    // Today's matches, one tap target each: a match with a score opens its
+    // Zápis, as everywhere else on the kiosk; one with a video and no
+    // score yet, its stream.
+    Widget matchLine(List<PrioritySlot> matches) => Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (var i = 0; i < matches.length; i++) ...[
+          if (i > 0) Text('  ·  ', style: infoStyle),
+          InkWell(
+            onTap: () => onOpenMatch(matches[i]),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: EmojiText(headerEventLabel(matches[i]), style: infoStyle),
+            ),
+          ),
+        ],
+      ],
+    );
+    // The bar's centre, untitled: the admin's warning, alone; else today's
+    // matches — the home ones (and the alley's blockages) on one line, the
+    // away ones under them; else the info line.
+    final home = [for (final m in todays) if (!m.isAway) m];
+    final away = [for (final m in todays) if (m.isAway) m];
+    final Widget? centre = warning != null
+        ? KioskWarning(
+            text: warning,
+            maxLines: 4,
+            fontSize: warningFontSize.toDouble(),
+          )
+        : todays.isNotEmpty
+        ? Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (home.isNotEmpty) matchLine(home),
+              if (home.isNotEmpty && away.isNotEmpty)
+                const SizedBox(height: 4),
+              if (away.isNotEmpty) matchLine(away),
+            ],
+          )
+        : info.isNotEmpty
+        ? EmojiText(
+            info,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: infoStyle,
+          )
         : null;
 
     return Container(
@@ -691,109 +873,30 @@ class _StatusBar extends ConsumerWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  clock,
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                  ),
+            // Always first: the date over the time.
+            KioskHeaderModuleFrame(
+              title: _capitalized(dayFull(todayDay)),
+              child: Text(
+                clock,
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
                 ),
-                Text(
-                  dayFull(todayDay),
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-                if (duty != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: KioskDutyLine(entry: duty, onTap: onOpenDuty),
-                  ),
-              ],
+              ),
             ),
-            // Today's weather and name day, when the admin wants them —
-            // and no warning hangs: it is then all the bar says.
-            if (warning == null) const KioskDayInfo(),
-            const SizedBox(width: 16),
             Expanded(
-              child: Row(
-                children: [
-                  // The admin's warning: alone in the bar's middle.
-                  if (warning != null)
-                    Expanded(
-                      child: KioskWarning(
-                        text: warning,
-                        maxLines: 4,
-                        fontSize: warningFontSize.toDouble(),
-                      ),
-                    ),
-                  // Today's matches, one tap target each: a match with a score
-                  // opens its Zápis, as everywhere else on the kiosk; one
-                  // with a video and no score yet, its stream.
-                  if (todays.isNotEmpty)
-                    Expanded(
-                      flex: notices.isEmpty ? 1 : 2,
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          for (var i = 0; i < todays.length; i++) ...[
-                            if (i > 0) Text('  ·  ', style: infoStyle),
-                            InkWell(
-                              onTap: () => onOpenMatch(todays[i]),
-                              borderRadius: BorderRadius.circular(6),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 2,
-                                ),
-                                child: EmojiText(
-                                  headerEventLabel(todays[i]),
-                                  style: infoStyle,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  if (info.isNotEmpty)
-                    Expanded(
-                      flex: notices.isEmpty ? 1 : 2,
-                      child: EmojiText(
-                        info,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  if ((info.isNotEmpty || todays.isNotEmpty) &&
-                      notices.isNotEmpty)
-                    const SizedBox(width: 24),
-                  // One notice's title at a time, in what is left.
-                  if (notices.isNotEmpty)
-                    Expanded(
-                      flex: 3,
-                      child: KioskHeadline(
-                        notices: notices,
-                        turn: Duration(
-                          seconds:
-                              ref
-                                  .watch(settingsProvider)
-                                  .value
-                                  ?.kioskNoticesRotationSeconds ??
-                              12,
-                        ),
-                        onOpen: onOpenNotice,
-                      ),
-                    ),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: _middle(
+                    width: constraints.maxWidth,
+                    textScaler: MediaQuery.textScalerOf(context),
+                    left: left,
+                    centre: centre,
+                    right: right,
+                    flexible: flexible,
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 16),

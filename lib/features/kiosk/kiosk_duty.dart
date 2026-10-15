@@ -1,13 +1,11 @@
 /// The canteen duty on the kiosk (0073): who serves now and who comes next,
-/// read from the plan of Správa → Služby. The admin switches each place on
-/// separately (Správa → Kiosk → Služby na kantýně): the status bar's line
-/// under the date ([KioskDutyLine]), a band across the board's day headers
-/// and a card in the side drawer. A tap on the line or the band opens the
-/// plan ([showKioskDutyDialog]); the card lists it itself. Display only —
-/// duties are edited in the app.
+/// read from the plan of Správa → Služby. The admin puts each place on
+/// separately (Správa → Kiosk): the header's module „Dnes má službu“
+/// ([KioskDutyModule], Záhlaví), a band across the board's day headers
+/// (Služby na kantýně) and a card in a side panel (Panely). A tap on the
+/// module or the band opens the plan ([showKioskDutyDialog]); the card
+/// lists it itself. Display only — duties are edited in the app.
 library;
-
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +14,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/duties.dart';
 import '../../domain/models.dart';
+import 'kiosk_header_module.dart';
 
 /// The roster's display names by user id, placeholders included — what
 /// [kioskDutyPlan] and [kioskDutyOn] look the assignees up in.
@@ -42,15 +41,12 @@ final kioskDutyPlanProvider =
       );
     });
 
-/// The status bar's duty line („V záhlaví“): „Služba: Jan Novák a Petr
-/// Svoboda“ with a cup, tinted `secondaryContainer`, one line of at most
-/// [maxWidth] and a fifth of the screen — a long list of names is cut, the
-/// clock column stays narrow and leaves the bar's middle its room. A tap
-/// opens the plan ([onTap]).
-class KioskDutyLine extends StatelessWidget {
-  const KioskDutyLine({super.key, required this.entry, required this.onTap});
-
-  static const maxWidth = 420.0;
+/// The header's duty module (0081): „Dnes má službu“ over „Jan Novák“,
+/// „Dnes mají službu“ for two or more. One line of at most a fifth of the
+/// screen — a long list of names is cut, the centre and the notices keep
+/// their room. A tap opens the plan ([onTap]).
+class KioskDutyModule extends StatelessWidget {
+  const KioskDutyModule({super.key, required this.entry, required this.onTap});
 
   /// Today's duty.
   final KioskDutyEntry entry;
@@ -59,43 +55,16 @@ class KioskDutyLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: math.min(maxWidth, MediaQuery.sizeOf(context).width / 5),
-      ),
-      child: Material(
-        color: scheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(8),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.local_cafe_outlined,
-                  size: 16,
-                  color: scheme.onSecondaryContainer,
-                ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    'Služba: ${entry.who}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSecondaryContainer,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+    return KioskHeaderModuleFrame(
+      title: entry.names.length == 1 ? 'Dnes má službu' : 'Dnes mají službu',
+      onTap: onTap,
+      maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderModuleShare,
+      child: Text(
+        entry.who,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        style: kioskHeaderNameStyle(scheme),
       ),
     );
   }

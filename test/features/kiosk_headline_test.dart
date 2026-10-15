@@ -28,16 +28,26 @@ void main() {
     List<Message> notices, {
     double width = 900,
     void Function(Message)? onOpen,
+    AlignmentGeometry? alignment,
+    EdgeInsetsGeometry? padding,
   }) => MaterialApp(
     home: Scaffold(
       body: Center(
         child: SizedBox(
           width: width,
-          child: KioskHeadline(
-            notices: notices,
-            turn: const Duration(seconds: 5),
-            onOpen: onOpen ?? (_) {},
-          ),
+          child: alignment == null
+              ? KioskHeadline(
+                  notices: notices,
+                  turn: const Duration(seconds: 5),
+                  onOpen: onOpen ?? (_) {},
+                )
+              : KioskHeadline(
+                  notices: notices,
+                  turn: const Duration(seconds: 5),
+                  onOpen: onOpen ?? (_) {},
+                  alignment: alignment,
+                  padding: padding ?? EdgeInsets.zero,
+                ),
         ),
       ),
     ),
@@ -108,5 +118,26 @@ void main() {
     );
     expect(title.didExceedMaxLines, isTrue);
     expect(title.overflow, TextOverflow.ellipsis);
+  });
+
+  testWidgets('in the header\'s „Nástěnka“ module the line starts at the '
+      'left, under the module\'s title, and fades there', (tester) async {
+    await tester.pumpWidget(
+      app(
+        [
+          notice('1', 'Zámek kuželny se mění v pondělí'),
+          notice('2', 'Brigáda'),
+        ],
+        alignment: Alignment.centerLeft,
+      ),
+    );
+    final headline = tester.getRect(find.byType(KioskHeadline));
+    final icon = find.byIcon(Icons.campaign_outlined);
+    expect(tester.getRect(icon).left, headline.left);
+    // The next one stands where the last one stood.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Brigáda'), findsOneWidget);
+    expect(tester.getRect(icon).left, headline.left);
   });
 }
