@@ -782,7 +782,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   helper:
                       'Po tolika sekundách bez dotyku kiosk zapomene '
                       'vybraného hráče, zavře okna i zápis, vrátí tabuli na '
-                      'dnešek a panel do výchozího stavu.',
+                      'dnešek a panely do výchozího stavu.',
                 ),
                 _number(
                   context,
@@ -871,8 +871,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                   max: 14,
                   helper:
                       'Kolik dní (sloupců) je na celé obrazovce najednou; '
-                      'další jsou o kus vedle. Rozbalený panel z nich zakryje '
-                      'tolik, kolik je jeho šířka.',
+                      'další jsou o kus vedle. Rozbalené panely z nich '
+                      'zakryjí tolik, kolik je jejich šířka.',
                 ),
                 _switch(
                   context,
@@ -996,7 +996,8 @@ class KioskSettingsScreen extends ConsumerWidget {
               context,
               'Služby na kantýně',
               'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu '
-                  've Správě → Služby. Každé místo se zapíná zvlášť.',
+                  've Správě → Služby. Každé místo se zapíná zvlášť; kartu '
+                  'do panelu dáš v Panelech (výš).',
               [
                 _switch(
                   context,
@@ -1117,10 +1118,10 @@ class KioskSettingsScreen extends ConsumerWidget {
                     settings?.kioskLiveMode ?? true,
                     'kiosk_live_mode',
                     subtitle:
-                        'Souboje hraného zápasu zaberou celý panel a panel '
-                        'zůstane rozbalený — i když ho návštěvník zavře, po '
-                        'době nečinnosti se rozbalí znovu. Vypnuto = hraný '
-                        'zápas je jen řádek v seznamu.',
+                        'Souboje hraného zápasu zaberou celý panel se zápasy '
+                        'a ten zůstane rozbalený — i když ho návštěvník '
+                        'zavře, po době nečinnosti se rozbalí znovu. Vypnuto '
+                        '= hraný zápas je jen řádek v seznamu.',
                   ),
                   if (settings?.kioskLiveMode ?? true) ...[
                     Padding(
@@ -1229,9 +1230,10 @@ class KioskSettingsScreen extends ConsumerWidget {
                       decoration: const InputDecoration(
                         labelText: 'Kde se okno objeví',
                         helperText:
-                            'Panel je vpravo; vlevo dole mu okno nepřekáží. '
-                            'Další okna do dalších rohů — nejdřív na stejné '
-                            'straně.',
+                            'Okno překryje panel na své straně; vyber roh na '
+                            'straně bez panelu. Další okna do dalších rohů — '
+                            'nejdřív na stejné straně.',
+                        helperMaxLines: 3,
                         border: OutlineInputBorder(),
                       ),
                       items: const [
@@ -1307,7 +1309,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   settings?.kioskAnimations ?? true,
                   'kiosk_animations',
                   subtitle:
-                      'Tlačítko panelu se každé čtyři sekundy rozzáří a ikona '
+                      'Tlačítka panelů se každé čtyři sekundy rozzáří a ikona '
                       'živého přenosu pulzuje; při tom se překresluje celá '
                       'obrazovka, i když se kiosku nikdo nedotýká. Vypnuto = '
                       'obojí je v klidu.',

@@ -1931,4 +1931,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_live_mode': false});
   });
+
+  testWidgets('the texts speak of two panels', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    for (final text in [
+      // Doba nečinnosti.
+      'Po tolika sekundách bez dotyku kiosk zapomene vybraného hráče, zavře '
+          'okna i zápis, vrátí tabuli na dnešek a panely do výchozího stavu.',
+      // Dní na obrazovce.
+      'Kolik dní (sloupců) je na celé obrazovce najednou; další jsou o kus '
+          'vedle. Rozbalené panely z nich zakryjí tolik, kolik je jejich '
+          'šířka.',
+      // Kde se okno objeví.
+      'Okno překryje panel na své straně; vyber roh na straně bez panelu. '
+          'Další okna do dalších rohů — nejdřív na stejné straně.',
+      // Opakující se animace.
+      'Tlačítka panelů se každé čtyři sekundy rozzáří a ikona živého '
+          'přenosu pulzuje; při tom se překresluje celá obrazovka, i když se '
+          'kiosku nikdo nedotýká. Vypnuto = obojí je v klidu.',
+      // Hraný zápas přes celý panel.
+      'Souboje hraného zápasu zaberou celý panel se zápasy a ten zůstane '
+          'rozbalený — i když ho návštěvník zavře, po době nečinnosti se '
+          'rozbalí znovu. Vypnuto = hraný zápas je jen řádek v seznamu.',
+    ]) {
+      expect(find.text(text), findsOneWidget, reason: text);
+    }
+    // The duty's card is placed in the Panely table.
+    expect(
+      inSection(
+        'Služby na kantýně',
+        find.text(
+          'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu ve '
+          'Správě → Služby. Každé místo se zapíná zvlášť; kartu do panelu '
+          'dáš v Panelech (výš).',
+        ),
+      ),
+      findsOneWidget,
+    );
+    // Nothing says the panel is on the right, or that there is one button.
+    expect(find.textContaining('Panel je vpravo'), findsNothing);
+    expect(find.textContaining('Tlačítko panelu'), findsNothing);
+    expect(find.textContaining('a panel do výchozího stavu'), findsNothing);
+  });
 }
