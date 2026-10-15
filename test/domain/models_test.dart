@@ -166,8 +166,8 @@ void main() {
       expect(ScheduleSettings.fromJson(base).kioskStreamMax, 1);
     });
 
-    test('fromJson reads the kiosk\'s duty places and the card\'s share '
-        '(0073); off and 30 % when absent', () {
+    test('fromJson reads the kiosk\'s duty places (0073); off when absent',
+        () {
       const base = {
         'lane_count': 4,
         'training_weekdays': [1, 2, 4],
@@ -178,22 +178,34 @@ void main() {
         ...base,
         'kiosk_duty_header': true,
         'kiosk_duty_board': true,
-        'kiosk_duty_drawer': true,
-        'kiosk_duty_share': 55,
       });
       expect(on.kioskDutyHeader, isTrue);
       expect(on.kioskDutyBoard, isTrue);
-      expect(on.kioskDutyDrawer, isTrue);
-      expect(on.kioskDutyShare, 55);
       final old = ScheduleSettings.fromJson(base);
       expect(old.kioskDutyHeader, isFalse);
       expect(old.kioskDutyBoard, isFalse);
-      expect(old.kioskDutyDrawer, isFalse);
-      expect(old.kioskDutyShare, 30);
       expect(ScheduleSettings.defaults.kioskDutyHeader, isFalse);
       expect(ScheduleSettings.defaults.kioskDutyBoard, isFalse);
-      expect(ScheduleSettings.defaults.kioskDutyDrawer, isFalse);
-      expect(ScheduleSettings.defaults.kioskDutyShare, 30);
+    });
+
+    test('a cached row from before 0077, with the dropped drawer columns '
+        'still in it, reads as the default layout', () {
+      final s = ScheduleSettings.fromJson({
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+        'kiosk_panel_enabled': false,
+        'kiosk_drawer_open': true,
+        'kiosk_drawer_columns': 5,
+        'kiosk_notices_mode': 'off',
+        'kiosk_notices_share': 70,
+        'kiosk_show_matches': false,
+        'kiosk_duty_drawer': true,
+        'kiosk_duty_share': 55,
+      });
+      expect(s.kioskPanels, KioskPanels.defaults);
+      expect(s.kioskNoticesHeader, isTrue);
     });
 
     test('fromJson reads where the duty band runs (0073); between the date '

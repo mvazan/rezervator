@@ -633,10 +633,6 @@ class AdminTenant {
       );
 }
 
-/// Where the kiosk shows the notices (0064, `kiosk_notices_mode`): not at
-/// all, in the drawer, one title at a time in the status bar, or both.
-enum KioskNoticesMode { off, drawer, header, both }
-
 /// Where the canteen duty's band runs in the kiosk board's day headers
 /// (0073, `kiosk_duty_band_position`): above the day label ([top]),
 /// between the label and the day's matches ([middle]) or along the
@@ -745,21 +741,15 @@ class ScheduleSettings {
     required this.maxActiveReservations,
     this.kioskDark = true,
     this.kioskFitDay = true,
-    this.kioskNoticesMode = KioskNoticesMode.both,
-    this.kioskShowMatches = true,
     this.kioskShowUpcoming = true,
     this.kioskFollowBoard = true,
     this.kioskLiveRefreshSeconds = 60,
     this.kioskLiveMode = true,
     this.kioskWeeksBack = 2,
     this.kioskWeeksAhead = 1,
-    this.kioskDrawerOpen = false,
-    this.kioskDrawerColumns = 2,
-    this.kioskNoticesShare = 40,
     this.kioskZapisPercent = 80,
     this.kioskNoticesRotationSeconds = 12,
     this.kioskLiveRotationSeconds = 12,
-    this.kioskPanelEnabled = true,
     this.kioskPastDays = 0,
     this.kioskIdleSeconds = 60,
     this.kioskVisibleDays = 7,
@@ -784,8 +774,6 @@ class ScheduleSettings {
     this.kioskStreamMax = 1,
     this.kioskDutyHeader = false,
     this.kioskDutyBoard = false,
-    this.kioskDutyDrawer = false,
-    this.kioskDutyShare = 30,
     this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
     this.kioskPanels = KioskPanels.defaults,
     this.kioskNoticesHeader = true,
@@ -811,22 +799,10 @@ class ScheduleSettings {
   /// the app's week view) and lets the board scroll vertically.
   final bool kioskFitDay;
 
-  /// What the kiosk's side drawer lists (0064): the active notices
-  /// and the matches — of the current week plus [kioskWeeksBack] weeks
-  /// back and (when [kioskShowUpcoming]) [kioskWeeksAhead] weeks ahead. A
-  /// match being played takes the whole drawer when [kioskLiveMode].
-  final KioskNoticesMode kioskNoticesMode;
-
-  /// The drawer lists the notices.
-  bool get kioskShowNotices =>
-      kioskNoticesMode == KioskNoticesMode.drawer ||
-      kioskNoticesMode == KioskNoticesMode.both;
-
-  /// The status bar shows one notice's title at a time.
-  bool get kioskNoticesInHeader =>
-      kioskNoticesMode == KioskNoticesMode.header ||
-      kioskNoticesMode == KioskNoticesMode.both;
-  final bool kioskShowMatches;
+  /// The panels' match list (module `matches`, 0064) covers the current
+  /// week plus [kioskWeeksBack] weeks back and, with this on,
+  /// [kioskWeeksAhead] weeks ahead. A match being played takes over the
+  /// panel holding the list when [kioskLiveMode].
   final bool kioskShowUpcoming;
 
   /// The match list follows the board: a visitor who scrolls the board to
@@ -890,15 +866,10 @@ class ScheduleSettings {
   /// The canteen duty on the kiosk (0073), each place switched on by
   /// itself: today's duty under the clock in the status bar, a tap shows
   /// the plan ([kioskDutyHeader]); a band across a duty's days in the
-  /// board's day headers ([kioskDutyBoard]); a card with the duty and the
-  /// plan in the side drawer ([kioskDutyDrawer]).
+  /// board's day headers ([kioskDutyBoard]). The card with the duty and the
+  /// plan is the panels' module `duty` ([kioskPanels]).
   final bool kioskDutyHeader;
   final bool kioskDutyBoard;
-  final bool kioskDutyDrawer;
-
-  /// Percent of the drawer's height the duty card takes (0073); the
-  /// notices and the matches share the rest as before.
-  final int kioskDutyShare;
 
   /// Where the band of [kioskDutyBoard] runs in the day headers (0073).
   final KioskDutyBandPosition kioskDutyBandPosition;
@@ -922,18 +893,6 @@ class ScheduleSettings {
   final int kioskWeeksBack;
   final int kioskWeeksAhead;
 
-  /// Whether the drawer is open when nobody has touched the kiosk for a
-  /// minute (a live match opens it regardless); a visitor may open or
-  /// close it meanwhile.
-  final bool kioskDrawerOpen;
-
-  /// How many of the board's day columns the open drawer covers (0064) —
-  /// at most one fewer than [kioskVisibleDays], see `kioskDrawerWidthFor`.
-  final int kioskDrawerColumns;
-
-  /// Percent of the drawer's height the notices get beside the matches.
-  final int kioskNoticesShare;
-
   /// Percent of the screen the Zápis modal covers; 100 = full screen, with
   /// a close button.
   final int kioskZapisPercent;
@@ -942,18 +901,14 @@ class ScheduleSettings {
   final int kioskNoticesRotationSeconds;
   final int kioskLiveRotationSeconds;
 
-  /// The whole drawer on or off (0064); the options above matter only while
-  /// it is on.
-  final bool kioskPanelEnabled;
-
   /// How many days back the board can be scrolled (0064); 0 = not at all.
   final int kioskPastDays;
 
   /// Seconds without a touch after which the kiosk starts over (0064).
   final int kioskIdleSeconds;
 
-  /// How many day columns the board fits on the whole screen (0064); the
-  /// open drawer covers [kioskDrawerColumns] of them.
+  /// How many day columns the board fits on the whole screen (0064); an
+  /// open panel covers its `days` of them (`kioskPanelWidths`).
   final int kioskVisibleDays;
 
   /// The lane rows' font size in px while the day scrolls ([kioskFitDay]
@@ -1016,11 +971,6 @@ class ScheduleSettings {
         maxActiveReservations: json['max_active_reservations'] as int,
         kioskDark: json['kiosk_dark'] as bool? ?? true,
         kioskFitDay: json['kiosk_fit_day'] as bool? ?? true,
-        kioskNoticesMode: KioskNoticesMode.values.firstWhere(
-          (m) => m.name == json['kiosk_notices_mode'],
-          orElse: () => KioskNoticesMode.both,
-        ),
-        kioskShowMatches: json['kiosk_show_matches'] as bool? ?? true,
         kioskShowUpcoming: json['kiosk_show_upcoming'] as bool? ?? true,
         kioskFollowBoard: json['kiosk_follow_board'] as bool? ?? true,
         kioskLiveRefreshSeconds:
@@ -1028,15 +978,11 @@ class ScheduleSettings {
         kioskLiveMode: json['kiosk_live_mode'] as bool? ?? true,
         kioskWeeksBack: json['kiosk_weeks_back'] as int? ?? 2,
         kioskWeeksAhead: json['kiosk_weeks_ahead'] as int? ?? 1,
-        kioskDrawerOpen: json['kiosk_drawer_open'] as bool? ?? false,
-        kioskDrawerColumns: json['kiosk_drawer_columns'] as int? ?? 2,
-        kioskNoticesShare: json['kiosk_notices_share'] as int? ?? 40,
         kioskZapisPercent: json['kiosk_zapis_percent'] as int? ?? 80,
         kioskNoticesRotationSeconds:
             json['kiosk_notices_rotation_seconds'] as int? ?? 12,
         kioskLiveRotationSeconds:
             json['kiosk_live_rotation_seconds'] as int? ?? 12,
-        kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
         kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 7,
@@ -1071,8 +1017,6 @@ class ScheduleSettings {
         kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
         kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
         kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,
-        kioskDutyDrawer: json['kiosk_duty_drawer'] as bool? ?? false,
-        kioskDutyShare: json['kiosk_duty_share'] as int? ?? 30,
         kioskDutyBandPosition: KioskDutyBandPosition.parse(
           json['kiosk_duty_band_position'] as String?,
         ),
