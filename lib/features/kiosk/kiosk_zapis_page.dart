@@ -446,8 +446,9 @@ class _Bar extends StatelessWidget {
   final void Function(PrioritySlot match) onShow;
   final void Function(String team) onTeam;
 
-  /// The middle's width — ‹, the day, › — that the teams keep clear of.
-  static const _middle = 320.0;
+  /// The middle's width — ‹ (48), the longest day („čtvrtek 30. 12.“) and
+  /// › (48) — that the teams keep clear of.
+  static const _middle = 270.0;
 
   @override
   Widget build(BuildContext context) {
@@ -487,7 +488,7 @@ class _Bar extends StatelessWidget {
           // Each team gets its half of what the middle leaves; the away
           // team shares its half with the ▶ and the ×.
           final half = (constraints.maxWidth - _middle) / 2 - 8;
-          final end = (play == null ? 0.0 : 220.0) + 56;
+          final end = (play == null ? 0.0 : 220.0) + 48 + 8;
           return Stack(
             alignment: Alignment.center,
             children: [
