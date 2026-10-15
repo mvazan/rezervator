@@ -12604,4 +12604,262 @@ begin
   raise notice 'OK: an admin saves the kiosk panels through the check as authenticated (0077)';
 end $$;
 
+-- 0078: „Hráči týdne“. kiosk_week_players gives an alley's approved members
+-- and its kiosk the lines of the alley's OWN side in the finished federation
+-- matches of one Monday to Sunday. The side is told by team slug, never by
+-- name. Substitutes' lines and lines without a total stay out, and the
+-- register's gender comes with each line. Another alley sees none of them,
+-- and anon may not call it at all. 0078 runs twice (it re-runs). An alley
+-- of its own, H, plays the previous week in Prague, the function's default.
+reset role;
+\ir ../migrations/0078_week_players.sql
+\ir ../migrations/0078_week_players.sql
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000000078', 'Kuželna H (0078)');
+insert into auth.users (id, email) values
+  ('78000000-0000-0000-0000-000000000001', 'h1@example.com'),
+  ('78000000-0000-0000-0000-000000000002', 'h2@example.com'),
+  ('78000000-0000-0000-0000-000000000003', 'h3@example.com')
+on conflict do nothing;
+insert into profiles (id, tenant_id, display_name, email, role, status) values
+  ('78000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000078',
+   'Hráč H', 'h1@example.com', 'player', 'approved'),
+  ('78000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000078',
+   'Kiosk H', 'h2@example.com', 'kiosk', 'approved'),
+  ('78000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000078',
+   'Čekající H', 'h3@example.com', 'player', 'pending');
+
+-- A federation match of an alley with its result, and one player line.
+create function pg_temp.wk_match(
+  p_tenant uuid, p_key text, p_date date, p_home text, p_home_slug text,
+  p_away text, p_away_slug text, p_is_away boolean, p_status text,
+  p_discipline text default 'T120')
+returns uuid language plpgsql as $$
+declare
+  v_id uuid;
+begin
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     home_team_slug, away_team_slug, is_away, competition, import_key,
+     created_by)
+  values
+    (p_tenant, p_date, '17:00', '20:00',
+     (select id from priority_slot_types
+       where tenant_id = p_tenant and is_match and builtin),
+     p_home, p_away, p_home_slug, p_away_slug, p_is_away, 'Divize H', p_key,
+     (select id from profiles where tenant_id = p_tenant order by id limit 1))
+  returning id into v_id;
+  insert into match_results (match_id, tenant_id, status, discipline)
+  values (v_id, p_tenant, p_status, p_discipline);
+  return v_id;
+end $$;
+create function pg_temp.wk_line(
+  p_match uuid, p_side text, p_position int, p_name text, p_slug text,
+  p_total int, p_errors int default 0, p_lanes int default 4,
+  p_sub text default null)
+returns void language sql as $$
+  insert into match_player_results
+    (match_id, tenant_id, side, position, player_name, player_slug, total,
+     errors, lanes, sub_name)
+  select p_match, s.tenant_id, p_side, p_position, p_name, p_slug, p_total,
+         p_errors,
+         (select coalesce(jsonb_agg(jsonb_build_object('lane', n)), '[]'::jsonb)
+            from generate_series(1, p_lanes) n),
+         p_sub
+    from priority_slots s where s.id = p_match
+$$;
+
+do $$
+declare
+  v_h constant uuid := '00000000-0000-0000-0000-000000000078';
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_mon constant date :=
+    date_trunc('week', now() at time zone 'Europe/Prague')::date - 7;
+  v_club uuid;
+  m uuid;
+begin
+  insert into clubs (tenant_id, name, color) values (v_h, 'Klub H', 3)
+  returning id into v_club;
+  insert into teams (tenant_id, name, club_id, site_slug) values
+    (v_h, 'Domácí A', v_club, 'domaci-a-muzi'),
+    (v_h, 'Domácí B', null, 'domaci-b-muzi');
+
+  -- Monday at home: our two lines count. A substitute's line, a line with
+  -- no total and the guests' line do not.
+  m := pg_temp.wk_match(v_h, 'cka:78001', v_mon, 'Domácí A', 'domaci-a-muzi',
+                        'Soupeř X', 'souper-x-muzi', false, 'finished');
+  perform pg_temp.wk_line(m, 'home', 1, 'Jan Dvořák', 'wk-jan-dvorak', 600, 2);
+  perform pg_temp.wk_line(m, 'home', 2, 'Eva Malá', 'wk-eva-mala', 550, 1);
+  perform pg_temp.wk_line(m, 'home', 3, 'Petr Starý', 'wk-petr-stary', 520, 0,
+                          4, 'Karel Nový');
+  perform pg_temp.wk_line(m, 'home', 4, 'Bez Výsledku', null, null);
+  perform pg_temp.wk_line(m, 'away', 1, 'Cizí Hráč', 'wk-cizi-hrac', 610);
+  -- Sunday away, forfeited, with no discipline stored: 2 lanes are 100
+  -- throws, and 3 lanes say nothing.
+  m := pg_temp.wk_match(v_h, 'cka:78002', v_mon + 6, 'Soupeř Y', 'souper-y-muzi',
+                        'Domácí B', 'domaci-b-muzi', true, 'forfeit', '');
+  perform pg_temp.wk_line(m, 'away', 1, 'Jan Dvořák', 'wk-jan-dvorak', 450, 3, 2);
+  perform pg_temp.wk_line(m, 'away', 2, 'Lída Tříková', 'wk-lida-trikova', 300,
+                          4, 3);
+  perform pg_temp.wk_line(m, 'home', 1, 'Hostitel Y', 'wk-hostitel-y', 500, 0, 2);
+  -- Our team's NAME on a side whose slug is not ours: not ours.
+  m := pg_temp.wk_match(v_h, 'cka:78003', v_mon + 2, 'Domácí A', 'jiny-tym-muzi',
+                        'Soupeř Z', 'souper-z-muzi', false, 'finished');
+  perform pg_temp.wk_line(m, 'home', 1, 'Jen Jménem', 'wk-jen-jmenem', 580);
+  -- Not finished yet.
+  m := pg_temp.wk_match(v_h, 'cka:78004', v_mon + 3, 'Domácí A', 'domaci-a-muzi',
+                        'Soupeř X', 'souper-x-muzi', false, 'in_progress');
+  perform pg_temp.wk_line(m, 'home', 1, 'Ještě Hraje', 'wk-jeste-hraje', 590);
+  -- The Sunday before and the Monday after.
+  m := pg_temp.wk_match(v_h, 'cka:78005', v_mon - 1, 'Domácí A', 'domaci-a-muzi',
+                        'Soupeř X', 'souper-x-muzi', false, 'finished');
+  perform pg_temp.wk_line(m, 'home', 1, 'Minulý Týden', 'wk-minuly-tyden', 570);
+  m := pg_temp.wk_match(v_h, 'cka:78006', v_mon + 7, 'Domácí A', 'domaci-a-muzi',
+                        'Soupeř X', 'souper-x-muzi', false, 'finished');
+  perform pg_temp.wk_line(m, 'home', 1, 'Příští Týden', 'wk-pristi-tyden', 560);
+  -- A hand-made match (no cka: key) is not a federation match.
+  m := pg_temp.wk_match(v_h, null, v_mon + 1, 'Domácí A', 'domaci-a-muzi',
+                        'Soupeř X', 'souper-x-muzi', false, 'finished');
+  perform pg_temp.wk_line(m, 'home', 1, 'Ruční Zápas', 'wk-rucni-zapas', 540);
+  -- Another alley plays the same week.
+  insert into teams (tenant_id, name, site_slug)
+  values (v_a, 'Áčko 0078', 'acko-0078-muzi');
+  m := pg_temp.wk_match(v_a, 'cka:78101', v_mon + 1, 'Áčko 0078', 'acko-0078-muzi',
+                        'Soupeř X', 'souper-x-muzi', false, 'finished');
+  perform pg_temp.wk_line(m, 'home', 1, 'Hráč Áčka', 'wk-hrac-acka', 530);
+
+  -- The register: a man found, a woman whose number is ambiguous, and no
+  -- row at all for Lída Tříková.
+  insert into site_player_regnums (slug, regnum, status, gender, gender_checked_at)
+  values ('wk-jan-dvorak', '701', 'found', 'm', now()),
+         ('wk-eva-mala', null, 'ambiguous', 'f', now());
+  begin
+    insert into site_player_regnums (slug, regnum, status, gender)
+    values ('wk-x', null, 'none', 'x');
+    raise exception 'FAIL: a gender other than m / f went into site_player_regnums (0078)';
+  exception when check_violation then null;
+  end;
+  if has_column_privilege('authenticated', 'public.site_player_regnums', 'gender', 'select')
+     or has_column_privilege('authenticated', 'public.site_player_regnums',
+                             'gender_checked_at', 'select') then
+    raise exception 'FAIL: the app can read the register''s gender (0078)';
+  end if;
+  if has_function_privilege('anon', 'kiosk_week_players(date)', 'execute') then
+    raise exception 'FAIL: anon may execute kiosk_week_players (0078)';
+  end if;
+  if not has_function_privilege('authenticated', 'kiosk_week_players(date)', 'execute') then
+    raise exception 'FAIL: the app may not execute kiosk_week_players (0078)';
+  end if;
+end $$;
+
+-- A player of H: the week's lines of our side, whichever day names the week.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"78000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_mon constant date :=
+    date_trunc('week', now() at time zone 'Europe/Prague')::date - 7;
+  v_week constant text :=
+    'Eva Malá 550 120 doma f, Jan Dvořák 450 100 venku m, '
+    'Jan Dvořák 600 120 doma m, Lída Tříková 300 - venku -';
+  v_day date;
+  v_got text;
+  r record;
+begin
+  foreach v_day in array array[v_mon, v_mon + 3, v_mon + 6, null] loop
+    select string_agg(format('%s %s %s %s %s', w.player_name, w.total,
+                             coalesce(w.throws::text, '-'),
+                             case when w.is_away then 'venku' else 'doma' end,
+                             coalesce(w.gender, '-')),
+                      ', ' order by w.player_name, w.total)
+      into v_got from kiosk_week_players(v_day) w;
+    if v_got is distinct from v_week then
+      raise exception 'FAIL: kiosk_week_players(%) gave [%], expected [%] (0078)',
+        coalesce(v_day::text, 'null'), v_got, v_week;
+    end if;
+  end loop;
+  select string_agg(w.player_name, ', ') into v_got
+    from kiosk_week_players(v_mon + 7) w;
+  if v_got is distinct from 'Příští Týden' then
+    raise exception 'FAIL: the following week gave [%] (0078)', v_got;
+  end if;
+
+  select * into r from kiosk_week_players(v_mon) w where w.total = 600;
+  if r.match_id is distinct from
+       (select id from priority_slots where import_key = 'cka:78001')
+     or r.date <> v_mon or r.errors <> 2 or r.player_slug <> 'wk-jan-dvorak'
+     or r.competition <> 'Divize H' or r.team_name <> 'Domácí A'
+     or r.opponent <> 'Soupeř X' or r.club_id is null
+     or r.club_name <> 'Klub H' or r.club_color <> 3 then
+    raise exception 'FAIL: a home line of kiosk_week_players is wrong: % (0078)', to_jsonb(r);
+  end if;
+  select * into r from kiosk_week_players(v_mon) w where w.total = 450;
+  if r.date <> v_mon + 6 or r.team_name <> 'Domácí B' or r.opponent <> 'Soupeř Y'
+     or r.club_id is not null or r.club_name is not null or r.club_color <> -1 then
+    raise exception 'FAIL: an away line of kiosk_week_players is wrong: % (0078)', to_jsonb(r);
+  end if;
+  raise notice 'OK: kiosk_week_players — the week of any of its days (none = the previous one in Prague), our side by slug only, substitutes, lines without a total, unfinished, hand-made and other weeks'' matches out, throws by discipline or lanes, home/away of the alley, team, opponent, club and the register''s gender (0078)';
+end $$;
+
+-- H's kiosk reads the same lines; a pending player reads nothing.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"78000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if (select count(*) from kiosk_week_players(
+        date_trunc('week', now() at time zone 'Europe/Prague')::date - 7)) <> 4 then
+    raise exception 'FAIL: the kiosk does not read its alley''s week (0078)';
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"78000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform kiosk_week_players(null);
+    raise exception 'FAIL: a pending player read the week''s players (0078)';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+
+-- Alley A sees its own line and none of H's; H never saw A's.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_mon constant date :=
+    date_trunc('week', now() at time zone 'Europe/Prague')::date - 7;
+begin
+  if not exists (select 1 from kiosk_week_players(v_mon) w
+                  where w.player_name = 'Hráč Áčka')
+     or exists (select 1 from kiosk_week_players(v_mon) w
+                 where w.team_name in ('Domácí A', 'Domácí B')) then
+    raise exception 'FAIL: kiosk_week_players crosses alleys (0078)';
+  end if;
+  raise notice 'OK: kiosk_week_players keeps to the caller''s alley, the kiosk included, not a pending player (0078)';
+end $$;
+
+-- Anon may not call it at all.
+reset role;
+set local role anon;
+set local request.jwt.claims = '{"role":"anon"}';
+do $$
+begin
+  begin
+    perform kiosk_week_players(null);
+    raise exception 'FAIL: anon called kiosk_week_players (0078)';
+  exception when insufficient_privilege then null;
+  end;
+  raise notice 'OK: anon has no EXECUTE on kiosk_week_players; the gender is the service role''s alone (0078)';
+end $$;
+reset role;
+
 rollback;

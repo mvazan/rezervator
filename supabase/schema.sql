@@ -2606,6 +2606,61 @@ COMMENT ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") IS 'Kio
 
 
 
+CREATE OR REPLACE FUNCTION "public"."kiosk_week_players"("p_monday" "date" DEFAULT NULL::"date") RETURNS TABLE("match_id" "uuid", "date" "date", "player_name" "text", "player_slug" "text", "total" integer, "errors" integer, "throws" integer, "is_away" boolean, "competition" "text", "team_name" "text", "opponent" "text", "club_id" "uuid", "club_name" "text", "club_color" integer, "gender" "text")
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  -- Any day of a week stands for its Monday. Without a day it is the
+  -- previous week in Prague, since the database runs in UTC. The app always
+  -- passes one, so its title and its gender look-ups name the same week.
+  v_monday constant date := coalesce(
+    date_trunc('week', p_monday)::date,
+    date_trunc('week', now() at time zone 'Europe/Prague')::date - 7);
+begin
+  if not is_approved_or_kiosk() then
+    raise exception 'not_allowed';
+  end if;
+  -- Every column is qualified: the output columns are variables here.
+  return query
+  select p.id, p.date, l.player_name, l.player_slug, l.total, l.errors,
+         case
+           when r.discipline = 'T120' then 120
+           when r.discipline = 'T100' then 100
+           -- No discipline stored: the lanes tell (4 × 30 or 2 × 50 throws).
+           when jsonb_typeof(l.lanes) <> 'array' then null
+           when jsonb_array_length(l.lanes) = 4 then 120
+           when jsonb_array_length(l.lanes) = 2 then 100
+         end,
+         -- The alley's home or away, as on the board, not the line's side:
+         -- in a derby at our alley both sides are at home.
+         p.is_away, p.competition, t.name,
+         case l.side when 'home' then p.away_team else p.home_team end,
+         c.id, c.name, coalesce(c.color, -1), g.gender
+    from priority_slots p
+    join match_results r on r.match_id = p.id
+    join match_player_results l on l.match_id = p.id
+    join teams t
+      on t.tenant_id = p.tenant_id
+     and t.site_slug = case l.side when 'home' then p.home_team_slug
+                                   else p.away_team_slug end
+    left join clubs c on c.id = t.club_id
+    left join site_player_regnums g on g.slug = l.player_slug
+   where p.tenant_id = current_tenant_id()
+     and p.import_key like 'cka:%'
+     and p.parent_id is null
+     and p.date between v_monday and v_monday + 6
+     and r.status in ('finished', 'forfeit')
+     and l.sub_name is null
+     and l.total is not null
+   order by p.date, p.starts_at, p.id, l.side, l.position;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."kiosk_week_players"("p_monday" "date") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -5818,7 +5873,10 @@ CREATE TABLE IF NOT EXISTS "public"."site_player_regnums" (
     "regnum" "text",
     "status" "text" NOT NULL,
     "looked_up_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "gender" "text",
+    "gender_checked_at" timestamp with time zone,
     CONSTRAINT "site_player_regnums_check" CHECK ((("status" = 'found'::"text") = ("regnum" IS NOT NULL))),
+    CONSTRAINT "site_player_regnums_gender_check" CHECK (("gender" = ANY (ARRAY['m'::"text", 'f'::"text"]))),
     CONSTRAINT "site_player_regnums_regnum_check" CHECK ((("regnum" IS NULL) OR ("regnum" ~ '^[0-9]{1,8}$'::"text"))),
     CONSTRAINT "site_player_regnums_slug_check" CHECK (("slug" ~ '^[a-z0-9][a-z0-9-]{0,99}$'::"text")),
     CONSTRAINT "site_player_regnums_status_check" CHECK (("status" = ANY (ARRAY['found'::"text", 'none'::"text", 'ambiguous'::"text"])))
@@ -5828,7 +5886,15 @@ CREATE TABLE IF NOT EXISTS "public"."site_player_regnums" (
 ALTER TABLE "public"."site_player_regnums" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."site_player_regnums" IS 'regnum-lookup cache of MATCH players, by results-service player slug (0059): resolved by the service page''s club and age against the register. Service role only.';
+COMMENT ON TABLE "public"."site_player_regnums" IS 'regnum-lookup cache of MATCH players, by results-service player slug (0059): resolved by the service page''s club and age against the register. Since 0078 it also keeps the register''s gender (m / f, null = unknown) and when that was last asked for. Service role only.';
+
+
+
+COMMENT ON COLUMN "public"."site_player_regnums"."gender" IS 'The ČKA register''s gender of the player (0078): m or f, null = unknown. regnum-lookup writes it with the number, or alone for a player found earlier; kiosk_week_players joins it.';
+
+
+
+COMMENT ON COLUMN "public"."site_player_regnums"."gender_checked_at" IS 'When regnum-lookup last asked the register for this player''s gender (0078), null = never. While gender is null it is asked again after a week.';
 
 
 
@@ -7369,6 +7435,12 @@ GRANT ALL ON FUNCTION "public"."kiosk_panels_valid"("p" "jsonb") TO "service_rol
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."kiosk_week_players"("p_monday" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."kiosk_week_players"("p_monday" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."kiosk_week_players"("p_monday" "date") TO "service_role";
 
 
 
