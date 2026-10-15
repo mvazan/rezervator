@@ -31,7 +31,7 @@ Re-runnable (`add column if not exists`, checks guarded). `public_week` is an al
 
 `lib/domain/kiosk_panel.dart` (pure, unit-tested):
 
-- `bool isFreshNotice(Message m, DateTime now, int days)` — `now.difference(noticePostedAt(m)) < Duration(days: days)`, never for a notice scheduled for later (`visibleFrom` ahead of `now`). A posting time after `now` otherwise counts as just posted (a negative difference is fresh): the kiosk's minute clock runs up to ~75 s behind, so a notice that has just gone up is usually ahead of it.
+- `bool isFreshNotice(Message m, DateTime now, int days)` — `now.difference(noticePostedAt(m)) < Duration(days: days)`, never for a notice scheduled for later (`visibleFrom` ahead of `now`). A posting time after `now` otherwise counts as just posted (a negative difference is fresh): the kiosk's minute clock runs up to ~75 s behind, so a notice that has just gone up is usually ahead of it. For the same reason `isScheduled` (`lib/domain/messages.dart`, the one place the app board and the kiosk decide „scheduled“) counts a `visibleFrom` within `noticeClockSlack` (90 s) after the clock as reached, so „Zobrazit hned“ — which stamps the server's `now()` — shows at once instead of up to ~75 s late.
 - `Duration kioskNoticeTurn(Message m, {required DateTime now, required Duration turn, required KioskNoticesFresh fresh, required int days})` — `turn × 2` when `fresh.lingers` and the notice is fresh, else `turn`.
 
 ### Card and status bar

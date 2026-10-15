@@ -156,6 +156,33 @@ void main() {
       expect(noticeFooter(later, now), 'zobrazí se 5. 10. v 8:00 · do odvolání');
     });
 
+    test('a notice within the clock slack of now is already up', () {
+      // „Zobrazit hned“ stamps the server's now(); the boards' minute clock
+      // runs up to ~75 s behind it, so 60 s ahead of the clock still counts
+      // as reached, 5 minutes ahead does not.
+      final now = DateTime(2026, 10, 2, 12);
+      final justShown = notice(
+          id: 'just-shown', visibleFrom: now.add(const Duration(seconds: 60)));
+      final waiting = notice(
+          id: 'waiting', visibleFrom: now.add(const Duration(minutes: 5)));
+      expect(isScheduled(justShown, now), isFalse);
+      expect(isScheduled(waiting, now), isTrue);
+      final split = splitNotices([justShown, waiting], now);
+      expect(split.active.map((m) => m.id), ['just-shown']);
+      expect(split.scheduled.map((m) => m.id), ['waiting']);
+      // The slack itself is still up, one second more is not.
+      expect(
+          isScheduled(notice(visibleFrom: now.add(noticeClockSlack)), now),
+          isFalse);
+      expect(
+          isScheduled(
+              notice(
+                  visibleFrom:
+                      now.add(noticeClockSlack + const Duration(seconds: 1))),
+              now),
+          isTrue);
+    });
+
     test('same posting time: by id, the newest-first way; scheduled by id',
         () {
       final split = splitNotices(

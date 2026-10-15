@@ -120,6 +120,22 @@ void main() {
             notice('later', visibleFrom: DateTime(2026, 10, 9, 8)), now, 3),
         isFalse,
       );
+      // „Zobrazit hned“ stamps the server's now(), a minute ahead of the
+      // lagging clock: it is up and fresh. Five minutes ahead is scheduled.
+      final shownNow = notice('shown-now',
+          createdAt: DateTime(2026, 9, 1),
+          visibleFrom: now.add(const Duration(seconds: 60)));
+      expect(isFreshNotice(shownNow, now, 3), isTrue);
+      expect(
+        isFreshNotice(
+            notice('five-min',
+                createdAt: DateTime(2026, 9, 1),
+                visibleFrom: now.add(const Duration(minutes: 5))),
+            now,
+            3),
+        isFalse,
+      );
+      expect(kioskNotices([shownNow], now).map((m) => m.id), ['shown-now']);
       // Posted after the kiosk's lagging minute clock: just posted, fresh.
       expect(
         isFreshNotice(
