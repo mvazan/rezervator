@@ -717,22 +717,10 @@ class _StatusBar extends ConsumerWidget {
                         MediaQuery.sizeOf(context).width * 0.4,
                       ),
                     ),
+                    // No avatar: the players have no pictures yet.
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: scheme.primaryContainer,
-                          child: Text(
-                            initialsOf(selected!.boardName),
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onPrimaryContainer,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
                         Flexible(
                           child: Text(
                             'Rezervuje: ${selected!.boardName}',

@@ -553,15 +553,9 @@ void main() {
     final banner = find.text('Rezervuje: Bobo');
     expect(banner, findsOneWidget);
     expect(find.textContaining('Jan Novák'), findsNothing);
-    // The avatar goes by the nick too.
-    expect(
-      find.descendant(
-        of: find.byType(CircleAvatar),
-        matching: find.text(initialsOf('Bobo')),
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('JN'), findsNothing);
+    // No avatar, no initials: the players have no pictures yet.
+    expect(find.byType(CircleAvatar), findsNothing);
+    expect(find.text(initialsOf('Bobo')), findsNothing);
     // No box: nothing between the banner and the bar's own background
     // paints one.
     final bar = Theme.of(tester.element(banner)).colorScheme
