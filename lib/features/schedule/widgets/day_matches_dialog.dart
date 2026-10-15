@@ -145,11 +145,15 @@ Widget _eventRow(
 ) {
   final showScore = hasScoreData(result);
   final winner = displayWinner(result);
-  final pins = result == null
-      ? ''
-      : pinsLabel(result.homeTotal, result.awayTotal);
+  final hasPins =
+      result != null && (result.homeTotal != null || result.awayTotal != null);
+  final league = _league(m);
+  final small = theme.textTheme.bodySmall?.copyWith(
+    color: scheme.onSurfaceVariant,
+  );
+  // The trophy, the lines and the score each centred on the row: the score
+  // and the pins one block, the trophy its counterpart on the left.
   final row = Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       MatchLeading(
         slot: m,
@@ -169,42 +173,28 @@ Widget _eventRow(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (!showScore)
-              MatchTitle(slot: m, style: theme.textTheme.titleSmall)
-            else
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: MatchTitle(
-                      slot: m,
-                      winner: winner,
-                      style: theme.textTheme.titleSmall,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    pointsLabel(result!.homePoints, result.awayPoints),
-                    style: theme.textTheme.titleSmall,
-                  ),
-                ],
-              ),
-            Text(
-              _meta(m),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+            MatchTitle(
+              slot: m,
+              winner: showScore ? winner : null,
+              style: theme.textTheme.titleSmall,
             ),
-            if (pins.isNotEmpty)
-              Text(
-                pins,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
+            Text(_where(m), style: small),
+            if (league.isNotEmpty) Text(league, style: small),
           ],
         ),
       ),
+      if (showScore || hasPins) ...[
+        const SizedBox(width: 8),
+        _ScoreBlock(
+          result: result!,
+          showPoints: showScore,
+          // Bolder and larger than the names, the day's headline.
+          pointsStyle: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+          pinsStyle: small,
+        ),
+      ],
     ],
   );
   return Padding(
@@ -213,12 +203,92 @@ Widget _eventRow(
   );
 }
 
-/// Time, then doma/venku for a match (a blockage has no side), then its note.
-String _meta(PrioritySlot m) {
+/// Time, then where: „Kuželna {venue}“ once the site named the alley, else
+/// doma/venku for a match (a blockage has no side).
+String _where(PrioritySlot m) {
+  final venue = m.venue ?? '';
   final parts = [
     '${m.startsAt.display()}–${m.endsAt.display()}',
-    if (m.type.isMatch) m.isAway ? 'venku' : 'doma',
-    if (m.description.isNotEmpty) m.description,
+    if (venue.isNotEmpty)
+      'Kuželna $venue'
+    else if (m.type.isMatch)
+      m.isAway ? 'venku' : 'doma',
   ];
   return parts.join(' · ');
+}
+
+/// A federation match's competition and round; anything else its note (a
+/// federation match's own note only repeats them, with the venue).
+String _league(PrioritySlot m) {
+  final parts = [
+    if ((m.competition ?? '').isNotEmpty) m.competition!,
+    if (m.round != null) '${m.round}. kolo',
+  ];
+  if (parts.isNotEmpty) return parts.join(' · ');
+  return m.fromFederation ? '' : m.description;
+}
+
+/// The points over the pins, their colons one under the other: each
+/// side's number in a column of its own — home's right-aligned, away's
+/// left-aligned — around the colons'. Points with no side yet read „–“ in
+/// the colon's place. Read out whole, as „5 : 3, 3460 : 3349“.
+class _ScoreBlock extends StatelessWidget {
+  const _ScoreBlock({
+    required this.result,
+    required this.showPoints,
+    required this.pointsStyle,
+    required this.pinsStyle,
+  });
+
+  final MatchResult result;
+  final bool showPoints;
+  final TextStyle? pointsStyle;
+  final TextStyle? pinsStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = result;
+    final noPoints = r.homePoints == null && r.awayPoints == null;
+    final pins = pinsLabel(r.homeTotal, r.awayTotal);
+    // The colon padded rather than spaced: a trailing space does not count
+    // when a line is centred, and „ : “ stood off its centre.
+    TableRow line(String home, String colon, String away, TextStyle? style) =>
+        TableRow(
+          children: [
+            Text(home, style: style, textAlign: TextAlign.right),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Text(colon, style: style, textAlign: TextAlign.center),
+            ),
+            Text(away, style: style, textAlign: TextAlign.left),
+          ],
+        );
+    String side(int? v) => v?.toString() ?? '–';
+    return Semantics(
+      label: [
+        if (showPoints) pointsLabel(r.homePoints, r.awayPoints),
+        if (pins.isNotEmpty) pins,
+      ].join(', '),
+      child: ExcludeSemantics(
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          defaultVerticalAlignment: TableCellVerticalAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            if (showPoints)
+              noPoints
+                  ? line('', '–', '', pointsStyle)
+                  : line(
+                      numLabel(r.homePoints),
+                      ':',
+                      numLabel(r.awayPoints),
+                      pointsStyle,
+                    ),
+            if (pins.isNotEmpty)
+              line(side(r.homeTotal), ':', side(r.awayTotal), pinsStyle),
+          ],
+        ),
+      ),
+    );
+  }
 }

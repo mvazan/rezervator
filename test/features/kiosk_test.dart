@@ -1701,10 +1701,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(
-        find.descendant(of: dialog, matching: find.text('5 : 3')),
-        findsOneWidget,
-      );
+      // The score, side by side around its colon.
+      for (final part in ['5', '3']) {
+        expect(
+          find.descendant(of: dialog, matching: find.text(part)),
+          findsOneWidget,
+        );
+      }
       // A video the kiosk cannot play (not YouTube): no video control at
       // all — the fallback trophy instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
@@ -4924,18 +4927,19 @@ void main() {
       });
     }
 
-    testWidgets('a match band on the board stacks home, dash and away, so '
-        'no team name breaks in half', (tester) async {
+    testWidgets('a match band on the board stacks the cup with the time, '
+        'then home, x and away, so no team name breaks in half', (
+      tester,
+    ) async {
       fullHd(tester);
       await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
       await tester.pumpAndSettle();
       Finder inBand(Finder f) =>
           find.descendant(of: find.byType(CalendarEventBand), matching: f);
-      expect(inBand(findEmojiText('🏆')), findsOneWidget);
+      expect(inBand(findEmojiText('🏆 14:00–17:00')), findsOneWidget);
       expect(inBand(find.text('Domácí')), findsOneWidget);
-      expect(inBand(find.text('–')), findsOneWidget);
+      expect(inBand(find.text('x')), findsOneWidget);
       expect(inBand(find.text('Soupeř')), findsOneWidget);
-      expect(inBand(find.text('14:00–17:00')), findsOneWidget);
       await finish(tester);
     });
 
@@ -4991,7 +4995,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.text('6 : 2'),
+          matching: find.text('6'),
         ),
       );
       await tester.pumpAndSettle();
