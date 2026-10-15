@@ -631,7 +631,7 @@ class KioskCard extends StatelessWidget {
 
   /// A 4 px stripe of this colour along the card's left edge, drawn over
   /// the card (it takes no room) and following its rounded corners — the
-  /// notices' card marks a fresh notice with it (0080). Null = none.
+  /// notices' card marks a fresh notice with it (0081). Null = none.
   final Color? stripe;
 
   @override
@@ -824,7 +824,7 @@ const _chipGap = 8.0;
 
 /// The notices, one at a time, the newest first. A single notice just
 /// stays; several take turns, each a [turn] of its own — a fresh one
-/// (0080) twice as long when the admin wants it so — with dots to say how
+/// (0081) twice as long when the admin wants it so — with dots to say how
 /// many there are; a notice newly on top shows at once. What does not fit
 /// the card is cut, and only then „Více“ offers the full text. While the
 /// admin highlights fresh notices, a fresh one wears „NOVÉ“ before its
@@ -843,7 +843,7 @@ class _NoticesCard extends ConsumerStatefulWidget {
   final List<Message> notices;
   final Duration turn;
 
-  /// What a fresh notice gets (0080) and for how many days it is fresh.
+  /// What a fresh notice gets (0081) and for how many days it is fresh.
   final KioskNoticesFresh fresh;
   final int freshDays;
   final bool fill;
@@ -1975,7 +1975,12 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
       // table should a row ever carry it.
       final score = GestureDetector(
         onTap: zapis,
-        child: MatchScoreLine(slot: slot, result: result, duels: duels),
+        // The teams as the app shows them: a club's nickname (0080).
+        child: MatchScoreLine(
+          slot: ref.watch(nameDisplayProvider).shown(slot),
+          result: result,
+          duels: duels,
+        ),
       );
       return layout == MatchLayout.compact
           ? DuelsCompact(duels: duels, result: result, header: score)

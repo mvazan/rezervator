@@ -224,7 +224,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         value: null, child: Text('Bez oddílu')),
                     for (final club in clubs)
                       DropdownMenuItem(
-                          value: club.id, child: Text(club.name)),
+                          value: club.id, child: Text(club.shown)),
                   ],
                   onChanged: (id) => setState(() => _clubId = id),
                 ),

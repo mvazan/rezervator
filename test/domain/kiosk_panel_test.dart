@@ -88,7 +88,7 @@ void main() {
     expect([for (final m in got) m.id], ['b-later', 'a-open']);
   });
 
-  group('fresh notices (0080)', () {
+  group('fresh notices (0081)', () {
     final now = DateTime(2026, 10, 8, 12);
 
     test('fresh while up for less than the days, counted from when it went '

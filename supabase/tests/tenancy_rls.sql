@@ -12891,25 +12891,145 @@ begin
   raise notice 'OK: the Zápis pages with the bar for a new alley, one of three ways, off the public overview (0079)';
 end $$;
 
--- 0080: a fresh notice on the kiosk gets the „NOVÉ“ label for three days
+-- 0080: a club's nickname — 1–30 characters, not blank, or none. Run
+-- again first: the migration is re-runnable.
+\ir ../migrations/0080_club_nickname.sql
+do $$
+declare
+  v_club uuid;
+begin
+  select id into v_club from clubs
+   where tenant_id = '00000000-0000-0000-0000-00000000000a' limit 1;
+  if v_club is null then
+    insert into clubs (tenant_id, name)
+    values ('00000000-0000-0000-0000-00000000000a', 'Oddíl (0080)')
+    returning id into v_club;
+  end if;
+  update clubs set nickname = 'Sokol IV' where id = v_club;
+  update clubs set nickname = null where id = v_club;
+  begin
+    update clubs set nickname = '   ' where id = v_club;
+    raise exception 'FAIL: a blank club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  begin
+    update clubs set nickname = repeat('x', 31) where id = v_club;
+    raise exception 'FAIL: a 31-character club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: a club nickname is 1–30 characters or none (0080)';
+end $$;
+
+-- 0080: what the server writes for people reads with the nickname —
+-- the longest matching club name wins, a name merely starting with it does
+-- not count, another tenant's clubs never apply — and a new nickname puts
+-- the club's future matches back in the calendar queue.
+do $$
+declare
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_other constant uuid := '00000000-0000-0000-0000-00000000000b';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_long uuid;
+  v_short uuid;
+  v_type uuid;
+  v_match uuid;
+  v_row record;
+begin
+  insert into clubs (tenant_id, name, site_name, nickname)
+  values (v_tenant, 'Sokol IV (0080)', 'TJ Sokol Brno IV', 'Sokol IV')
+  returning id into v_long;
+  insert into clubs (tenant_id, name, nickname)
+  values (v_tenant, 'TJ Sokol Brno', 'Sokol')
+  returning id into v_short;
+  if team_shown(v_tenant, 'TJ Sokol Brno IV B') <> 'Sokol IV B'
+     or team_shown(v_tenant, 'TJ Sokol Brno IV') <> 'Sokol IV'
+     or team_shown(v_tenant, 'Sokol IV (0080) A') <> 'Sokol IV A'
+     or team_shown(v_tenant, 'TJ Sokol Brno A') <> 'Sokol A'
+     or team_shown(v_tenant, 'TJ Sokol Brnox A') <> 'TJ Sokol Brnox A'
+     or team_shown(v_tenant, 'KK Blansko') <> 'KK Blansko'
+     or team_shown(v_other, 'TJ Sokol Brno IV B') <> 'TJ Sokol Brno IV B' then
+    raise exception 'FAIL: team_shown maps names wrong (0080)';
+  end if;
+
+  -- A followed future match: the calendar and the reminder see the
+  -- nickname; the follow itself still matches the stored name.
+  insert into google_calendar_links (user_id, status, google_email)
+  values (v_uid, 'linked', 'a@gmail.com')
+  on conflict (user_id) do update set status = 'linked';
+  delete from calendar_teams where user_id = v_uid;
+  insert into calendar_teams (user_id, team) values (v_uid, 'TJ Sokol Brno IV B');
+  update profiles set followed_teams = array['TJ Sokol Brno IV B']
+   where id = v_uid;
+  select id into v_type from priority_slot_types
+   where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     is_away, created_by)
+  values
+    (v_tenant, (now() at time zone 'Europe/Prague')::date + 300, '06:00',
+     '07:00', v_type, 'KK Blansko', 'TJ Sokol Brno IV B', true, v_uid)
+  returning id into v_match;
+  select * into v_row from my_future_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.home_team <> 'KK Blansko'
+     or v_row.away_team <> 'Sokol IV B' then
+    raise exception 'FAIL: my_future_matches does not show the nickname: %',
+      to_jsonb(v_row);
+  end if;
+  select * into v_row from my_upcoming_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.away_team <> 'Sokol IV B' then
+    raise exception 'FAIL: my_upcoming_matches does not show the nickname: %',
+      to_jsonb(v_row);
+  end if;
+
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  update clubs set color = 3 where id = v_long;
+  if exists (select 1 from notification_jobs
+              where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a club change that keeps its names queued a calendar sync (0080)';
+  end if;
+  update clubs set nickname = 'Sokolíci' where id = v_long;
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a new nickname did not queue the calendar sync (0080)';
+  end if;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  delete from clubs where id = v_long;
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: deleting a nicknamed club did not queue the calendar sync (0080)';
+  end if;
+  raise notice 'OK: reminders and calendar read team names with the nickname (0080)';
+end $$;
+
+-- Not callable from the app: it is a helper of the server's own functions.
+do $$
+begin
+  if has_function_privilege('authenticated', 'public.team_shown(uuid, text)', 'execute')
+     or has_function_privilege('anon', 'public.team_shown(uuid, text)', 'execute') then
+    raise exception 'FAIL: team_shown is callable by app roles (0080)';
+  end if;
+  raise notice 'OK: team_shown stays server-side (0080)';
+end $$;
+
+-- 0081: a fresh notice on the kiosk gets the „NOVÉ“ label for three days
 -- unless the admin says otherwise — on every alley, a new one too; only the
 -- four modes and 1–14 days go in, the admin saves both through the API's
--- role, and both stay off the public overview. 0080 runs twice (it
+-- role, and both stay off the public overview. 0081 runs twice (it
 -- re-runs).
-\ir ../migrations/0080_kiosk_notices_fresh.sql
-\ir ../migrations/0080_kiosk_notices_fresh.sql
+\ir ../migrations/0081_kiosk_notices_fresh.sql
+\ir ../migrations/0081_kiosk_notices_fresh.sql
 insert into tenants (id, name) values
-  ('00000000-0000-0000-0000-000000000080', 'Kuželna P (0080)');
+  ('00000000-0000-0000-0000-000000000081', 'Kuželna P (0081)');
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
-  v_p constant uuid := '00000000-0000-0000-0000-000000000080';
+  v_p constant uuid := '00000000-0000-0000-0000-000000000081';
 begin
   if (select count(*) from schedule_settings
        where tenant_id in (v_a, v_p)
          and kiosk_notices_fresh_mode = 'highlight'
          and kiosk_notices_fresh_days = 3) <> 2 then
-    raise exception 'FAIL: an alley does not start with the label for three days (0080)';
+    raise exception 'FAIL: an alley does not start with the label for three days (0081)';
   end if;
   update schedule_settings set kiosk_notices_fresh_mode = 'off' where tenant_id = v_a;
   update schedule_settings set kiosk_notices_fresh_mode = 'longer' where tenant_id = v_a;
@@ -12918,32 +13038,32 @@ begin
   update schedule_settings set kiosk_notices_fresh_days = 14 where tenant_id = v_a;
   begin
     update schedule_settings set kiosk_notices_fresh_mode = 'blink' where tenant_id = v_a;
-    raise exception 'FAIL: an unknown fresh notice mode was accepted (0080)';
+    raise exception 'FAIL: an unknown fresh notice mode was accepted (0081)';
   exception when check_violation then null;
   end;
   begin
     update schedule_settings set kiosk_notices_fresh_mode = null where tenant_id = v_a;
-    raise exception 'FAIL: no fresh notice mode was accepted (0080)';
+    raise exception 'FAIL: no fresh notice mode was accepted (0081)';
   exception when not_null_violation then null;
   end;
   begin
     update schedule_settings set kiosk_notices_fresh_days = 0 where tenant_id = v_a;
-    raise exception 'FAIL: a notice fresh for 0 days was accepted (0080)';
+    raise exception 'FAIL: a notice fresh for 0 days was accepted (0081)';
   exception when check_violation then null;
   end;
   begin
     update schedule_settings set kiosk_notices_fresh_days = 15 where tenant_id = v_a;
-    raise exception 'FAIL: a notice fresh for 15 days was accepted (0080)';
+    raise exception 'FAIL: a notice fresh for 15 days was accepted (0081)';
   exception when check_violation then null;
   end;
   if public_week('kuzelna-a', current_date)->'settings' ?| array[
        'kiosk_notices_fresh_mode', 'kiosk_notices_fresh_days'] then
-    raise exception 'FAIL: the public overview hands out a 0080 setting';
+    raise exception 'FAIL: the public overview hands out a 0081 setting';
   end if;
   update schedule_settings set kiosk_notices_fresh_mode = 'highlight',
                                kiosk_notices_fresh_days = 3
    where tenant_id = v_a;
-  raise notice 'OK: a fresh notice gets the label for three days unless the admin says otherwise, one of four modes, 1–14 days, off the public overview (0080)';
+  raise notice 'OK: a fresh notice gets the label for three days unless the admin says otherwise, one of four modes, 1–14 days, off the public overview (0081)';
 end $$;
 
 -- Alley A's admin saves both through the API's role (0017's table-wide
@@ -12957,12 +13077,12 @@ begin
      set kiosk_notices_fresh_mode = 'longer', kiosk_notices_fresh_days = 7
    where tenant_id = '00000000-0000-0000-0000-00000000000a';
   if not found then
-    raise exception 'FAIL: the admin could not save the fresh notices (0080)';
+    raise exception 'FAIL: the admin could not save the fresh notices (0081)';
   end if;
   begin
     update schedule_settings set kiosk_notices_fresh_days = 15
      where tenant_id = '00000000-0000-0000-0000-00000000000a';
-    raise exception 'FAIL: the admin saved a notice fresh for 15 days (0080)';
+    raise exception 'FAIL: the admin saved a notice fresh for 15 days (0081)';
   exception when check_violation then null;
   end;
 end $$;
@@ -12973,15 +13093,15 @@ begin
                   where tenant_id = '00000000-0000-0000-0000-00000000000a'
                     and kiosk_notices_fresh_mode = 'longer'
                     and kiosk_notices_fresh_days = 7) then
-    raise exception 'FAIL: the admin''s fresh notices were not saved (0080)';
+    raise exception 'FAIL: the admin''s fresh notices were not saved (0081)';
   end if;
   update schedule_settings set kiosk_notices_fresh_mode = 'highlight',
                                kiosk_notices_fresh_days = 3
    where tenant_id = '00000000-0000-0000-0000-00000000000a';
-  raise notice 'OK: an admin saves the fresh notices as authenticated (0080)';
+  raise notice 'OK: an admin saves the fresh notices as authenticated (0081)';
 end $$;
 
--- 0080: visible_from keeps when a notice went up. A time ahead schedules it
+-- 0081: visible_from keeps when a notice went up. A time ahead schedules it
 -- and its ping waits as one job, as in 0064; shown at once while it still
 -- waits, it records now() and the job is gone; a notice already up keeps
 -- its time — a past one, or none — when shown at once or given a time gone
@@ -12996,7 +13116,7 @@ begin
     '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
   perform message_set_visible_from(v_notice, v_at, true);
   if (select visible_from from messages where id = v_notice) is distinct from v_at then
-    raise exception 'FAIL: the admin could not schedule the notice (0080)';
+    raise exception 'FAIL: the admin could not schedule the notice (0081)';
   end if;
 end $$;
 reset role;
@@ -13007,7 +13127,7 @@ begin
   if (select count(*) from notification_jobs
        where kind = 'notice_visible' and payload->>'message_id' = v_notice::text
          and run_at = now() + interval '2 days') <> 1 then
-    raise exception 'FAIL: a scheduled notice has no notice_visible job at its time (0080)';
+    raise exception 'FAIL: a scheduled notice has no notice_visible job at its time (0081)';
   end if;
 end $$;
 set local role authenticated;
@@ -13026,12 +13146,12 @@ declare
   v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
 begin
   if (select visible_from from messages where id = v_notice) is distinct from now() then
-    raise exception 'FAIL: a scheduled notice shown at once does not count from now (0080)';
+    raise exception 'FAIL: a scheduled notice shown at once does not count from now (0081)';
   end if;
   if exists (select 1 from notification_jobs
               where kind = 'notice_visible'
                 and payload->>'message_id' = v_notice::text) then
-    raise exception 'FAIL: a scheduled notice shown at once kept its job (0080)';
+    raise exception 'FAIL: a scheduled notice shown at once kept its job (0081)';
   end if;
   -- It went up two days ago.
   update messages set visible_from = now() - interval '2 days' where id = v_notice;
@@ -13046,12 +13166,12 @@ begin
   perform message_set_visible_from(v_notice, null);
   if (select visible_from from messages where id = v_notice)
        is distinct from now() - interval '2 days' then
-    raise exception 'FAIL: a notice already up moved when shown at once (0080)';
+    raise exception 'FAIL: a notice already up moved when shown at once (0081)';
   end if;
   perform message_set_visible_from(v_notice, now() - interval '1 hour');
   if (select visible_from from messages where id = v_notice)
        is distinct from now() - interval '2 days' then
-    raise exception 'FAIL: a notice already up moved to a time gone by (0080)';
+    raise exception 'FAIL: a notice already up moved to a time gone by (0081)';
   end if;
 end $$;
 reset role;
@@ -13062,7 +13182,7 @@ begin
   if exists (select 1 from notification_jobs
               where kind = 'notice_visible'
                 and payload->>'message_id' = v_notice::text) then
-    raise exception 'FAIL: a notice already up got a notice_visible job (0080)';
+    raise exception 'FAIL: a notice already up got a notice_visible job (0081)';
   end if;
   -- Posted at once: no visible_from, it counts from created_at.
   update messages set visible_from = null where id = v_notice;
@@ -13076,13 +13196,13 @@ begin
     '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
   perform message_set_visible_from(v_notice, null);
   if (select visible_from from messages where id = v_notice) is not null then
-    raise exception 'FAIL: a notice posted at once got a visible_from when shown at once (0080)';
+    raise exception 'FAIL: a notice posted at once got a visible_from when shown at once (0081)';
   end if;
 end $$;
 reset role;
 do $$
 begin
-  raise notice 'OK: a notice shown early counts from then, one already up keeps its time, scheduling and its job as before (0080)';
+  raise notice 'OK: a notice shown early counts from then, one already up keeps its time, scheduling and its job as before (0081)';
 end $$;
 
 rollback;

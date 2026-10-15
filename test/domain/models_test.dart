@@ -370,7 +370,7 @@ void main() {
     });
 
     test('fromJson reads what a fresh notice gets and for how many days '
-        '(0080); the label for three days when absent or unknown', () {
+        '(0081); the label for three days when absent or unknown', () {
       const base = {
         'lane_count': 4,
         'training_weekdays': [1, 2, 4],
@@ -412,9 +412,9 @@ void main() {
     });
 
     test('the fresh notices\' defaults are the columns\' defaults', () {
-      // A new alley gets 0080's defaults; the app's fallbacks must match.
+      // A new alley gets 0081's defaults; the app's fallbacks must match.
       final sql = File(
-        'supabase/migrations/0080_kiosk_notices_fresh.sql',
+        'supabase/migrations/0081_kiosk_notices_fresh.sql',
       ).readAsStringSync();
       final mode = RegExp(
         r"kiosk_notices_fresh_mode\s+text\s+not\s+null\s+default\s+'(\w+)'",
@@ -1160,6 +1160,73 @@ void main() {
         RegnumCandidate.fromJson(const {'id': '7', 'club': 'TJ'}).detail,
         'věk neuveden',
       );
+    });
+  });
+
+  group('club nicknames (0080)', () {
+    test('Club reads its nickname; blank = none; shown falls back to the name',
+        () {
+      final nick = Club.fromJson(
+        {'id': 'c', 'name': 'TJ Sokol Brno IV', 'nickname': ' Sokol IV '},
+      );
+      expect(nick.nickname, 'Sokol IV');
+      expect(nick.shown, 'Sokol IV');
+      final blank = Club.fromJson({'id': 'c', 'name': 'KK Brno', 'nickname': ' '});
+      expect(blank.nickname, isNull);
+      expect(blank.shown, 'KK Brno');
+      expect(clubNameOf('c', [nick]), 'Sokol IV');
+    });
+
+    final sokol = Club(
+      id: 's',
+      name: 'TJ Sokol Brno IV',
+      siteName: 'TJ Sokol Brno IV',
+      nickname: 'Sokol IV',
+    );
+    final veverky = Club(
+      id: 'v',
+      name: 'SKK Veverky',
+      siteName: 'SKK Veverky Brno',
+      nickname: 'Veverky',
+    );
+    const plain = Club(id: 'p', name: 'KS Devítka Brno', siteName: 'KS Devítka Brno');
+    final names = NameDisplay([sokol, veverky, plain]);
+
+    test('a team of a club with a nickname: the nickname for the club', () {
+      expect(names.team('TJ Sokol Brno IV'), 'Sokol IV');
+      expect(names.team('TJ Sokol Brno IV B'), 'Sokol IV B');
+      // The site's name, longer than the club's own, wins.
+      expect(names.team('SKK Veverky Brno C'), 'Veverky C');
+      // The club's own name works too, word by word only.
+      expect(names.team('SKK Veverky ženy'), 'Veverky ženy');
+      expect(names.team('SKK Veverkyová'), 'SKK Veverkyová');
+    });
+
+    test('anything else as it is: no nickname, another alley\'s team', () {
+      expect(names.team('KS Devítka Brno A'), 'KS Devítka Brno A');
+      expect(names.team('Slavia Praha C'), 'Slavia Praha C');
+      expect(NameDisplay.none.team('TJ Sokol Brno IV B'), 'TJ Sokol Brno IV B');
+    });
+
+    test('a match title with both teams shown; another blockage as it is', () {
+      final match = PrioritySlot(
+        id: 'm',
+        date: Day(2026, 10, 15),
+        startsAt: const HourMinute(17, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'TJ Sokol Brno IV B',
+        awayTeam: 'SKK Veverky Brno A',
+      );
+      expect(names.title(match), 'Sokol IV B – Veverky A');
+      final blockage = PrioritySlot(
+        id: 'b',
+        date: Day(2026, 10, 15),
+        startsAt: const HourMinute(9, 0),
+        endsAt: const HourMinute(12, 0),
+        type: const PrioritySlotType(id: 't', name: 'TJ Sokol Brno IV brigáda'),
+      );
+      expect(names.title(blockage), 'TJ Sokol Brno IV brigáda');
     });
   });
 }

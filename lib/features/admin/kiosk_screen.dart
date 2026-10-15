@@ -1055,7 +1055,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                         '(v záhlaví i v panelu).',
                   ),
                   // What a notice up for less than a few days gets on the
-                  // kiosk (0080) — and those days, unless it gets nothing.
+                  // kiosk (0081) — and those days, unless it gets nothing.
                   Padding(
                     padding: const EdgeInsets.only(top: 8, bottom: 12),
                     child: DropdownButtonFormField<KioskNoticesFresh>(

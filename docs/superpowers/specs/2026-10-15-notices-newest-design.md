@@ -1,6 +1,6 @@
 # Nástěnka: nejnovější nahoře, čerstvé oznamy na kiosku, nové v appce
 
-Requested by the user on 2026-10-15. The app speaks Czech; the user writes Slovak. Branch `notices-newest` from `main` (f103e28, migrations up to 0078). Migration `0080_kiosk_notices_fresh.sql` — `0079` is taken by another branch (`0079_kiosk_zapis_nav.sql`); whichever merges second renumbers, never `db push --include-all`.
+Requested by the user on 2026-10-15. The app speaks Czech; the user writes Slovak. Branch `notices-newest` from `main` (f103e28, migrations up to 0078). Migration `0081_kiosk_notices_fresh.sql` — written as 0080, renumbered when main got `0079_kiosk_zapis_nav.sql` and `0080_club_nickname.sql` first; never `db push --include-all`.
 
 ## Decided with the user
 
@@ -14,7 +14,7 @@ Requested by the user on 2026-10-15. The app speaks Czech; the user writes Slova
 
 ## Kiosk
 
-### Data (0080)
+### Data (0081)
 
 `schedule_settings`:
 
@@ -58,5 +58,5 @@ Under „Střídání oznamů“ (shown when the notices are in the header or a 
 - **Widget (kiosk):** the card and the status bar start on the newest; a fresh notice with highlight shows „NOVÉ“ (and the stripe), an old one does not; with `longer` the fresh notice stays twice the turn, an old one the turn; a newly posted notice is shown at once; the existing rotation tests updated to the new order.
 - **Widget (admin):** the two controls PATCH `kiosk_notices_fresh_mode` / `kiosk_notices_fresh_days`, the days field hidden when off.
 - **Widget (app):** the board lists newest first; the notices unread on opening show „Nové“ for the visit (also after the optimistic read), not the read ones, not the author's own; a notice that arrives while the board is open and is marked read on this visit is new too; reopening shows none.
-- **SQL:** 0080 as above.
+- **SQL:** 0081 as above.
 - **Browser** on the local stack: the kiosk card and status bar (new notice posted → shown first with NOVÉ; longer turn), the admin controls, the app board with a fresh unread notice.

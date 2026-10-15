@@ -5,6 +5,7 @@ import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
+import '../../../core/widgets/shown_names.dart';
 
 /// One vertical item of a day's grid: a block row, an off-block event banner,
 /// or an empty internal gap between blocks. The renderers walk this list in
@@ -110,7 +111,7 @@ class GapEventBanner extends StatelessWidget {
           fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
           fallbackFg: scheme.onTertiaryContainer),
     };
-    final text = eventBandLabel(event);
+    final text = eventBandLabel(event, names: shownNamesNow(context));
     final banner = Container(
       constraints: const BoxConstraints(minHeight: 36),
       alignment: Alignment.center,

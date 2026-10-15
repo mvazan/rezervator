@@ -48,7 +48,7 @@ List<PickerClub> pickerClubs(List<PlayerName> players, List<Club> clubs) {
     for (final MapEntry(key: id, value: list) in members.entries)
       PickerClub(
         id: id,
-        name: byId[id]!.name,
+        name: byId[id]!.shown,
         colorIndex: byId[id]!.colorIndex,
         players: list,
       ),

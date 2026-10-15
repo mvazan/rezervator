@@ -46,7 +46,7 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
 /// How far the boards' minute clock (`nowProvider`) can run behind wall
 /// time: it holds a value until the minute changes, and notices that only
 /// on its 15 s poll, so it lags up to ~75 s. A notice whose `visibleFrom` is within this of the
-/// clock counts as up — „Zobrazit hned“ (0080) stamps the server's `now()`,
+/// clock counts as up — „Zobrazit hned“ (0081) stamps the server's `now()`,
 /// which the lagging clock has not reached yet.
 const noticeClockSlack = Duration(seconds: 90);
 
@@ -60,7 +60,7 @@ bool isScheduled(Message m, DateTime now) =>
 
 /// When [m] went up on the Nástěnka: [Message.visibleFrom] for a notice
 /// posted ahead of time — the time it was posted for, or when it was shown
-/// early with „Zobrazit hned“ (0080) — or else when it was posted. The
+/// early with „Zobrazit hned“ (0081) — or else when it was posted. The
 /// Nástěnka's order, its „vyvěšeno“ day and the kiosk's fresh notices all
 /// count from it.
 DateTime noticePostedAt(Message m) => m.visibleFrom ?? m.createdAt;

@@ -10,11 +10,16 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../data/providers.dart' show nameDisplayProvider;
 
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 
-class MatchTitle extends StatelessWidget {
+/// The teams read as the app shows them: a club's nickname for its name
+/// (0080, [nameDisplayProvider]).
+class MatchTitle extends ConsumerWidget {
   const MatchTitle({super.key, required this.slot, this.winner, this.style});
 
   final PrioritySlot slot;
@@ -22,9 +27,10 @@ class MatchTitle extends StatelessWidget {
   final TextStyle? style;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final names = ref.watch(nameDisplayProvider);
     if (winner == null || !slot.type.isMatch || slot.homeTeam.isEmpty) {
-      return Text(slot.title, style: style);
+      return Text(names.title(slot), style: style);
     }
     final base = style ?? DefaultTextStyle.of(context).style;
     // FIXED weights on both sides, not "add bold" to one relative to base:
@@ -43,7 +49,7 @@ class MatchTitle extends StatelessWidget {
       TextSpan(
         children: [
           TextSpan(
-            text: slot.homeTeam,
+            text: names.team(slot.homeTeam),
             style: winner == MatchSide.home ? winnerStyle : loserStyle,
           ),
           // Matches the loser's w400, not `base` (w700 under e.g.
@@ -51,7 +57,7 @@ class MatchTitle extends StatelessWidget {
           // read heavier than the name itself (Fix round 1).
           TextSpan(text: ' – ', style: loserStyle),
           TextSpan(
-            text: slot.awayTeam,
+            text: names.team(slot.awayTeam),
             style: winner == MatchSide.away ? winnerStyle : loserStyle,
           ),
         ],

@@ -11,6 +11,7 @@ import '../../../core/ui.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
 import 'day_matches_dialog.dart';
+import '../../../core/widgets/shown_names.dart';
 
 class DayHeader extends StatelessWidget {
   const DayHeader({
@@ -126,9 +127,11 @@ class DayHeader extends StatelessWidget {
                 for (final m in priority)
                   Padding(
                     padding: const EdgeInsets.only(top: 5, left: 52),
-                    child: EmojiText(
-                      headerEventLabel(m),
-                      style: TextStyle(color: scheme.primary, fontSize: 13),
+                    child: ShownNames(
+                      builder: (context, names) => EmojiText(
+                        headerEventLabel(m, names: names),
+                        style: TextStyle(color: scheme.primary, fontSize: 13),
+                      ),
                     ),
                   ),
               ],

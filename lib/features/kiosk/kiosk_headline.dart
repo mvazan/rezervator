@@ -4,7 +4,7 @@
 /// cross-fade to the next, right where it stays. Nothing moves in between —
 /// a running news strip pulled the eye all the time. A tap opens the notice
 /// in full; its text is also in the drawer. The newest comes first, and a
-/// fresh one (0080) wears „NOVÉ“ or stays longer, as the admin chose.
+/// fresh one (0081) wears „NOVÉ“ or stays longer, as the admin chose.
 library;
 
 import 'package:flutter/material.dart';
@@ -32,7 +32,7 @@ class KioskHeadline extends StatefulWidget {
   /// The kiosk's clock: a notice stops being fresh as the minutes go by.
   final DateTime now;
 
-  /// What a fresh notice gets (0080) and for how many days it is fresh.
+  /// What a fresh notice gets (0081) and for how many days it is fresh.
   final KioskNoticesFresh fresh;
   final int freshDays;
   final void Function(Message notice) onOpen;

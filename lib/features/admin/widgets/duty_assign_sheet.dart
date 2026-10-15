@@ -171,7 +171,7 @@ class _DutyAssignSheetState extends ConsumerState<DutyAssignSheet> {
     final clubs = _chipClubs;
     final chips = <(String?, String)>[
       (null, 'Všichni'),
-      for (final c in clubs) (c.id, c.name),
+      for (final c in clubs) (c.id, c.shown),
       if (clubs.isNotEmpty && _hasNoClub) (_noClub, 'Bez oddílu'),
     ];
     return chips.length < 3 ? const [] : chips;

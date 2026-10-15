@@ -17,7 +17,7 @@ List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
       now,
     ).active;
 
-/// Whether [m] is a fresh notice on the kiosk (0080): up for less than
+/// Whether [m] is a fresh notice on the kiosk (0081): up for less than
 /// [days] days at [now], counted from when it went up ([noticePostedAt]).
 /// A notice scheduled for later ([isScheduled], beyond the
 /// `noticeClockSlack`) is never fresh — it is not up yet. A notice posted

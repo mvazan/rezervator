@@ -1,4 +1,4 @@
-/// „NOVÉ“ before the title of a fresh notice on the kiosk (0080): one
+/// „NOVÉ“ before the title of a fresh notice on the kiosk (0081): one
 /// that went up less than the admin's few days ago, while the admin has
 /// fresh notices highlighted. The same chip in the status bar and in the
 /// panel's card.

@@ -244,7 +244,7 @@ List<ResultsClub> resultsClubs({
     for (final t in teamRows)
       if (t.clubId != null) t.name: t.clubId!,
   };
-  final names = {for (final c in clubs) c.id: c.name};
+  final names = {for (final c in clubs) c.id: c.shown};
   final byClub = <String?, List<String>>{};
   for (final team in teams) {
     final id = clubOf[team];

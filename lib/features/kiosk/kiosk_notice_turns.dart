@@ -2,7 +2,7 @@
 /// and the panel's card: the notice shown has a one-shot timer of its own,
 /// re-armed after every step (the timer's or a swipe's), so each gets a turn
 /// of its own — twice the admin's for a fresh one when the admin wants fresh
-/// notices shown longer (0080, `kioskNoticeTurn`). A new notice on top is
+/// notices shown longer (0081, `kioskNoticeTurn`). A new notice on top is
 /// shown at once, fewer notices keep the shown one within them, and a change
 /// of the turn or of what makes a notice fresh starts the shown one's turn
 /// over.
@@ -35,7 +35,7 @@ mixin KioskNoticeTurns<T extends StatefulWidget> on State<T> {
   /// The admin's turn.
   Duration get turn;
 
-  /// What a fresh notice gets (0080) and for how many days it is fresh.
+  /// What a fresh notice gets (0081) and for how many days it is fresh.
   KioskNoticesFresh get fresh;
   int get freshDays;
 

@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../core/widgets/shown_names.dart';
 import '../../data/providers.dart';
 import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
@@ -469,6 +470,8 @@ class _Bar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Shown with the club's nickname (0080); the tap still names the team.
+    final names = shownNamesNow(context);
     Widget team(String name, double maxWidth) => ConstrainedBox(
       constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
       child: OutlinedButton(
@@ -482,7 +485,7 @@ class _Bar extends StatelessWidget {
           children: [
             Flexible(
               child: Text(
-                name,
+                names.team(name),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -616,6 +619,7 @@ class _TeamMatchesState extends State<_TeamMatches> {
   @override
   Widget build(BuildContext context) {
     final team = widget.team;
+    final names = shownNamesNow(context);
     final matches = widget.matches;
     final results = widget.results;
     return Padding(
@@ -646,7 +650,7 @@ class _TeamMatchesState extends State<_TeamMatches> {
               return ListTile(
                 selected: m.id == widget.shown.id,
                 title: Text(
-                  home ? m.awayTeam : m.homeTeam,
+                  names.team(home ? m.awayTeam : m.homeTeam),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

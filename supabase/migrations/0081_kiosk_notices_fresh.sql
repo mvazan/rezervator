@@ -1,4 +1,4 @@
--- 0080 — fresh notices on the kiosk (Správa → Kiosk → Nástěnka). A notice
+-- 0081 — fresh notices on the kiosk (Správa → Kiosk → Nástěnka). A notice
 -- is fresh while it has been up for fewer than kiosk_notices_fresh_days
 -- days (1–14, default 3), counted from when it went up: visible_from for a
 -- notice posted ahead of time (or shown early, below), created_at
@@ -53,13 +53,13 @@ begin
 end $$;
 
 comment on column schedule_settings.kiosk_notices_fresh_mode is
-  'What a fresh notice gets on the kiosk (0080): off | highlight (the NOVÉ label) | longer (twice kiosk_notices_rotation_seconds) | both. Default highlight.';
+  'What a fresh notice gets on the kiosk (0081): off | highlight (the NOVÉ label) | longer (twice kiosk_notices_rotation_seconds) | both. Default highlight.';
 comment on column schedule_settings.kiosk_notices_fresh_days is
-  'A notice is fresh on the kiosk while it has been up (visible_from, else created_at) for fewer days than this (0080), 1–14, default 3.';
+  'A notice is fresh on the kiosk while it has been up (visible_from, else created_at) for fewer days than this (0081), 1–14, default 3.';
 
 -- When a notice shows (admin of its alley): a time ahead schedules it; null
 -- or a time gone by shows it now — a notice still waiting records now() as
--- the time it went up, one already up keeps its own (0080; 0064 cleared
+-- the time it went up, one already up keeps its own (0081; 0064 cleared
 -- it). [p_notify] also sets whether it pings (null keeps it). A notice that
 -- pings and shows later gets its push and e-mail then: a notice_visible
 -- job at that time (one per notice — moving the time re-arms it; a notice

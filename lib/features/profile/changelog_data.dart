@@ -100,6 +100,10 @@ const appChangelog = <Release>[
     'Kiosk: modul „Napište nám“ — QR kód formuláře na webu, zprávu napíšeš '
         'v mobilu, ne na obrazovce kiosku. Ťuknutí ukáže velký kód. Správce '
         'ho umístí ve Správa → Kiosk → Panely.',
+    'Oddíly mají přezdívku: správce ji zadá ve Správě → Oddíly a aplikace '
+        'ji ukáže místo celého názvu — z „TJ Sokol Brno IV B“ je „Sokol IV '
+        'B“ v rozvrhu, zápasech, výsledcích, na kiosku, v připomínkách i '
+        'v Google kalendáři.',
     'Nástěnka: nejnovější oznam je nahoře — v aplikaci i na kiosku, také '
         'mezi sbalenými „Starší“. Naplánované oznamy zůstávají seřazené '
         'podle toho, kdy se zobrazí.',
@@ -119,6 +123,7 @@ const appChangelog = <Release>[
     'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
     'Výsledky: filtr podle oddílu, pak družstva.',
     'Klubovna: Napište nám — zpráva autorovi.',
+    'Oddíly: přezdívka místo celého názvu.',
     'Nástěnka: nejnovější nahoře, nové se štítkem.',
   ]),
   Release(null, '14. 10. 2026', [

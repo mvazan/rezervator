@@ -655,7 +655,7 @@ void main() {
     (true, PanelSide.off, 'in the header only'),
     (false, PanelSide.left, 'in a panel only'),
   ]) {
-    testWidgets('the notices\' rotation and the fresh notices (0080) show '
+    testWidgets('the notices\' rotation and the fresh notices (0081) show '
         'with the notices $why', (
       tester,
     ) async {
@@ -1395,7 +1395,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  group('fresh notices (0080)', () {
+  group('fresh notices (0081)', () {
     Map<String, dynamic> lastPatch() => jsonDecode(
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
