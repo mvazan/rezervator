@@ -9,7 +9,7 @@ import 'dart:convert' show jsonEncode;
 
 /// A module of the kiosk's panels. The name is its id in `kiosk_panels`
 /// — do not rename one.
-enum KioskModule { duty, notices, matches, guide, week }
+enum KioskModule { duty, notices, matches, guide, week, feedback }
 
 /// Where a module goes: nowhere, the left panel or the right one. The name
 /// is its `side` in `kiosk_panels` — do not rename one.
@@ -24,6 +24,7 @@ int kioskModuleDefaultShare(KioskModule m) => switch (m) {
   KioskModule.matches => 60,
   KioskModule.guide => 45,
   KioskModule.week => 55,
+  KioskModule.feedback => 35,
 };
 
 /// The bounds `kiosk_panels_valid` (0077) holds a panel's width and a
@@ -145,9 +146,11 @@ class KioskPanels {
   /// In order: a panel stacks its modules top to bottom as listed here.
   final List<KioskModulePlacement> modules;
 
-  /// 0077's column default, letter for letter (a test compares the two):
-  /// both panels two days wide and closed, the notices and the matches in
-  /// the right one — what the kiosk showed before there were two.
+  /// 0077's column default, letter for letter (a test compares the two),
+  /// and the modules added since at its end, off — what a row with that
+  /// default reads as ([KioskPanels.fromJson] adds them): both panels two
+  /// days wide and closed, the notices and the matches in the right one —
+  /// what the kiosk showed before there were two.
   static const defaults = KioskPanels(
     left: KioskPanel(days: 2, open: false),
     right: KioskPanel(days: 2, open: false),
@@ -157,6 +160,7 @@ class KioskPanels {
       KioskModulePlacement(id: 'matches', side: PanelSide.right, share: 60),
       KioskModulePlacement(id: 'guide', side: PanelSide.off, share: 45),
       KioskModulePlacement(id: 'week', side: PanelSide.off, share: 55),
+      KioskModulePlacement(id: 'feedback', side: PanelSide.off, share: 35),
     ],
   );
 
@@ -392,7 +396,9 @@ bool kioskPanelsExclusive({
 /// days; duty, notices and matches go right in the old fixed order when the
 /// drawer was on and each was in it — the matches also with the list off
 /// while live mode was on, as the match being played took the drawer then
-/// — guide and week stay off. The shares come from the old nested weights
+/// — guide and week stay off, as does every module added since (the SQL
+/// lists only its five; the app reads a missing one as off, so the mirror
+/// lists it so). The shares come from the old nested weights
 /// (duty [dutyShare] % of the drawer, notices [noticesShare] % of the
 /// rest), rounded half away from zero like numeric `round()`: all three →
 /// duty d, notices round((100 − d) · n / 100), matches the rest to 100;
@@ -443,8 +449,9 @@ KioskPanels kioskPanelsFromLegacy({
         matches,
         duty ? (notices ? 100 - d - noticesOfRest : 100 - d) : 100 - n,
       ),
-      place(KioskModule.guide, false, 0),
-      place(KioskModule.week, false, 0),
+      // Guide, week and every module added since: off.
+      for (final m in KioskModule.values.skip(KioskModule.guide.index))
+        place(m, false, 0),
     ]),
   );
 }

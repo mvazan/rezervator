@@ -113,6 +113,7 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskModule.matches => 'Zápasy',
     KioskModule.guide => 'Jak začít',
     KioskModule.week => 'Hráči týdne',
+    KioskModule.feedback => 'Napište nám',
   };
 
   static String _zapisNavLabel(KioskZapisNav m) => switch (m) {

@@ -37,6 +37,7 @@ import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
+import 'kiosk_feedback.dart' show KioskFeedbackCard;
 import 'kiosk_guide.dart' show KioskGuideCard;
 import 'kiosk_week.dart' show KioskWeekCard;
 
@@ -146,8 +147,8 @@ final kioskPanelContentProvider =
           // The list — or the match being played alone, when the list's
           // weeks hold no match (Sunday evening's, still live on Monday).
           KioskModule.matches => hasMatches || live.isNotEmpty,
-          // A fixed text: always something to show.
-          KioskModule.guide => true,
+          // Fixed texts: always something to show.
+          KioskModule.guide || KioskModule.feedback => true,
           KioskModule.week => hasWeek,
         };
         if (shows) entries.add(KioskPanelEntry(module, placement.share));
@@ -215,6 +216,7 @@ class KioskPanelView extends ConsumerWidget {
     required this.onOpenMatch,
     this.onOpenGuide,
     this.onOpenWeek,
+    this.onOpenFeedback,
     this.onPlay,
     this.resetToken = 0,
     this.boardDays,
@@ -263,6 +265,9 @@ class KioskPanelView extends ConsumerWidget {
   /// A tap on „Hráči týdne“: the whole week full screen; null = a tap does
   /// nothing.
   final VoidCallback? onOpenWeek;
+
+  /// A tap on „Napište nám“: its QR code large; null = a tap does nothing.
+  final VoidCallback? onOpenFeedback;
 
   /// ▶ at a match with a video: its stream (0072); null while the admin
   /// has the streams off — no ▶ and no live badge.
@@ -315,6 +320,9 @@ class KioskPanelView extends ConsumerWidget {
       KioskModule.week => KioskWeekCard(
         key: ValueKey(resetToken),
         onOpen: () => onOpenWeek?.call(),
+      ),
+      KioskModule.feedback => KioskFeedbackCard(
+        onOpen: () => onOpenFeedback?.call(),
       ),
     };
     final showsLive =
