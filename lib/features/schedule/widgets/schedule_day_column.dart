@@ -25,6 +25,7 @@ import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
 import '../schedule_callbacks.dart';
 import 'calendar_board.dart';
+import '../../../core/widgets/shown_names.dart';
 
 /// A 60-minute block gets this much height per lane at the comfortable
 /// scale (the app's week view; the kiosk's "comfortable scroll" mode).
@@ -282,15 +283,18 @@ class ScheduleDayColumn extends StatelessWidget {
           fallbackBg: matchFallbackBg, fallbackFg: matchFallbackFg);
       Widget band() {
         final time = '${m.startsAt.display()}–${m.endsAt.display()}';
-        Widget w = CalendarEventBand(
-          background: bg,
-          foreground: fg,
-          text: '${slotEventLabel(m)}\n$time',
-          // A match: the cup with the time, a blank line, then home, „x“,
-          // away, each on its own line when the band is tall enough.
-          lines: matchBandLines(m),
-          bold: true,
-          fontSize: bandFontSize,
+        // The teams as the app shows them: a club's nickname (0080).
+        Widget w = ShownNames(
+          builder: (context, names) => CalendarEventBand(
+            background: bg,
+            foreground: fg,
+            text: '${slotEventLabel(m, names: names)}\n$time',
+            // A match: the cup with the time, a blank line, then home, „x“,
+            // away, each on its own line when the band is tall enough.
+            lines: matchBandLines(m, names: names),
+            bold: true,
+            fontSize: bandFontSize,
+          ),
         );
         // Click = edit (a click has nothing else to do on a blocking band);
         // an úklid child edits its parent match.
@@ -312,7 +316,7 @@ class ScheduleDayColumn extends StatelessWidget {
             context,
             data: data,
             hoverMinute: data.hoverMinute,
-            label: m.title,
+            label: shownNamesNow(context).title(m),
             heightMinutes: m.endsAt.minutesFromMidnight -
                 m.startsAt.minutesFromMidnight,
             child: w,

@@ -17,6 +17,7 @@ import '../../../domain/labels.dart' show BandLine, bandGap;
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
 import 'day_matches_dialog.dart';
+import '../../../core/widgets/shown_names.dart';
 
 /// Width of the hour ruler column.
 const double calendarRulerWidth = 46.0;
@@ -890,17 +891,19 @@ class BoardColumnHeader extends StatelessWidget {
                       child: Column(
                         children: [
                           for (final m in priority)
-                            EmojiText(
-                              headerEventLabel(m),
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                height: 1.25,
-                                color: isToday
-                                    ? Colors.white.withValues(alpha: 0.9)
-                                    : scheme.primary,
+                            ShownNames(
+                              builder: (context, names) => EmojiText(
+                                headerEventLabel(m, names: names),
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  height: 1.25,
+                                  color: isToday
+                                      ? Colors.white.withValues(alpha: 0.9)
+                                      : scheme.primary,
+                                ),
                               ),
                             ),
                         ],
