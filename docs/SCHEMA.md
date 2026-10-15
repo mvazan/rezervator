@@ -144,7 +144,7 @@ reappears, when `service_role` lacks DML on any table or view, or when
 |---|---|---|
 | `register_profile(display_name, tenant_id, club_id?, nick?, phone?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending; placeholders never count as the first member. `phone` (0048) is stored as given when E.164, blank = none — the app normalises it first (`lib/domain/phone.dart`). 0048 dropped the four-argument signature: a call without `p_phone` (the 1.2.x app) resolves to this one through the default. `empty_display_name`, `nick_too_long`, `invalid_phone`, `unknown_tenant`, `unknown_club`. |
 | `create_tenant_and_register(tenant_name, display_name, nick?, phone?)` | signed-in user | Creates a pending tenant with the caller as founder, then registers through `register_profile`, the founder's `phone` (0048) included, all in one transaction: an `invalid_phone` founds no tenant. 0048 dropped the three-argument signature; a call without `p_phone` resolves through the default. `empty_tenant_name`, `tenant_exists`, `invalid_phone`. |
-| `registration_clubs(tenant_id)` | signed-in, pre-profile | Club list for the register screen. |
+| `registration_clubs(tenant_id)` | signed-in, pre-profile | Club list for the register screen — by the shown name, `nickname` when set (0080). |
 | `approve_player(user_id)`, `set_role(user_id, role)`, `set_player_club(user_id, club_id)`, `upsert_club(...)`, `delete_club(id)` | admin | Member and club administration. `cannot_demote_self`, `placeholder_no_account` (a hand-made profile stays a player), `unknown_club`. |
 | `kiosk_password_target(user_id)` (0028) | admin | The gate behind the `kiosk-password` edge function: returns the id of a kiosk of the caller's OWN alley, so the function sets a password only where the caller may. Called with the CALLER's JWT (the function then uses the service role). `not_allowed`, `unknown_kiosk`. |
 | `set_display_name(user_id, name)` (0060) | admin | The admin corrects an account's (or any profile's) name in the caller's OWN alley — `profiles_update_own` lets a player change only their own. Trimmed, inner whitespace collapsed; `not_authenticated`, `not_allowed`, `empty_display_name`, `display_name_too_long` (> 60), `unknown_player` (not in the alley). A real change clears `regnum_checked_at` so the registration number is looked up again; a number already set stays. |
@@ -194,7 +194,9 @@ reappears, when `service_role` lacks DML on any table or view, or when
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
 `rental_occurrences`, `cancel_res_for_priority_slot`,
-`enqueue_notification`, `enqueue_calendar_sync`,
+`enqueue_notification`, `enqueue_calendar_sync`, `team_shown` (0080: a
+team name with its club's nickname, as the app's `NameDisplay` — what
+reminders, Google Calendar titles and the „zápas: …“ cancel note show),
 `trigger_notification_jobs` (called by cron), `notify_webhook_config`,
 `seed_demo_member` (service_role only — Play-review demo account),
 `public_tenant_id`, `same_group`, `_group_drop_member` (0044),
@@ -641,9 +643,13 @@ re-timed block) reach Google through `notification_jobs`:
   (`match_calendar_followers`; teams before AND after the change), payload
   `{user_id, match_id}`, dedupe `calendar:<user>:match:<slot>`. Úklid
   children and other blockages enqueue nothing. `backfill_calendar_jobs`
-  also queues the followed future matches.
+  also queues the followed future matches. Trigger `clubs_enqueue_calendar`
+  (0080, update / delete on `clubs`) queues the same jobs for every future
+  match a club's team plays when its nickname — or a name it replaces —
+  changes, so the events already in Google get the new title.
 - Handler (`notify`): a `match_id` payload reads the slot at run time
-  (`my_future_matches`) and either writes or deletes the event — see
+  (`my_future_matches`, team names as shown since 0080) and either writes
+  or deletes the event — see
   **Second calendar and match colours** below for exactly where.
 
 ### Second calendar and match colours (0032, colour moved to `team_colors` by 0036, wired up in Task 3)
