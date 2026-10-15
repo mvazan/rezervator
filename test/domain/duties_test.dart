@@ -983,19 +983,6 @@ void main() {
       );
     });
 
-    test('the header module\'s title: „Dnes“ first, „Službu má“ after an '
-        'earlier module said it; „mají“ for two or more', () {
-      const one = ['Adam Beneš'];
-      const two = ['Jan Novák', 'Petr Svoboda'];
-      expect(KioskDutyEntry(now, one).headerTitle(today: true),
-          'Dnes má službu');
-      expect(KioskDutyEntry(now, two).headerTitle(today: true),
-          'Dnes mají službu');
-      expect(KioskDutyEntry(now, one).headerTitle(today: false), 'Službu má');
-      expect(KioskDutyEntry(now, two).headerTitle(today: false),
-          'Službu mají');
-    });
-
     test('a duty\'s short dates: the month once, both across a month, the '
         'day alone', () {
       DutyPeriod period(Day from, Day to) =>

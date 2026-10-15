@@ -591,14 +591,6 @@ class KioskDutyEntry {
   /// „Jan Novák a Petr Svoboda“.
   String get who => joinNames(names);
 
-  /// The header module's title (0082): „Dnes má službu“, „Dnes mají
-  /// službu“ for two or more — or, after an earlier module said „Dnes“
-  /// ([today] false), „Službu má“, „Službu mají“.
-  String headerTitle({required bool today}) {
-    final verb = names.length == 1 ? 'má' : 'mají';
-    return today ? 'Dnes $verb službu' : 'Službu $verb';
-  }
-
   /// The board's band: names alone would not say what they are —
   /// „Jan Novák a Petr Svoboda mají službu (5.–11. 10.)“, „má“ for one.
   String get bandLabel =>

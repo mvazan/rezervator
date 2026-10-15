@@ -774,37 +774,8 @@ class _StatusBar extends ConsumerWidget {
         ? freshWeather(ref.watch(kioskWeatherProvider).value, now)
         : null;
     final nameDay = on(KioskHeaderModule.nameday)
-        ? czechNameDay(todayDay)
+        ? nameDayHeader(czechNameDay(todayDay))
         : null;
-    final weatherTitle =
-        settings?.kioskWeatherTitle ?? kioskWeatherDefaultTitle;
-
-    // „Dnes“ once (the user): the first module in the bar's order — left
-    // after the clock, then right — whose title would say it does, the
-    // later ones leave it out: „Dnes v Brně“, „Svátek mají“, „Službu má“.
-    // A module with nothing to say today does not count.
-    final saysToday = <KioskHeaderModule, bool>{};
-    var saidToday = false;
-    for (final side in const [PanelSide.left, PanelSide.right]) {
-      for (final p in header.modulesOn(side)) {
-        final m = p.module!;
-        final title = switch (m) {
-          KioskHeaderModule.weather => weather == null ? null : weatherTitle,
-          KioskHeaderModule.nameday =>
-            nameDay == null ? null : nameDayHeader(nameDay)?.title,
-          KioskHeaderModule.duty =>
-            duty?.headerTitle(today: true),
-          KioskHeaderModule.notices => null,
-        };
-        if (title == null) continue;
-        saysToday[m] = !saidToday;
-        saidToday = saidToday || kioskTitleSaysToday(title);
-      }
-    }
-    bool today(KioskHeaderModule m) => saysToday[m] ?? true;
-    final nameDayLines = nameDay == null
-        ? null
-        : nameDayHeader(nameDay, today: today(KioskHeaderModule.nameday));
 
     // A module as the bar lays it out — null when it has nothing to say
     // today, so the others close up. Keyed: a module keeps its state (the
@@ -816,23 +787,16 @@ class _StatusBar extends ConsumerWidget {
             : KioskWeatherModule(
                 key: ValueKey(m),
                 weather: weather,
-                title: today(KioskHeaderModule.weather)
-                    ? weatherTitle
-                    : kioskTitleWithoutToday(weatherTitle),
+                title: settings?.kioskWeatherTitle ?? kioskWeatherDefaultTitle,
               ),
       KioskHeaderModule.nameday =>
-        nameDayLines == null
+        nameDay == null
             ? null
-            : KioskNameDayModule(key: ValueKey(m), day: nameDayLines),
+            : KioskNameDayModule(key: ValueKey(m), day: nameDay),
       KioskHeaderModule.duty =>
         duty == null
             ? null
-            : KioskDutyModule(
-                key: ValueKey(m),
-                entry: duty,
-                onTap: onOpenDuty,
-                today: today(KioskHeaderModule.duty),
-              ),
+            : KioskDutyModule(key: ValueKey(m), entry: duty, onTap: onOpenDuty),
       // One notice's title at a time, in what is left.
       KioskHeaderModule.notices =>
         notices.isEmpty

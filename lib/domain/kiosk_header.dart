@@ -18,24 +18,6 @@ enum KioskHeaderModule { weather, nameday, duty, notices }
 /// `kiosk_weather_title` null).
 const kioskWeatherDefaultTitle = 'Počasí';
 
-/// Whether a module's title already says „dnes“. The header says it once
-/// (the user: „Dnes v Brně“, „Svátek mají“, „Službu má“): the modules after
-/// the first one that does leave it out.
-bool kioskTitleSaysToday(String title) =>
-    RegExp(r'(^|[\s,(])dnes($|[\s,.:)])', caseSensitive: false)
-        .hasMatch(title);
-
-/// The admin's weather title after an earlier module said „Dnes“: a
-/// leading „Dnes“ dropped and the rest capitalised („Dnes v Brně“ → „V
-/// Brně“); any other title as typed.
-String kioskTitleWithoutToday(String title) {
-  final rest = RegExp(r'^\s*dnes[\s,:]+', caseSensitive: false)
-      .firstMatch(title);
-  if (rest == null || rest.end >= title.length) return title;
-  final tail = title.substring(rest.end);
-  return tail[0].toUpperCase() + tail.substring(1);
-}
-
 final _headerModulesById = {
   for (final m in KioskHeaderModule.values) m.name: m,
 };
