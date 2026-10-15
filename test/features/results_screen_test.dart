@@ -116,6 +116,9 @@ void main() {
     Stream<List<PrioritySlot>>? slotsStream,
     Map<String, MatchResult> results = const {},
     List<String> teams = const [veverky, souperA],
+    // The teams' rows and oddíly — the filter's oddíl row.
+    List<Team> teamRows = const [],
+    List<Club> clubs = const [],
     Map<String, int> teamColors = const {},
     Map<String, bool> exceptions = const {},
     List<CalendarTeam> calendarTeams = const [],
@@ -133,7 +136,8 @@ void main() {
     return ProviderScope(
       overrides: [
         leagueCompetitionsProvider.overrideWithValue(competitions),
-        teamsProvider.overrideWith((ref) => Stream.value(const [])),
+        teamsProvider.overrideWith((ref) => Stream.value(teamRows)),
+        clubsProvider.overrideWith((ref) => Stream.value(clubs)),
         leagueMatchesProvider.overrideWith((ref, slug) {
           onLeagueSubscribed?.call(slug);
           return Stream.value(league[slug] ?? const []);
@@ -280,6 +284,119 @@ void main() {
 
     expect(find.text('$veverky – $souperA'), findsOneWidget);
     expect(find.text('$souperA – $souperB'), findsNothing);
+  });
+
+  group('oddíly, then teams', () {
+    const husovice = 'TJ Sokol Husovice';
+    final teamRows = [
+      Team(id: 't1', name: veverky, clubId: 'c-v'),
+      Team(id: 't2', name: 'SKK Veverky Brno B', clubId: 'c-v'),
+      Team(id: 't3', name: husovice, clubId: 'c-h'),
+      Team(id: 't4', name: '$husovice B', clubId: 'c-h'),
+      Team(id: 't5', name: '$husovice C', clubId: 'c-h'),
+    ];
+    const clubs = [
+      Club(id: 'c-v', name: 'SKK Veverky'),
+      Club(id: 'c-h', name: 'TJ Sokol Husovice'),
+    ];
+    final teams = [
+      veverky,
+      'SKK Veverky Brno B',
+      husovice,
+      '$husovice B',
+      '$husovice C',
+      // A team only the matches know: „Ostatní“.
+      souperA,
+    ];
+    Finder chip(String label) => find.widgetWithText(ChoiceChip, label);
+    bool picked(WidgetTester tester, String label) =>
+        tester.widget<ChoiceChip>(chip(label)).selected;
+
+    testWidgets('the first row is Vše and the oddíly, Czech-sorted, Ostatní '
+        'last — no chip per team until an oddíl is picked', (tester) async {
+      await tester.pumpWidget(
+        app(teams: teams, teamRows: teamRows, clubs: clubs),
+      );
+      await tester.pumpAndSettle();
+      for (final c in ['Vše', 'SKK Veverky', 'TJ Sokol Husovice', 'Ostatní']) {
+        expect(chip(c), findsOneWidget, reason: c);
+      }
+      double x(String c) => tester.getTopLeft(chip(c)).dx;
+      expect(x('SKK Veverky'), lessThan(x('TJ Sokol Husovice')));
+      expect(x('TJ Sokol Husovice'), lessThan(x('Ostatní')));
+      expect(chip(veverky), findsNothing);
+      expect(chip('Celý oddíl'), findsNothing);
+      expect(picked(tester, 'Vše'), isTrue);
+    });
+
+    testWidgets('an oddíl lists its teams by letter in a second row and '
+        'filters to them; a team narrows it further', (tester) async {
+      final hA = match(id: 'h1', date: today.addDays(1), home: husovice);
+      final hB = match(id: 'h2', date: today.addDays(2), home: '$husovice B');
+      final v = match(id: 'v1', date: today.addDays(3));
+      await tester.pumpWidget(
+        app(
+          slots: [hA, hB, v],
+          teams: teams,
+          teamRows: teamRows,
+          clubs: clubs,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(chip('TJ Sokol Husovice'));
+      await tester.pumpAndSettle();
+      for (final c in ['Celý oddíl', 'A', 'B', 'C']) {
+        expect(chip(c), findsOneWidget, reason: c);
+      }
+      // Under the oddíly, starting at the same left edge.
+      expect(
+        tester.getTopLeft(chip('A')).dy,
+        greaterThan(tester.getBottomLeft(chip('Vše')).dy),
+      );
+      expect(
+        tester.getTopLeft(chip('Celý oddíl')).dx,
+        closeTo(tester.getTopLeft(chip('Vše')).dx, 0.5),
+      );
+      expect(picked(tester, 'Celý oddíl'), isTrue);
+      expect(find.text('$husovice – $souperA'), findsOneWidget);
+      expect(find.text('$husovice B – $souperA'), findsOneWidget);
+      expect(find.text('$veverky – $souperA'), findsNothing);
+      // The letter's full name on long press.
+      expect(
+        tester.widget<ChoiceChip>(chip('B')).tooltip,
+        '$husovice B',
+      );
+
+      await tester.tap(chip('B'));
+      await tester.pumpAndSettle();
+      expect(find.text('$husovice – $souperA'), findsNothing);
+      expect(find.text('$husovice B – $souperA'), findsOneWidget);
+
+      // Another oddíl starts from its whole oddíl.
+      await tester.tap(chip('SKK Veverky'));
+      await tester.pumpAndSettle();
+      expect(picked(tester, 'Celý oddíl'), isTrue);
+      expect(find.text('$veverky – $souperA'), findsOneWidget);
+      expect(find.text('$husovice B – $souperA'), findsNothing);
+
+      // Vše drops both rows' picks.
+      await tester.tap(chip('Vše'));
+      await tester.pumpAndSettle();
+      expect(chip('Celý oddíl'), findsNothing);
+      expect(find.text('$husovice – $souperA'), findsOneWidget);
+    });
+
+    testWidgets('an oddíl of one team has no second row', (tester) async {
+      await tester.pumpWidget(
+        app(teams: teams, teamRows: teamRows, clubs: clubs),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(chip('Ostatní'));
+      await tester.pumpAndSettle();
+      expect(chip('Celý oddíl'), findsNothing);
+      expect(picked(tester, 'Ostatní'), isTrue);
+    });
   });
 
   testWidgets('a finished match shows its points and pins', (tester) async {
@@ -1048,6 +1165,22 @@ void main() {
   });
 
   // The saved mode and competition arrive a moment after the first frame.
+  testWidgets('a Krajský přebor chip reads KP, its full name on long press', (
+    tester,
+  ) async {
+    const kp = 'Krajský přebor Jmk 1. třídy Sever';
+    await tester.pumpWidget(app(
+      competitions: const [(slug: 'kp', name: kp), (slug: 'jmd', name: 'Jihomoravská divize')],
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Soutěže'));
+    await tester.pumpAndSettle();
+    final chip = find.widgetWithText(ChoiceChip, 'KP Jmk 1. třídy Sever');
+    expect(chip, findsOneWidget);
+    expect(tester.widget<ChoiceChip>(chip).tooltip, kp);
+    expect(find.widgetWithText(ChoiceChip, 'Jihomoravská divize'), findsOneWidget);
+  });
+
   group('competition view, saved choice', () {
     // A season long enough to scroll: 20 rounds of finished foreign matches
     // (one a week, ending three weeks ago), then a live one being played now.
