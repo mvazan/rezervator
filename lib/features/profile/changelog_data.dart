@@ -94,8 +94,14 @@ const appChangelog = <Release>[
         'liště nad zápisem, nebo po stranách) i přejetím prstem; ťuk na '
         'družstvo ukáže jeho zápasy. Správce volí ve Správa → Kiosk → '
         'Listování v zápisu.',
+    'Napište nám: v Klubovně je formulář pro zprávu autorovi aplikace — co '
+        'v Rezervátoru chybí nebo nefunguje. Jméno a e-mail jsou předvyplněné '
+        'a dají se smazat. Na webu jde formulář otevřít i bez přihlášení.',
+    'Kiosk: modul „Napište nám“ — QR kód formuláře na webu, zprávu napíšeš '
+        'v mobilu, ne na obrazovce kiosku. Ťuknutí ukáže velký kód. Správce '
+        'ho umístí ve Správa → Kiosk → Panely.',
   ], store: [
-    'Kiosk: dva panely u tabule (Hráči týdne, Jak začít s QR kódem).',
+    'Kiosk: dva panely (Hráči týdne, Jak začít a Napište nám s QR kódy).',
     'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
         'výsledky hraného zápasu.',
     'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče, '
@@ -104,6 +110,7 @@ const appChangelog = <Release>[
         'výraznější výsledek.',
     'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
     'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
+    'Klubovna: Napište nám — zpráva autorovi.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
