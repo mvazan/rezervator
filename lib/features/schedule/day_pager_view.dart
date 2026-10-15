@@ -461,23 +461,44 @@ class _DayPage extends StatelessWidget {
   static const _laneLabelWidth = 56.0;
   static const _laneTileSpacing = 6.0;
 
-  /// The block's time label: the start with its dash over the end, always
-  /// on two lines. Left to wrap on its own in the narrow column, the label
+  /// The block's time label: the start, the dash and the end, each on a
+  /// line of its own, the dash on a short line of its own — centred
+  /// between the times, not much taller than the gap a two-line label
+  /// would leave. Left to wrap on its own in the narrow column, the label
   /// broke wherever the width ran out — at 130 % „17:00– / 18:00“ in one
-  /// row and „18:00 / – / 19:00“ in the next (18:00– is a pixel wider). A
-  /// line too wide for the column shrinks the label instead.
+  /// row and „18:00 / – / 19:00“ in the next. A time too wide for the
+  /// column shrinks the label instead.
   Widget _blockLabel(TimeBlock block) {
     final [start, end] = block.label.split('–');
+    const style = TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
     return FittedBox(
       fit: BoxFit.scaleDown,
       alignment: Alignment.centerLeft,
-      child: Text(
-        '$start–\n$end',
-        softWrap: false,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      child: Semantics(
+        label: block.label,
+        child: ExcludeSemantics(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(start, style: style),
+              Text(
+                '–',
+                style: style.copyWith(
+                  height: _dashLineHeight,
+                  leadingDistribution: TextLeadingDistribution.even,
+                ),
+              ),
+              Text(end, style: style),
+            ],
+          ),
+        ),
       ),
     );
   }
+
+  /// The dash's line, as a share of the text size: room for the dash and
+  /// little more.
+  static const _dashLineHeight = 0.7;
 
   /// Block rows interleaved with off-block event banners and empty-gap rows,
   /// in time order (see [dayGridItems]).
