@@ -48,7 +48,7 @@ IconData weatherIcon(WeatherKind kind, {required bool isDay}) =>
       WeatherKind.thunderstorm => Icons.thunderstorm,
     };
 
-/// The weather module: the admin's title („Dnes v Brně“) over the icon,
+/// The weather module: the admin's title („Brno:“) over the icon,
 /// the temperature and today's high and low, at most a fifth of the
 /// screen (the row scales down). A tap shows the forecast's source in
 /// place of the title for [sourceFor] — no watermark in the header
@@ -110,7 +110,7 @@ class _KioskWeatherModuleState extends State<KioskWeatherModule> {
   }
 }
 
-/// The name-day module: „Dnes má svátek“ over „Hedvika“ (`nameDayHeader`),
+/// The name-day module: „Svátek slaví:“ over „Hedvika“ (`nameDayHeader`),
 /// one line of at most a fifth of the screen — a long list of names is
 /// cut.
 class KioskNameDayModule extends StatelessWidget {

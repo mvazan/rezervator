@@ -3114,7 +3114,7 @@ void main() {
       await tester.pumpWidget(app(nameday: true));
       await tester.pumpAndSettle();
       // Thursday 8 October: Věra.
-      final title = find.text('Dnes má svátek');
+      final title = find.text('Svátek slaví:');
       final nameday = find.text('Věra');
       expect(title, findsOneWidget);
       expect(nameday, findsOneWidget);
@@ -3140,7 +3140,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(find.byType(KioskNameDayModule), findsNothing);
-      expect(find.text('Dnes má svátek'), findsNothing);
+      expect(find.text('Svátek slaví:'), findsNothing);
       await finish(tester);
     });
 
@@ -3301,7 +3301,7 @@ void main() {
           app(
             header: header,
             forecast: forecast,
-            weatherTitle: 'Dnes v Brně',
+            weatherTitle: 'Brno',
             notices: [notice('1', 'Brigáda')],
             slots: [fed('m', day, 'Domácí'), away],
             dutyPeriods: [current],
@@ -3312,11 +3312,11 @@ void main() {
         expect(tester.takeException(), isNull);
 
         final titles = [
-          'Čtvrtek 8. 10.',
-          'Dnes má svátek',
-          'Dnes v Brně',
-          'Nástěnka',
-          'Dnes mají službu',
+          'Dnes je čtvrtek 8. 10.',
+          'Svátek slaví:',
+          'Brno:',
+          'Nástěnka:',
+          'Službu mají:',
         ];
         final values = [
           find.text('12:00'),
@@ -3443,7 +3443,7 @@ void main() {
         fullHd(tester);
         await tester.pumpWidget(app());
         await tester.pumpAndSettle();
-        final date = find.text('Čtvrtek 8. 10.');
+        final date = find.text('Dnes je čtvrtek 8. 10.');
         final time = find.text('12:00');
         expect(date, findsOneWidget);
         expect(
@@ -3570,22 +3570,22 @@ void main() {
         fullHd(tester);
         await tester.pumpWidget(app(weather: true, forecast: forecast));
         await tester.pumpAndSettle();
-        expect(find.text(kioskWeatherDefaultTitle), findsOneWidget);
+        expect(find.text(kioskWeatherTitleOf(null)), findsOneWidget);
         expect(find.text(weatherSource), findsNothing);
         await tester.tap(find.text('14°'));
         await tester.pump();
         expect(find.text(weatherSource), findsOneWidget);
-        expect(find.text(kioskWeatherDefaultTitle), findsNothing);
+        expect(find.text(kioskWeatherTitleOf(null)), findsNothing);
         await tester.pump(KioskWeatherModule.sourceFor);
         await tester.pump();
-        expect(find.text(kioskWeatherDefaultTitle), findsOneWidget);
+        expect(find.text(kioskWeatherTitleOf(null)), findsOneWidget);
         await finish(tester);
 
         await tester.pumpWidget(
-          app(weather: true, forecast: forecast, weatherTitle: 'Dnes v Brně'),
+          app(weather: true, forecast: forecast, weatherTitle: 'Brno'),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Dnes v Brně'), findsOneWidget);
+        expect(find.text('Brno:'), findsOneWidget);
         await finish(tester);
       });
 
@@ -3648,7 +3648,7 @@ void main() {
           app(
             header: header,
             forecast: forecast,
-            weatherTitle: 'Dnes v Brně',
+            weatherTitle: 'Brno',
             notices: [notice('1', 'Brigáda v sobotu od devíti')],
             dutyPeriods: [current],
             dutyAssignments: [
@@ -3723,8 +3723,8 @@ void main() {
         }
         // The titles still share their line.
         expect(
-          tester.getRect(find.text('Dnes má svátek')).top,
-          closeTo(tester.getRect(find.text('Čtvrtek 8. 10.')).top, 0.5),
+          tester.getRect(find.text('Svátek slaví:')).top,
+          closeTo(tester.getRect(find.text('Dnes je čtvrtek 8. 10.')).top, 0.5),
         );
         await finish(tester);
       });
@@ -6506,8 +6506,8 @@ void main() {
       expect(inBar('Zámek'), findsOneWidget);
       expect(inBar('1/2'), findsOneWidget);
       expect(find.textContaining('Skryté'), findsNothing);
-      // A module: under its title „Nástěnka“, starting where it starts.
-      final title = find.text('Nástěnka');
+      // A module: under its title „Nástěnka:“, starting where it starts.
+      final title = find.text('Nástěnka:');
       expect(title, findsOneWidget);
       expect(
         tester.getRect(title).bottom,
@@ -7081,7 +7081,7 @@ void main() {
         for (var i = 0; i < 6; i++) assign('w$i', players[i + 1]),
         assign('over', players[25]),
       ];
-      // The header's module: who serves today, under „Dnes mají službu“.
+      // The header's module: who serves today, under „Službu mají:“.
       final line = find.descendant(
         of: find.byType(KioskDutyModule),
         matching: find.text('AA Hráč a PP Hráč'),
@@ -7092,7 +7092,7 @@ void main() {
       const nothingAhead = 'Další služby zatím nejsou naplánované.';
 
       testWidgets('in the header: who serves today, a module beside the '
-          'clock — „Dnes mají službu“ over the names', (tester) async {
+          'clock — „Službu mají:“ over the names', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -7105,7 +7105,7 @@ void main() {
         expect(line, findsOneWidget);
         final title = find.descendant(
           of: find.byType(KioskDutyModule),
-          matching: find.text('Dnes mají službu'),
+          matching: find.text('Službu mají:'),
         );
         expect(title, findsOneWidget);
         expect(
@@ -7115,7 +7115,7 @@ void main() {
         expect(tester.getRect(title).left, tester.getRect(line).left);
         // Beside the clock, not under its date; the title on the date's
         // line, the names on the time's.
-        final date = find.text('Čtvrtek 8. 10.');
+        final date = find.text('Dnes je čtvrtek 8. 10.');
         final clock = find.ancestor(
           of: date,
           matching: find.byType(KioskHeaderModuleFrame),
@@ -7136,7 +7136,7 @@ void main() {
         await finish(tester);
       });
 
-      testWidgets('one on duty: „Dnes má službu“', (tester) async {
+      testWidgets('one on duty: „Službu má:“', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -7149,8 +7149,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Dnes má službu'), findsOneWidget);
-        expect(find.text('Dnes mají službu'), findsNothing);
+        expect(find.text('Službu má:'), findsOneWidget);
+        expect(find.text('Službu mají:'), findsNothing);
         expect(
           find.descendant(
             of: find.byType(KioskDutyModule),

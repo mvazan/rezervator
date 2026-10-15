@@ -12,40 +12,40 @@ void main() {
   test('an ordinary day: its name, the variant only one source knows left '
       'out', () {
     expect(czechNameDay(Day(2026, 1, 3)).names, ['Radmila']);
-    expect(header(1, 3), (title: 'Dnes má svátek', text: 'Radmila'));
+    expect(header(1, 3), (title: 'Svátek slaví:', text: 'Radmila'));
   });
 
   test('several names, joined the Czech way, under the plural title', () {
-    expect(header(12, 24), (title: 'Dnes mají svátek', text: 'Adam a Eva'));
+    expect(header(12, 24), (title: 'Svátek slaví:', text: 'Adam a Eva'));
     expect(
       header(1, 6),
-      (title: 'Dnes mají svátek', text: 'Kašpar, Melichar a Baltazar'),
+      (title: 'Svátek slaví:', text: 'Kašpar, Melichar a Baltazar'),
     );
     expect(
       header(9, 28),
-      (title: 'Dnes mají svátek', text: 'Václav a Václava'),
+      (title: 'Svátek slaví:', text: 'Václav a Václava'),
     );
   });
 
   test('a public holiday without a name says the holiday', () {
     expect(czechNameDay(Day(2026, 1, 1)).names, isEmpty);
-    expect(header(1, 1), (title: 'Státní svátek', text: 'Nový rok'));
+    expect(header(1, 1), (title: 'Státní svátek:', text: 'Nový rok'));
     expect(
       header(12, 25),
-      (title: 'Státní svátek', text: '1. svátek vánoční'),
+      (title: 'Státní svátek:', text: '1. svátek vánoční'),
     );
     // A holiday with names: the names.
     expect(czechNameDay(Day(2026, 12, 24)).holiday, 'Štědrý den');
     expect(
       header(7, 5),
-      (title: 'Dnes mají svátek', text: 'Cyril a Metoděj'),
+      (title: 'Svátek slaví:', text: 'Cyril a Metoděj'),
     );
   });
 
   test('29 February has its name in a leap year', () {
     expect(
       header(2, 29, year: 2028),
-      (title: 'Dnes má svátek', text: 'Horymír'),
+      (title: 'Svátek slaví:', text: 'Horymír'),
     );
   });
 

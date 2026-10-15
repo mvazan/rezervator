@@ -25,23 +25,20 @@ NameDay czechNameDay(Day day) {
   return (names: _names[key] ?? const [], holiday: _holidays[key]);
 }
 
-/// What the kiosk's name-day module says for [day] (0082): „Dnes má
-/// svátek“ over „Radmila“, „Dnes mají svátek“ over „Adam a Eva“ (several
-/// names joined the Czech way); a public holiday without a name:
-/// „Státní svátek“ over the holiday; null when there is neither.
+/// What the kiosk's name-day module says for [day] (0082): „Svátek
+/// slaví:“ over „Radmila“ or „Adam a Eva“ (several names joined the Czech
+/// way); a public holiday without a name: „Státní svátek:“ over the
+/// holiday; null when there is neither.
 ({String title, String text})? nameDayHeader(NameDay day) {
   final names = day.names;
   if (names.isEmpty) {
     final holiday = day.holiday;
-    return holiday == null ? null : (title: 'Státní svátek', text: holiday);
+    return holiday == null ? null : (title: 'Státní svátek:', text: holiday);
   }
   final list = names.length == 1
       ? names.single
       : '${names.sublist(0, names.length - 1).join(', ')} a ${names.last}';
-  return (
-    title: names.length == 1 ? 'Dnes má svátek' : 'Dnes mají svátek',
-    text: list,
-  );
+  return (title: 'Svátek slaví:', text: list);
 }
 
 /// Every day of a leap year, by `MM-DD`.

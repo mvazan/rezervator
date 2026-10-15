@@ -1,6 +1,6 @@
 /// The canteen duty on the kiosk (0073): who serves now and who comes next,
 /// read from the plan of Správa → Služby. The admin puts each place on
-/// separately (Správa → Kiosk): the header's module „Dnes má službu“
+/// separately (Správa → Kiosk): the header's module „Službu má:“
 /// ([KioskDutyModule], Záhlaví), a band across the board's day headers
 /// (Služby na kantýně) and a card in a side panel (Panely). A tap on the
 /// module or the band opens the plan ([showKioskDutyDialog]); the card
@@ -41,8 +41,8 @@ final kioskDutyPlanProvider =
       );
     });
 
-/// The header's duty module (0082): „Dnes má službu“ over „Jan Novák“,
-/// „Dnes mají službu“ for two or more. One line of at most a fifth of the
+/// The header's duty module (0082): „Službu má:“ over „Jan Novák“,
+/// „Službu mají:“ for two or more. One line of at most a fifth of the
 /// screen — a long list of names is cut, the centre and the notices keep
 /// their room. A tap opens the plan ([onTap]).
 class KioskDutyModule extends StatelessWidget {
@@ -56,7 +56,7 @@ class KioskDutyModule extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return KioskHeaderModuleFrame(
-      title: entry.names.length == 1 ? 'Dnes má službu' : 'Dnes mají službu',
+      title: entry.headerTitle,
       onTap: onTap,
       maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderModuleShare,
       child: Text(

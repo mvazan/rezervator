@@ -410,4 +410,13 @@ void main() {
       }
     });
   });
+
+  test('the weather\'s title on the kiosk: the place with a colon, like '
+      'every module\'s; „Počasí:“ without one; no second colon', () {
+    expect(kioskWeatherTitleOf('Brno'), 'Brno:');
+    expect(kioskWeatherTitleOf('  Brno  '), 'Brno:');
+    expect(kioskWeatherTitleOf('Brno:'), 'Brno:');
+    expect(kioskWeatherTitleOf(null), 'Počasí:');
+    expect(kioskWeatherTitleOf('   '), 'Počasí:');
+  });
 }

@@ -1004,8 +1004,8 @@ class ScheduleSettings {
   /// [kioskPanels]' business.
   final KioskHeader kioskHeader;
 
-  /// The weather module's title (0082), typed by the admin („Dnes v
-  /// Brně“); null shows [kioskWeatherDefaultTitle].
+  /// The weather module's title (0082), the place the admin types
+  /// („Brno“, shown „Brno:“); null shows [kioskWeatherDefaultTitle].
   final String? kioskWeatherTitle;
 
   /// What a fresh notice gets on the kiosk — the „NOVÉ“ label, twice the

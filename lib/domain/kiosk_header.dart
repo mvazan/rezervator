@@ -18,6 +18,16 @@ enum KioskHeaderModule { weather, nameday, duty, notices }
 /// `kiosk_weather_title` null).
 const kioskWeatherDefaultTitle = 'Počasí';
 
+/// The weather module's title on the kiosk: the admin's (the place —
+/// „Brno“) or [kioskWeatherDefaultTitle], with a colon like every module's
+/// title („Brno:“) — none added to one the admin ended with a colon.
+String kioskWeatherTitleOf(String? typed) {
+  final title = (typed ?? '').trim().isEmpty
+      ? kioskWeatherDefaultTitle
+      : typed!.trim();
+  return title.endsWith(':') ? title : '$title:';
+}
+
 final _headerModulesById = {
   for (final m in KioskHeaderModule.values) m.name: m,
 };

@@ -66,12 +66,12 @@ void main() {
         ),
       );
 
-  final title = find.text('Dnes v Brně');
+  final title = find.text('Brno:');
 
   testWidgets('the weather: the admin\'s title over the icon, now, today\'s '
       'high and low', (tester) async {
     await tester.pumpWidget(
-      app(KioskWeatherModule(weather: weather(), title: 'Dnes v Brně')),
+      app(KioskWeatherModule(weather: weather(), title: 'Brno:')),
     );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.cloudy_snowing), findsOneWidget);
@@ -82,7 +82,7 @@ void main() {
     // One tap target, read as the title and then the weather.
     expect(
       find.bySemanticsLabel(
-        'Dnes v Brně\n'
+        'Brno:\n'
         'Počasí: Sněžení, −3°, dnes nejvýš 1°, nejníž −7°. $weatherSource',
       ),
       findsOneWidget,
@@ -112,7 +112,7 @@ void main() {
   testWidgets('no source in the header; a tap on the weather shows it in '
       'place of the title for a while', (tester) async {
     await tester.pumpWidget(
-      app(KioskWeatherModule(weather: weather(), title: 'Dnes v Brně')),
+      app(KioskWeatherModule(weather: weather(), title: 'Brno:')),
     );
     await tester.pumpAndSettle();
     expect(find.text(weatherSource), findsNothing);
@@ -160,14 +160,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     final name = find.text('Radmila');
-    expect(find.text('Dnes má svátek'), findsOneWidget);
+    expect(find.text('Svátek slaví:'), findsOneWidget);
     expect(name, findsOneWidget);
     expect(
-      tester.getRect(find.text('Dnes má svátek')).bottom,
+      tester.getRect(find.text('Svátek slaví:')).bottom,
       lessThanOrEqualTo(tester.getRect(name).top),
     );
     expect(
-      tester.getRect(find.text('Dnes má svátek')).left,
+      tester.getRect(find.text('Svátek slaví:')).left,
       tester.getRect(name).left,
     );
   });
@@ -186,7 +186,7 @@ void main() {
           children: [
             KioskWeatherModule(
               weather: weather(t: -12.4, chance: 100),
-              title: 'Dnes v Brně',
+              title: 'Brno:',
             ),
             KioskNameDayModule(
               day: nameDayHeader(czechNameDay(Day(2026, 1, 6)))!,

@@ -51,9 +51,10 @@ String changelogHeading(Release r, {required bool web}) {
 const appChangelog = <Release>[
   Release(null, '15. 10. 2026', [
     'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
-        'v jedné řadě — hodiny s datem, počasí (nadpis napíše správce, třeba '
-        '„Dnes v Brně“), svátek, nově služba na kantýně („Dnes má službu“ '
-        'místo řádku pod hodinami) a nástěnka. Ve Správě → Kiosk → Záhlaví '
+        'v jedné řadě — „Dnes je čtvrtek 15. 10.“ nad hodinami, počasí '
+        '(místo v nadpisu napíše správce, třeba „Brno:“), „Svátek slaví:“, '
+        'nově „Službu má:“ (místo řádku pod hodinami) a nástěnka. Ve Správě '
+        '→ Kiosk → Záhlaví '
         'každému zvolíš, jestli je vlevo, nebo vpravo, a pořadí; dnešní '
         'zápasy jsou uprostřed, domácí nad venkovními.',
     'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '

@@ -588,11 +588,6 @@ const _centreRoom = 200.0;
 /// after it.
 const _headlineIcon = 36.0;
 
-/// [text] with its first letter upper-cased: „Čtvrtek 8. 10.“ over the
-/// clock.
-String _capitalized(String text) =>
-    text.isEmpty ? text : text[0].toUpperCase() + text.substring(1);
-
 /// The header: the clock, the admin's modules left and right of the centre
 /// (0082, each a title over its value — [KioskHeaderModuleFrame]), today's
 /// matches or the info line in the centre, „Rezervace tréninku“ last.
@@ -787,7 +782,7 @@ class _StatusBar extends ConsumerWidget {
             : KioskWeatherModule(
                 key: ValueKey(m),
                 weather: weather,
-                title: settings?.kioskWeatherTitle ?? kioskWeatherDefaultTitle,
+                title: kioskWeatherTitleOf(settings?.kioskWeatherTitle),
               ),
       KioskHeaderModule.nameday =>
         nameDay == null
@@ -805,7 +800,7 @@ class _StatusBar extends ConsumerWidget {
                 key: ValueKey(m),
                 flex: 3,
                 child: KioskHeaderModuleFrame(
-                  title: 'Nástěnka',
+                  title: 'Nástěnka:',
                   // Too narrow for the icon and a glyph or two (a small
                   // kiosk with large text and a busy header): the title
                   // alone, rather than a headline that overflows.
@@ -911,9 +906,13 @@ class _StatusBar extends ConsumerWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Always first: the date over the time.
+            // Always first: „Dnes je čtvrtek 15. 10.“ over the time.
             KioskHeaderModuleFrame(
-              title: _capitalized(dayFull(todayDay)),
+              title: 'Dnes je ${dayFull(todayDay)}',
+              // Like the other short modules: on a narrow kiosk with large
+              // text the day ellipsizes; the time always fits.
+              maxWidth:
+                  MediaQuery.sizeOf(context).width * kioskHeaderModuleShare,
               child: Text(clock, style: kioskHeaderClockStyle),
             ),
             Expanded(

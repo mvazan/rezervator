@@ -983,6 +983,16 @@ void main() {
       );
     });
 
+    test('the header module\'s title: „Službu má:“, „Službu mají:“ for two '
+        'or more', () {
+      expect(KioskDutyEntry(now, const ['Adam Beneš']).headerTitle,
+          'Službu má:');
+      expect(
+        KioskDutyEntry(now, const ['Jan Novák', 'Petr Svoboda']).headerTitle,
+        'Službu mají:',
+      );
+    });
+
     test('a duty\'s short dates: the month once, both across a month, the '
         'day alone', () {
       DutyPeriod period(Day from, Day to) =>
