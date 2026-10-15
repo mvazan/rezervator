@@ -655,7 +655,8 @@ void main() {
     (true, PanelSide.off, 'in the header only'),
     (false, PanelSide.left, 'in a panel only'),
   ]) {
-    testWidgets('the notices\' rotation shows with the notices $why', (
+    testWidgets('the notices\' rotation and the fresh notices (0080) show '
+        'with the notices $why', (
       tester,
     ) async {
       tall(tester);
@@ -681,6 +682,17 @@ void main() {
           'Nástěnka',
           find.widgetWithText(TextField, 'Střídání oznamů'),
         ),
+        findsOneWidget,
+      );
+      expect(
+        inSection(
+          'Nástěnka',
+          find.byType(DropdownButtonFormField<KioskNoticesFresh>),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        inSection('Nástěnka', find.widgetWithText(TextField, 'Čerstvý je do')),
         findsOneWidget,
       );
     });
@@ -1349,6 +1361,155 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
   }
+
+  group('fresh notices (0080)', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    int patches() => requests.where((r) => r.method == 'PATCH').length;
+    final mode = find.byType(DropdownButtonFormField<KioskNoticesFresh>);
+    double top(WidgetTester tester, Finder f) => tester.getTopLeft(f).dy;
+    String note(String days) =>
+        'Oznam vyvěšený před méně než $days dostane štítek NOVÉ, nebo '
+        'zůstane na obrazovce dvakrát déle.';
+
+    testWidgets('„Čerstvé oznamy“ under the rotation, highlighted by '
+        'default: each choice PATCHes kiosk_notices_fresh_mode', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(inSection('Nástěnka', mode), findsOneWidget);
+      expect(
+        find.descendant(of: mode, matching: find.text('Čerstvé oznamy')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: mode, matching: find.text('Zvýraznit')),
+        findsOneWidget,
+      );
+      expect(find.text(note('3 dny')), findsOneWidget);
+      expect(
+        top(tester, mode),
+        greaterThan(
+          top(tester, find.widgetWithText(TextField, 'Střídání oznamů')),
+        ),
+      );
+
+      await tester.ensureVisible(mode);
+      await tester.tap(
+        find.descendant(of: mode, matching: find.text('Zvýraznit')),
+      );
+      await tester.pumpAndSettle();
+      for (final option in [
+        'Nezvýrazňovat',
+        'Zobrazit déle',
+        'Zvýraznit i zobrazit déle',
+      ]) {
+        expect(find.text(option), findsOneWidget);
+      }
+      await tester.tap(find.text('Zobrazit déle').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_notices_fresh_mode': 'longer'});
+
+      await tester.tap(find.text('Zobrazit déle'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zvýraznit i zobrazit déle').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_notices_fresh_mode': 'both'});
+
+      await tester.tap(find.text('Zvýraznit i zobrazit déle'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Nezvýrazňovat').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_notices_fresh_mode': 'off'});
+    });
+
+    testWidgets('„Čerstvý je do“, 3 days by default, PATCHes '
+        'kiosk_notices_fresh_days; outside 1–14 nothing is written', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      final days = inSection(
+        'Nástěnka',
+        find.widgetWithText(TextField, 'Čerstvý je do'),
+      );
+      expect(days, findsOneWidget);
+      expect(top(tester, days), greaterThan(top(tester, mode)));
+      final field = tester.widget<TextField>(days);
+      expect(field.controller!.text, '3');
+      expect(field.decoration!.suffixText, 'dní');
+
+      await enter(tester, 'Čerstvý je do', '7');
+      expect(lastPatch(), {'kiosk_notices_fresh_days': 7});
+      final written = patches();
+      await enter(tester, 'Čerstvý je do', '15');
+      expect(find.text('Zadej číslo od 1 do 14.'), findsOneWidget);
+      expect(patches(), written);
+      await enter(tester, 'Čerstvý je do', '0');
+      expect(find.text('Zadej číslo od 1 do 14.'), findsOneWidget);
+      expect(patches(), written);
+    });
+
+    testWidgets('fresh ones getting nothing: no „Čerstvý je do“; the note '
+        'counts the admin\'s days — one day in its own form', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskNoticesFresh: KioskNoticesFresh.off,
+            kioskNoticesFreshDays: 1,
+            tenantId: 't',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: mode, matching: find.text('Nezvýrazňovat')),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(TextField, 'Čerstvý je do'), findsNothing);
+      expect(find.text(note('1 dnem')), findsOneWidget);
+    });
+
+    testWidgets('with the notices neither in the header nor in a panel, '
+        'neither control', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: const {1},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskNoticesHeader: false,
+            kioskPanels: KioskPanels.defaults.withSide(
+              KioskModule.notices,
+              PanelSide.off,
+            ),
+            tenantId: 't',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(inSection('Nástěnka', find.text('V záhlaví')), findsOneWidget);
+      expect(mode, findsNothing);
+      expect(find.widgetWithText(TextField, 'Čerstvý je do'), findsNothing);
+    });
+  });
 
   group('canteen duty (0073)', () {
     Map<String, dynamic> lastPatch() => jsonDecode(

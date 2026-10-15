@@ -127,6 +127,20 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskDutyBandPosition.bottom => 'Dole pod zápasy',
   };
 
+  static String _freshLabel(KioskNoticesFresh f) => switch (f) {
+    KioskNoticesFresh.off => 'Nezvýrazňovat',
+    KioskNoticesFresh.highlight => 'Zvýraznit',
+    KioskNoticesFresh.longer => 'Zobrazit déle',
+    KioskNoticesFresh.both => 'Zvýraznit i zobrazit déle',
+  };
+
+  /// The note under „Čerstvé oznamy“ for the admin's [days] — one day in
+  /// its own form („před 1 dnem“, „před 3 dny“).
+  static String _freshNote(int days) =>
+      'Oznam vyvěšený před méně než '
+      '${days == 1 ? '1 dnem' : '$days dny'} dostane štítek NOVÉ, nebo '
+      'zůstane na obrazovce dvakrát déle.';
+
   /// The note under the two ranges: they are only where the list opens;
   /// [button] is the kiosk's own button for that direction.
   static String _rangeNote(String button) =>
@@ -988,7 +1002,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                       'panelu vlevo nebo vpravo dáš nástěnku v Panelech (výš).',
                 ),
                 if ((settings?.kioskNoticesHeader ?? true) ||
-                    _placed(settings, KioskModule.notices))
+                    _placed(settings, KioskModule.notices)) ...[
                   _number(
                     context,
                     settings,
@@ -1002,6 +1016,52 @@ class KioskSettingsScreen extends ConsumerWidget {
                         'Po kolika sekundách se ukáže další oznam '
                         '(v záhlaví i v panelu).',
                   ),
+                  // What a notice up for less than a few days gets on the
+                  // kiosk (0080) — and those days, unless it gets nothing.
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskNoticesFresh>(
+                      initialValue:
+                          settings?.kioskNoticesFresh ??
+                          KioskNoticesFresh.highlight,
+                      decoration: InputDecoration(
+                        labelText: 'Čerstvé oznamy',
+                        helperText: _freshNote(
+                          settings?.kioskNoticesFreshDays ?? 3,
+                        ),
+                        helperMaxLines: 3,
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final f in KioskNoticesFresh.values)
+                          DropdownMenuItem(
+                            value: f,
+                            child: Text(_freshLabel(f)),
+                          ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (f) => f == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_notices_fresh_mode': f.name,
+                                  }),
+                    ),
+                  ),
+                  if ((settings?.kioskNoticesFresh ??
+                          KioskNoticesFresh.highlight) !=
+                      KioskNoticesFresh.off)
+                    _number(
+                      context,
+                      settings,
+                      'Čerstvý je do',
+                      settings?.kioskNoticesFreshDays ?? 3,
+                      'kiosk_notices_fresh_days',
+                      unit: 'dní',
+                      min: 1,
+                      max: 14,
+                    ),
+                ],
               ],
             ),
             _section(
