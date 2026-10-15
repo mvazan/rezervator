@@ -3298,12 +3298,15 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
 
+        // „Dnes“ once, in the bar's order: the name day (moved first)
+        // says it, so the weather's „Dnes v Brně“ and the duty leave it
+        // out.
         final titles = [
           'Čtvrtek 8. 10.',
           'Dnes má svátek',
-          'Dnes v Brně',
+          'V Brně',
           'Nástěnka',
-          'Dnes mají službu',
+          'Službu mají',
         ];
         final values = [
           find.text('12:00'),
@@ -3370,6 +3373,75 @@ void main() {
           order[5].left - order[4].right,
           closeTo(kioskHeaderGap, 0.5),
         );
+
+        await finish(tester);
+      });
+
+      testWidgets('„Dnes“ once: the first module in the bar\'s order that '
+          'would say it does, the later ones leave it out — and a module '
+          'with nothing to say today does not count', (tester) async {
+        fullHd(tester);
+        Future<void> titles(
+          KioskHeader header,
+          String? weatherTitle,
+          List<String> expected, {
+          List<DutyAssignment>? duty,
+        }) async {
+          // A fresh scope: its overrides are read once.
+          await tester.pumpWidget(const SizedBox());
+          await tester.pumpWidget(
+            app(
+              header: header,
+              forecast: forecast,
+              weatherTitle: weatherTitle,
+              dutyPeriods: [current],
+              dutyAssignments: duty ?? serving,
+            ),
+          );
+          await tester.pumpAndSettle();
+          for (final t in expected) {
+            expect(find.text(t), findsOneWidget, reason: t);
+          }
+        }
+
+        final all = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.left);
+        // The user's example: the weather first says it.
+        await titles(all, 'Dnes v Brně', [
+          'Dnes v Brně',
+          'Svátek má',
+          'Službu mají',
+        ]);
+        // The default weather title does not: the name day says it.
+        await titles(all, null, [
+          kioskWeatherDefaultTitle,
+          'Dnes má svátek',
+          'Službu mají',
+        ]);
+        // The duty moved first, on its own across the centre on the right
+        // it still comes after the left ones.
+        await titles(
+          all.withSide(KioskHeaderModule.weather, PanelSide.right),
+          'Dnes v Brně',
+          ['Dnes má svátek', 'Službu mají', 'V Brně'],
+        );
+        // One on duty, first in the bar.
+        await titles(
+          all.moved(KioskHeaderModule.duty, -2),
+          'Dnes v Brně',
+          ['Dnes má službu', 'V Brně', 'Svátek má'],
+          duty: [serving.first],
+        );
+        // Nobody serving: the duty says nothing, the name day says „Dnes“.
+        await titles(
+          all.moved(KioskHeaderModule.duty, -2),
+          null,
+          [kioskWeatherDefaultTitle, 'Dnes má svátek'],
+          duty: const [],
+        );
+        expect(find.textContaining('lužbu'), findsNothing);
 
         await finish(tester);
       });
@@ -3710,7 +3782,8 @@ void main() {
         }
         // The titles still share their line.
         expect(
-          tester.getRect(find.text('Dnes má svátek')).top,
+          // After „Dnes v Brně“ the name day leaves „Dnes“ out.
+          tester.getRect(find.text('Svátek má')).top,
           closeTo(tester.getRect(find.text('Čtvrtek 8. 10.')).top, 0.5),
         );
         await finish(tester);

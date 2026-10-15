@@ -475,7 +475,8 @@ void main() {
             'obnovuje se každou půlhodinu; zdroj kiosk ukáže po ťuknutí na '
             'počasí. Svátek podle českého kalendáře; ve státní svátek bez '
             'jména jeho název. Služba podle plánu ve Správě → Služby; ťuk '
-            'ukáže plán.',
+            'ukáže plán. „Dnes“ stojí jen v prvním nadpisu zleva, další ho '
+            'vynechají („Svátek mají“, „Službu má“, u počasí úvodní „Dnes“).',
           ),
         ),
         findsOneWidget,

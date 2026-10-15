@@ -410,4 +410,30 @@ void main() {
       }
     });
   });
+
+  group('„Dnes“ once in the header', () {
+    test('a title says it as a word, anywhere, in any case', () {
+      for (final t in ['Dnes v Brně', 'dnes', 'Počasí dnes', 'Počasí (dnes)',
+          'Dnes: Brno', 'Dnes má svátek']) {
+        expect(kioskTitleSaysToday(t), isTrue, reason: t);
+      }
+      for (final t in ['Počasí', 'Svátek má', 'Dneska', 'Ednes', 'V Brně']) {
+        expect(kioskTitleSaysToday(t), isFalse, reason: t);
+      }
+    });
+
+    test('the weather title after it: a leading „Dnes“ dropped, the rest '
+        'capitalised; any other title as typed', () {
+      expect(kioskTitleWithoutToday('Dnes v Brně'), 'V Brně');
+      expect(kioskTitleWithoutToday('dnes ve Zlíně'), 'Ve Zlíně');
+      expect(kioskTitleWithoutToday('Dnes: Brno'), 'Brno');
+      expect(kioskTitleWithoutToday('  Dnes   v Brně'), 'V Brně');
+      // Nothing after it, or no leading „Dnes“: as typed.
+      expect(kioskTitleWithoutToday('Dnes'), 'Dnes');
+      expect(kioskTitleWithoutToday('Počasí dnes'), 'Počasí dnes');
+      expect(kioskTitleWithoutToday('Dneska v Brně'), 'Dneska v Brně');
+      expect(kioskTitleWithoutToday(kioskWeatherDefaultTitle),
+          kioskWeatherDefaultTitle);
+    });
+  });
 }

@@ -27,6 +27,23 @@ void main() {
     );
   });
 
+  test('after an earlier module said „Dnes“: „Svátek má“, „Svátek mají“; '
+      'a holiday without a name keeps „Státní svátek“', () {
+    NameDay day(int month, int d) => czechNameDay(Day(2026, month, d));
+    expect(
+      nameDayHeader(day(1, 3), today: false),
+      (title: 'Svátek má', text: 'Radmila'),
+    );
+    expect(
+      nameDayHeader(day(12, 24), today: false),
+      (title: 'Svátek mají', text: 'Adam a Eva'),
+    );
+    expect(
+      nameDayHeader(day(1, 1), today: false),
+      (title: 'Státní svátek', text: 'Nový rok'),
+    );
+  });
+
   test('a public holiday without a name says the holiday', () {
     expect(czechNameDay(Day(2026, 1, 1)).names, isEmpty);
     expect(header(1, 1), (title: 'Státní svátek', text: 'Nový rok'));

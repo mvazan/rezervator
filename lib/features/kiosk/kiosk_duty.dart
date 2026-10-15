@@ -42,21 +42,31 @@ final kioskDutyPlanProvider =
     });
 
 /// The header's duty module (0082): „Dnes má službu“ over „Jan Novák“,
-/// „Dnes mají službu“ for two or more. One line of at most a fifth of the
+/// „Dnes mají službu“ for two or more — „Službu má“ after an earlier
+/// module said „Dnes“. One line of at most a fifth of the
 /// screen — a long list of names is cut, the centre and the notices keep
 /// their room. A tap opens the plan ([onTap]).
 class KioskDutyModule extends StatelessWidget {
-  const KioskDutyModule({super.key, required this.entry, required this.onTap});
+  const KioskDutyModule({
+    super.key,
+    required this.entry,
+    required this.onTap,
+    this.today = true,
+  });
 
   /// Today's duty.
   final KioskDutyEntry entry;
   final VoidCallback onTap;
 
+  /// Whether the title says „Dnes“ — false after an earlier module in the
+  /// bar said it ([KioskDutyEntry.headerTitle]).
+  final bool today;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return KioskHeaderModuleFrame(
-      title: entry.names.length == 1 ? 'Dnes má službu' : 'Dnes mají službu',
+      title: entry.headerTitle(today: today),
       onTap: onTap,
       maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderModuleShare,
       child: Text(
