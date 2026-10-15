@@ -165,17 +165,21 @@ class _NoSheet extends StatelessWidget {
                       alignment: WrapAlignment.center,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        TextButton(
+                        TextButton.icon(
                           onPressed: () => tap(slot.homeTeam),
-                          child: Text(
+                          iconAlignment: IconAlignment.end,
+                          icon: const Icon(Icons.expand_more),
+                          label: Text(
                             slot.homeTeam,
                             style: text.headlineSmall,
                           ),
                         ),
                         Text(' – ', style: text.headlineSmall),
-                        TextButton(
+                        TextButton.icon(
                           onPressed: () => tap(slot.awayTeam),
-                          child: Text(
+                          iconAlignment: IconAlignment.end,
+                          icon: const Icon(Icons.expand_more),
+                          label: Text(
                             slot.awayTeam,
                             style: text.headlineSmall,
                           ),

@@ -1092,6 +1092,7 @@ class _ScoreTableBody extends StatelessWidget {
     final total = isHome ? result?.homeTotal : result?.awayTotal;
     final setPoints = isHome ? result?.homeSetPoints : result?.awaySetPoints;
 
+    final onTeam = this.onTeam;
     final name = _cell(
       width: m.nameWidth,
       height: _teamRowHeight,
@@ -1099,8 +1100,24 @@ class _ScoreTableBody extends StatelessWidget {
       text: teamName,
       style: _s16w700,
       maxLines: geometry.teamNameMaxLines,
+      // A tappable name says so: a ▾ after it, as on a dropdown.
+      span: onTeam == null
+          ? null
+          : TextSpan(
+              style: _s16w700.copyWith(color: _kBlack),
+              children: [
+                TextSpan(text: teamName),
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.middle,
+                  child: Icon(
+                    Icons.expand_more,
+                    size: (_s16w700.fontSize ?? 16) * 1.25,
+                    color: _kBlack,
+                  ),
+                ),
+              ],
+            ),
     );
-    final onTeam = this.onTeam;
     return Row(
       children: [
         if (onTeam == null)

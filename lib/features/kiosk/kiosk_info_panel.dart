@@ -387,7 +387,7 @@ class KioskPanelView extends ConsumerWidget {
 /// Every few seconds it breathes once — a soft glow and a little more
 /// opacity — so a tablet on the wall shows that there is something to
 /// open, without ever moving; both buttons breathe together.
-class KioskDrawerButton extends StatefulWidget {
+class KioskDrawerButton extends StatelessWidget {
   const KioskDrawerButton({
     super.key,
     required this.side,
@@ -429,10 +429,61 @@ class KioskDrawerButton extends StatefulWidget {
   static DateTime Function() clock = DateTime.now;
 
   @override
-  State<KioskDrawerButton> createState() => _KioskDrawerButtonState();
+  Widget build(BuildContext context) {
+    final left = side == PanelSide.left;
+    // The way a tap moves the panel: the right one opens to the left and
+    // closes to the right, the left one the other way round.
+    final towardsRight = left != open;
+    return Semantics(
+      // A node of its own: two buttons, each known by its label.
+      container: true,
+      button: true,
+      label: '${open ? 'Skrýt' : 'Zobrazit'} ${left ? 'levý' : 'pravý'} panel',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Center(
+            child: KioskBreathingIcon(
+              towardsRight
+                  ? Icons.keyboard_double_arrow_right
+                  : Icons.keyboard_double_arrow_left,
+              breathe: breathe,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _KioskDrawerButtonState extends State<KioskDrawerButton>
+/// An icon that breathes like [KioskDrawerButton]'s — once every few
+/// seconds on the same wall-clock beat ([KioskDrawerButton.untilBreath]), a
+/// soft glow and a little more opacity — or keeps still ([breathe] off).
+/// The side panels' buttons and the Zápis's side arrows (0079) wear it, so
+/// whatever on the wall opens or turns breathes together. [enabled] false
+/// = a dim, still icon: nothing that way.
+class KioskBreathingIcon extends StatefulWidget {
+  const KioskBreathingIcon(
+    this.icon, {
+    super.key,
+    this.breathe = true,
+    this.enabled = true,
+    this.size = 44,
+  });
+
+  final IconData icon;
+  final bool breathe;
+  final bool enabled;
+  final double size;
+
+  @override
+  State<KioskBreathingIcon> createState() => _KioskBreathingIconState();
+}
+
+class _KioskBreathingIconState extends State<KioskBreathingIcon>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
@@ -440,17 +491,19 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   );
   Timer? _rest;
 
+  bool get _breathes => widget.breathe && widget.enabled;
+
   @override
   void initState() {
     super.initState();
-    if (widget.breathe) _breathe();
+    if (_breathes) _breathe();
   }
 
   @override
-  void didUpdateWidget(KioskDrawerButton old) {
+  void didUpdateWidget(KioskBreathingIcon old) {
     super.didUpdateWidget(old);
-    if (old.breathe == widget.breathe) return;
-    if (widget.breathe) {
+    if ((old.breathe && old.enabled) == _breathes) return;
+    if (_breathes) {
       _breathe();
     } else {
       // Mid-breath: stopped, and no rest timer follows a breath that never
@@ -471,7 +524,7 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
     _rest = Timer(wait, () {
       if (!mounted) return;
       _controller.forward(from: 0).whenComplete(() {
-        if (mounted) _breathe();
+        if (mounted && _breathes) _breathe();
       });
     });
   }
@@ -486,52 +539,28 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final left = widget.side == PanelSide.left;
-    // The way a tap moves the panel: the right one opens to the left and
-    // closes to the right, the left one the other way round.
-    final towardsRight = left != widget.open;
-    return Semantics(
-      // A node of its own: two buttons, each known by its label.
-      container: true,
-      button: true,
-      label:
-          '${widget.open ? 'Skrýt' : 'Zobrazit'} '
-          '${left ? 'levý' : 'pravý'} panel',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: SizedBox(
-          width: KioskDrawerButton.size,
-          height: KioskDrawerButton.size,
-          child: Center(
-            // Its own layer: a breath repaints the icon, not the board and
-            // the panel under it.
-            child: RepaintBoundary(
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  // 0 → 1 → 0 over one breath; 0 while the button is still.
-                  final glow = math.sin(_controller.value * math.pi);
-                  return Icon(
-                    towardsRight
-                        ? Icons.keyboard_double_arrow_right
-                        : Icons.keyboard_double_arrow_left,
-                    size: 44,
-                    color: scheme.onSurfaceVariant.withValues(
-                      alpha: 0.4 + 0.35 * glow,
-                    ),
-                    shadows: [
-                      Shadow(
-                        color: scheme.primary.withValues(alpha: 0.75 * glow),
-                        blurRadius: 4 + 16 * glow,
-                      ),
-                    ],
-                  );
-                },
-              ),
+    // Its own layer: a breath repaints the icon, not the board and the
+    // panel under it.
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          // 0 → 1 → 0 over one breath; 0 while the icon is still.
+          final glow = math.sin(_controller.value * math.pi);
+          return Icon(
+            widget.icon,
+            size: widget.size,
+            color: scheme.onSurfaceVariant.withValues(
+              alpha: widget.enabled ? 0.4 + 0.35 * glow : 0.15,
             ),
-          ),
-        ),
+            shadows: [
+              Shadow(
+                color: scheme.primary.withValues(alpha: 0.75 * glow),
+                blurRadius: 4 + 16 * glow,
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -20,6 +20,7 @@ import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/results.dart';
 import '../clubhouse/widgets/zapis_page.dart';
+import 'kiosk_info_panel.dart' show KioskBreathingIcon;
 
 /// A match's ▶: the label of its button and what it does.
 typedef KioskZapisPlay = ({String label, VoidCallback onPlay});
@@ -103,9 +104,11 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
   void _toggleList(String team) =>
       setState(() => _listFor = _listFor == team ? null : team);
 
-  /// The side arrows need this much room beside the modal; with less, they
-  /// float over the sheet as at full screen.
+  /// A side arrow's width beside the modal, and its gap to the modal's
+  /// edge; with less room than both, the arrows float over the sheet as at
+  /// full screen.
   static const _sideRoom = 56.0;
+  static const _sideGap = 4.0;
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +247,11 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
     // full screen, or with too little room — floating over the sheet's
     // edges, hidden and shown with the × by a tap on the sheet.
     final room = (size.width - box.width) / 2;
-    final floating = full || room < _sideRoom;
+    final floating = full || room < _sideRoom + _sideGap;
+    // The side panel's „Opakující se animace“ (0065) holds for these too.
+    final breathe = ref.watch(
+      settingsProvider.select((s) => s.value?.kioskAnimations ?? true),
+    );
     Widget faded(Widget child) => AnimatedOpacity(
       opacity: _controls ? 1 : 0,
       duration: const Duration(milliseconds: 200),
@@ -255,6 +262,7 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
       return _SideArrow(
         forward: forward,
         floating: floating,
+        breathe: breathe,
         onTap: to == null ? null : () => _show(to),
       );
     }
@@ -283,17 +291,10 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
                     _PlayButton(play: play),
                     const SizedBox(width: 8),
                   ],
-                  Material(
-                    shape: const CircleBorder(),
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.surface.withValues(alpha: 0.85),
-                    elevation: 2,
-                    child: IconButton(
-                      icon: const Icon(Icons.close),
-                      tooltip: 'Zavřít',
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
+                  _Disc(
+                    tooltip: 'Zavřít',
+                    onTap: () => Navigator.of(context).pop(),
+                    child: const Icon(Icons.close, size: _Disc.iconSize),
                   ),
                 ],
               ),
@@ -307,13 +308,14 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
     return Stack(
       children: [
         modal(content),
+        // Right beside the modal's edges.
         for (final forward in [false, true])
           Positioned(
             top: 0,
             bottom: 0,
-            left: forward ? null : 0,
-            right: forward ? 0 : null,
-            width: room,
+            left: forward ? null : room - _sideGap - _sideRoom,
+            right: forward ? room - _sideGap - _sideRoom : null,
+            width: _sideRoom,
             child: Center(child: arrow(forward)),
           ),
       ],
@@ -328,43 +330,38 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
   }
 }
 
-/// ‹ or › beside the Zápis, as the side panel's button (a bare chevron);
-/// floating over the sheet it sits on a disc so the sheet's cells do not
-/// swallow it. Dim with nothing that way.
+/// ‹ or › beside the Zápis, as the side panel's button — a bare chevron
+/// breathing on the panel buttons' beat ([KioskBreathingIcon]); floating
+/// over the sheet it sits on a disc the size of the × ([_Disc]) so the
+/// sheet's cells do not swallow it. Dim and still with nothing that way.
 class _SideArrow extends StatelessWidget {
   const _SideArrow({
     required this.forward,
     required this.floating,
+    required this.breathe,
     required this.onTap,
   });
 
   final bool forward;
   final bool floating;
+  final bool breathe;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final icon = Icon(
-      forward ? Icons.chevron_right : Icons.chevron_left,
-      size: 44,
-      color: floating
-          ? scheme.onSurface.withValues(alpha: onTap == null ? 0.3 : 0.9)
-          : scheme.onSurfaceVariant.withValues(alpha: onTap == null ? 0.15 : 0.6),
-    );
+    final icon = forward ? Icons.chevron_right : Icons.chevron_left;
     final label = forward ? 'Další zápas' : 'Předchozí zápas';
     if (floating) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Material(
-          shape: const CircleBorder(),
-          color: scheme.surface.withValues(alpha: 0.85),
-          elevation: 2,
-          child: IconButton(
-            iconSize: 44,
-            tooltip: label,
-            onPressed: onTap,
-            icon: icon,
+        child: _Disc(
+          tooltip: label,
+          onTap: onTap,
+          child: KioskBreathingIcon(
+            icon,
+            size: _Disc.iconSize,
+            breathe: breathe,
+            enabled: onTap != null,
           ),
         ),
       );
@@ -379,11 +376,50 @@ class _SideArrow extends StatelessWidget {
         child: SizedBox(
           width: _KioskZapisState._sideRoom,
           height: 96,
-          child: Center(child: icon),
+          child: Center(
+            child: KioskBreathingIcon(
+              icon,
+              breathe: breathe,
+              enabled: onTap != null,
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+/// A round button over the sheet — the ×, and the arrows floating at full
+/// screen — all one size.
+class _Disc extends StatelessWidget {
+  const _Disc({required this.tooltip, required this.onTap, required this.child});
+
+  final String tooltip;
+  final VoidCallback? onTap;
+  final Widget child;
+
+  static const size = 56.0;
+  static const iconSize = 32.0;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: Semantics(
+      button: true,
+      enabled: onTap != null,
+      label: tooltip,
+      child: Material(
+        shape: const CircleBorder(),
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
+        elevation: 2,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox.square(dimension: size, child: Center(child: child)),
+        ),
+      ),
+    ),
+  );
 }
 
 /// The paging bar: ‹, the home team, the day, the away team, › — centred —
@@ -443,7 +479,7 @@ class _Bar extends StatelessWidget {
       children: [
         if (play != null) ...[_PlayButton(play: play), const SizedBox(width: 4)],
         IconButton(
-          iconSize: 28,
+          iconSize: 32,
           tooltip: 'Zavřít',
           onPressed: () => Navigator.of(context).pop(),
           icon: const Icon(Icons.close),

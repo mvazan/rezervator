@@ -4292,8 +4292,11 @@ void main() {
         expect(find.byType(OutlinedButton), findsNothing);
         final back = find.byIcon(Icons.chevron_left);
         final forth = find.byIcon(Icons.chevron_right);
+        // Right beside the modal, not out in the middle of the room.
         expect(tester.getRect(back).right, lessThan(sheet.left));
+        expect(tester.getRect(back).right, greaterThan(sheet.left - 20));
         expect(tester.getRect(forth).left, greaterThan(sheet.right));
+        expect(tester.getRect(forth).left, lessThan(sheet.right + 20));
         expect(
           tester.getCenter(back).dy,
           closeTo(sheet.center.dy, 2),
@@ -4302,13 +4305,34 @@ void main() {
         // ‹: the match before, a sheet without players — its teams buttons.
         await tester.tap(back);
         await tester.pumpAndSettle();
-        expect(find.widgetWithText(TextButton, 'Jiný'), findsOneWidget);
+        expect(
+          find.ancestor(
+            of: find.text('Jiný'),
+            matching: find.byWidgetPredicate((w) => w is TextButton),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byIcon(Icons.expand_more), findsNWidgets(2));
         await tester.tap(forth);
         await tester.pumpAndSettle();
         expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
 
         // A tap on the away team's name in the sheet: its matches.
-        await tester.tap(find.text('Soupeř').first);
+        // The name wears a ▾: it can be tapped.
+        final name = find
+            .descendant(
+              of: find.byType(LegacyScoreSheetPage),
+              matching: find.textContaining('Soupeř'),
+            )
+            .first;
+        expect(
+          find.descendant(
+            of: find.byType(LegacyScoreSheetPage),
+            matching: find.byIcon(Icons.expand_more),
+          ),
+          findsNWidgets(2),
+        );
+        await tester.tap(name);
         await tester.pumpAndSettle();
         expect(inList(find.byType(ListTile)), findsNWidgets(3));
         await tester.tap(
@@ -4352,6 +4376,12 @@ void main() {
             .opacity;
         expect(opacity(back), 1);
         expect(opacity(find.byIcon(Icons.close)), 1);
+        // The arrows and the × are one size.
+        Size disc(Finder icon) => tester.getSize(
+          find.ancestor(of: icon, matching: find.byType(InkWell)).first,
+        );
+        expect(disc(back), disc(find.byIcon(Icons.close)));
+        expect(disc(find.byIcon(Icons.chevron_right)), disc(back));
 
         // A tap on the sheet (off its team names): gone.
         await tester.tapAt(sheet.center + const Offset(0, 200));
