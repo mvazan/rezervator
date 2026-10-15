@@ -69,12 +69,15 @@ const appChangelog = <Release>[
         'písmo.',
     'Kalendář po dnech: čas bloku je začátek, pomlčka a konec pod sebou — '
         'v každém řádku stejně, i při větším písmu.',
+    'Kiosk: seznam zápasů při posunu tabule neskáče — ukáže jen zápasy dnů, '
+        'které na tabuli přibyly, a posune se jen o tolik, aby byly vidět.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
     'Zápas v rozvrhu: nahoře pohár s časem, pod ním domácí a hosté.',
     'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
-    'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo.',
+    'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo; '
+        'seznam zápasů při posunu tabule neskáče.',
     'Kalendář po dnech: čas bloku jednotně pod sebou.',
   ]),
   Release(null, '14. 10. 2026', [

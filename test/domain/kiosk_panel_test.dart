@@ -461,4 +461,46 @@ void main() {
       expect(visible(opened: ['c', 'd', 'e'], max: 2), ['d', 'e']);
     });
   });
+
+  group('kioskNewlyShownDays', () {
+    final today = Day(2026, 10, 8);
+    ({Day first, Day last}) span(int from, int to) =>
+        (first: today.addDays(from), last: today.addDays(to));
+
+    test('a day back: only the day that came into view', () {
+      expect(
+        kioskNewlyShownDays(span(0, 6), span(-1, 5), today: today),
+        span(-1, -1),
+      );
+    });
+
+    test('a day forward: only the day that came into view', () {
+      expect(
+        kioskNewlyShownDays(span(0, 6), span(1, 7), today: today),
+        span(7, 7),
+      );
+    });
+
+    test('a jump past the old days: all the new ones', () {
+      expect(
+        kioskNewlyShownDays(span(0, 6), span(-20, -14), today: today),
+        span(-20, -14),
+      );
+      expect(
+        kioskNewlyShownDays(span(0, 6), span(10, 16), today: today),
+        span(10, 16),
+      );
+    });
+
+    test('the first scroll counts from the board as it opens, today at its '
+        'left edge', () {
+      expect(kioskNewlyShownDays(null, span(-1, 5), today: today), span(-1, -1));
+      expect(kioskNewlyShownDays(null, span(2, 8), today: today), span(7, 8));
+    });
+
+    test('the same days, or fewer of them, bring nothing new', () {
+      expect(kioskNewlyShownDays(span(0, 6), span(0, 6), today: today), isNull);
+      expect(kioskNewlyShownDays(span(0, 6), span(1, 5), today: today), isNull);
+    });
+  });
 }
