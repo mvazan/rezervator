@@ -1701,10 +1701,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(
-        find.descendant(of: dialog, matching: find.text('5 : 3')),
-        findsOneWidget,
-      );
+      // The score, side by side around its colon.
+      for (final part in ['5', '3']) {
+        expect(
+          find.descendant(of: dialog, matching: find.text(part)),
+          findsOneWidget,
+        );
+      }
       // A video the kiosk cannot play (not YouTube): no video control at
       // all — the fallback trophy instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
@@ -4992,7 +4995,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.text('6 : 2'),
+          matching: find.text('6'),
         ),
       );
       await tester.pumpAndSettle();

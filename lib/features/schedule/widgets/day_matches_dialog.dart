@@ -145,15 +145,15 @@ Widget _eventRow(
 ) {
   final showScore = hasScoreData(result);
   final winner = displayWinner(result);
-  final pins = result == null
-      ? ''
-      : pinsLabel(result.homeTotal, result.awayTotal);
+  final hasPins =
+      result != null && (result.homeTotal != null || result.awayTotal != null);
   final league = _league(m);
   final small = theme.textTheme.bodySmall?.copyWith(
     color: scheme.onSurfaceVariant,
   );
+  // The trophy, the lines and the score each centred on the row: the score
+  // and the pins one block, the trophy its counterpart on the left.
   final row = Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       MatchLeading(
         slot: m,
@@ -173,52 +173,28 @@ Widget _eventRow(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // The match and the time with the kuželna, the points at the
-            // end, centred on the two — bolder and larger than the names,
-            // the day's headline.
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      MatchTitle(
-                        slot: m,
-                        winner: showScore ? winner : null,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                      Text(_where(m), style: small),
-                    ],
-                  ),
-                ),
-                if (showScore) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    pointsLabel(result!.homePoints, result.awayPoints),
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ],
+            MatchTitle(
+              slot: m,
+              winner: showScore ? winner : null,
+              style: theme.textTheme.titleSmall,
             ),
-            // The competition and the round, the pins at the end — under
-            // the points.
-            if (league.isNotEmpty || pins.isNotEmpty)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Expanded(child: Text(league, style: small)),
-                  if (pins.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    Text(pins, style: small),
-                  ],
-                ],
-              ),
+            Text(_where(m), style: small),
+            if (league.isNotEmpty) Text(league, style: small),
           ],
         ),
       ),
+      if (showScore || hasPins) ...[
+        const SizedBox(width: 8),
+        _ScoreBlock(
+          result: result!,
+          showPoints: showScore,
+          // Bolder and larger than the names, the day's headline.
+          pointsStyle: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+          pinsStyle: small,
+        ),
+      ],
     ],
   );
   return Padding(
@@ -250,4 +226,64 @@ String _league(PrioritySlot m) {
   ];
   if (parts.isNotEmpty) return parts.join(' · ');
   return m.fromFederation ? '' : m.description;
+}
+
+/// The points over the pins, their colons one under the other: each
+/// side's number in a column of its own — home's right-aligned, away's
+/// left-aligned — around the colons'. Points with no side yet read „–“ in
+/// the colon's place. Read out whole, as „5 : 3, 3460 : 3349“.
+class _ScoreBlock extends StatelessWidget {
+  const _ScoreBlock({
+    required this.result,
+    required this.showPoints,
+    required this.pointsStyle,
+    required this.pinsStyle,
+  });
+
+  final MatchResult result;
+  final bool showPoints;
+  final TextStyle? pointsStyle;
+  final TextStyle? pinsStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = result;
+    final noPoints = r.homePoints == null && r.awayPoints == null;
+    final pins = pinsLabel(r.homeTotal, r.awayTotal);
+    TableRow line(String home, String colon, String away, TextStyle? style) =>
+        TableRow(
+          children: [
+            Text(home, style: style, textAlign: TextAlign.right),
+            Text(colon, style: style, textAlign: TextAlign.center),
+            Text(away, style: style, textAlign: TextAlign.left),
+          ],
+        );
+    String side(int? v) => v?.toString() ?? '–';
+    return Semantics(
+      label: [
+        if (showPoints) pointsLabel(r.homePoints, r.awayPoints),
+        if (pins.isNotEmpty) pins,
+      ].join(', '),
+      child: ExcludeSemantics(
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          defaultVerticalAlignment: TableCellVerticalAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            if (showPoints)
+              noPoints
+                  ? line('', '–', '', pointsStyle)
+                  : line(
+                      numLabel(r.homePoints),
+                      ' : ',
+                      numLabel(r.awayPoints),
+                      pointsStyle,
+                    ),
+            if (pins.isNotEmpty)
+              line(side(r.homeTotal), ' : ', side(r.awayTotal), pinsStyle),
+          ],
+        ),
+      ),
+    );
+  }
 }
