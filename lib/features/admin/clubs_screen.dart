@@ -41,16 +41,24 @@ class ClubsScreen extends ConsumerWidget {
       Api.updateTeam(id: team.id, name: name, clubId: clubId, active: active);
 
   Future<void> _addOrEdit(BuildContext context, {Club? existing}) async {
-    final result = await showDialog<(String, int)>(
+    final result = await showDialog<(String, int, String?)>(
       context: context,
       builder: (_) => ClubDialog(existing: existing),
     );
     if (result == null || !context.mounted) return;
-    final (name, colorIndex) = result;
+    final (name, colorIndex, nickname) = result;
     await tryAction(
       context,
-      () =>
-          Api.upsertClub(id: existing?.id, name: name, colorIndex: colorIndex),
+      () async {
+        final id = await Api.upsertClub(
+          id: existing?.id,
+          name: name,
+          colorIndex: colorIndex,
+        );
+        if (nickname != existing?.nickname) {
+          await Api.setClubNickname(id, nickname);
+        }
+      },
       success: 'Uloženo.',
       errorText: friendlyDbError,
     );
@@ -154,6 +162,12 @@ class ClubsScreen extends ConsumerWidget {
                   ListTile(
                     leading: ColorDot(colorIndex: club.colorIndex),
                     title: Text(club.name),
+                    // The nickname the app shows instead (0080).
+                    subtitle: Text(
+                      club.nickname == null
+                          ? 'Bez přezdívky'
+                          : 'Přezdívka: ${club.nickname}',
+                    ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

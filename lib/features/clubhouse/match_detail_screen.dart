@@ -262,13 +262,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
     }
   }
 
-  static String _appBarTitle(PrioritySlot? slot) {
+  static String _appBarTitle(PrioritySlot? slot, NameDisplay names) {
     if (slot == null) return 'Zápas';
     final parts = [
       if ((slot.competition ?? '').isNotEmpty) slot.competition!,
       if (slot.round != null) '${slot.round}. kolo',
     ];
-    return parts.isEmpty ? slot.title : parts.join(' · ');
+    return parts.isEmpty ? names.title(slot) : parts.join(' · ');
   }
 
   /// The video button is the scoreboard's status while the match is live
@@ -562,7 +562,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
   }) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_appBarTitle(slot)),
+        title: Text(_appBarTitle(slot, ref.watch(nameDisplayProvider))),
         actions: [
           if (showRefreshButton)
             showWaiting

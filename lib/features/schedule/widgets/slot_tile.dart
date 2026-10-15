@@ -16,6 +16,7 @@ import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
 import '../calendar_focus.dart';
 import '../schedule_callbacks.dart';
+import '../../../core/widgets/shown_names.dart';
 
 enum SlotTileSize {
   /// Week calendar: one clipped line, lane digit drawn beside the tile.
@@ -101,12 +102,14 @@ class SlotTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: _sizedText(
-            slotEventLabel(slot),
-            TextStyle(
-              fontSize: _compact ? 10 : 12,
-              fontWeight: FontWeight.w600,
-              color: fg,
+          child: ShownNames(
+            builder: (context, names) => _sizedText(
+              slotEventLabel(slot, names: names),
+              TextStyle(
+                fontSize: _compact ? 10 : 12,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
             ),
           ),
         );
@@ -330,12 +333,16 @@ class SlotTile extends StatelessWidget {
         return _rowShell(
           context,
           background: bg,
-          child: EmojiText(
-            slotEventLabel(slot),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: 11 * textScale, fontWeight: FontWeight.w600, color: fg),
+          child: ShownNames(
+            builder: (context, names) => EmojiText(
+              slotEventLabel(slot, names: names),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 11 * textScale,
+                  fontWeight: FontWeight.w600,
+                  color: fg),
+            ),
           ),
         );
     }

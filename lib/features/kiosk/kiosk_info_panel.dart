@@ -1909,7 +1909,12 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
       // table should a row ever carry it.
       final score = GestureDetector(
         onTap: zapis,
-        child: MatchScoreLine(slot: slot, result: result, duels: duels),
+        // The teams as the app shows them: a club's nickname (0080).
+        child: MatchScoreLine(
+          slot: ref.watch(nameDisplayProvider).shown(slot),
+          result: result,
+          duels: duels,
+        ),
       );
       return layout == MatchLayout.compact
           ? DuelsCompact(duels: duels, result: result, header: score)

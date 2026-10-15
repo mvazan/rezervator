@@ -302,7 +302,11 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   /// teams is picked, the whole oddíl and its teams by letter
   /// ([teamChipLabels]) — instead of a chip for every team of the alley.
   /// With one, its teams in one row, as ever.
-  Widget _teamFilter(List<ResultsClub> clubs, ResultsClub? picked) {
+  Widget _teamFilter(
+    List<ResultsClub> clubs,
+    ResultsClub? picked,
+    NameDisplay names,
+  ) {
     if (clubs.length < 2) {
       return _chipRow([
         (
@@ -313,7 +317,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ),
         for (final t in clubs.expand((c) => c.teams))
           (
-            label: t,
+            label: names.team(t),
             tooltip: null,
             selected: _team == t,
             onTap: () => _selectTeam(t),
@@ -355,7 +359,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             for (final t in picked.teams)
               (
                 label: labels[t]!,
-                tooltip: labels[t] == t ? null : t,
+                tooltip: labels[t] == t ? null : names.team(t),
                 selected: _team == t,
                 onTap: () => _selectTeam(t),
               ),
@@ -664,7 +668,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
           if (inCompetitions)
             _competitionChips(competitions, slug)
           else
-            _teamFilter(clubs, picked),
+            _teamFilter(clubs, picked, ref.watch(nameDisplayProvider)),
           if (leagueFailed)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),

@@ -34,6 +34,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../config.dart';
 import '../../../core/ui.dart';
+import '../../../core/widgets/shown_names.dart';
 import '../../../data/providers.dart';
 import '../../../domain/collation.dart';
 import '../../../domain/models.dart';
@@ -79,12 +80,15 @@ Future<void> showMyTeamsSheet(
         // Every team the schedule knows plus whatever is already picked in
         // either list — a team that has left the schedule can still be
         // unticked.
+        // Sorted by the name the row shows — a club nickname (0080) can
+        // move a team far from where its full name would put it.
+        final names = ref.watch(nameDisplayProvider);
         final teams = <String>{
           ...ref.watch(ourTeamsProvider),
           ...followed,
           for (final t in routed) t.team,
         }.toList()
-          ..sort(compareCzech);
+          ..sort((a, b) => compareCzech(names.team(a), names.team(b)));
         return _MyTeamsList(
           teams: teams,
           followed: followed,
@@ -291,7 +295,7 @@ class _MyTeamsListState extends State<_MyTeamsList> {
           children: [
             ListTile(
               title: Text(
-                'Zápasy — $team',
+                'Zápasy — ${shownNamesNow(context).team(team)}',
                 style: Theme.of(sheet).textTheme.titleMedium,
               ),
               subtitle: const Text('Do kterého kalendáře patří.'),
@@ -404,7 +408,11 @@ class _MyTeamsListState extends State<_MyTeamsList> {
           children: [
             const SizedBox(width: 16),
             Expanded(
-              child: Text(team, maxLines: 2, overflow: TextOverflow.ellipsis),
+              child: Text(
+                shownNamesNow(context).team(team),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             _cellBox(
               key: ValueKey('$team:overview'),
@@ -431,7 +439,8 @@ class _MyTeamsListState extends State<_MyTeamsList> {
                         final picked = await pickEventColor(
                           context,
                           current: current,
-                          title: 'Barva – $team',
+                          title:
+                              'Barva – ${shownNamesNow(context).team(team)}',
                         );
                         if (picked != current) _setColor(team, picked);
                       },

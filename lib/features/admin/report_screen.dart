@@ -127,7 +127,10 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                   return ListView(
                     children: [
                       for (final (club, members)
-                          in attendanceByClub(report)) ...[
+                          in attendanceByClub(
+                        report,
+                        names: ref.watch(nameDisplayProvider),
+                      )) ...[
                         Padding(
                           padding: padWithSystemInset(context, const EdgeInsets.fromLTRB(16, 12, 16, 2)),
                           child: Text(

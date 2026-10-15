@@ -756,7 +756,10 @@ class _StatusBar extends ConsumerWidget {
                                   vertical: 2,
                                 ),
                                 child: EmojiText(
-                                  headerEventLabel(todays[i]),
+                                  headerEventLabel(
+                                    todays[i],
+                                    names: ref.watch(nameDisplayProvider),
+                                  ),
                                   style: infoStyle,
                                 ),
                               ),

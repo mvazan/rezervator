@@ -12890,4 +12890,124 @@ begin
   raise notice 'OK: the Zápis pages with the bar for a new alley, one of three ways, off the public overview (0079)';
 end $$;
 
+-- 0080: a club's nickname — 1–30 characters, not blank, or none. Run
+-- again first: the migration is re-runnable.
+\ir ../migrations/0080_club_nickname.sql
+do $$
+declare
+  v_club uuid;
+begin
+  select id into v_club from clubs
+   where tenant_id = '00000000-0000-0000-0000-00000000000a' limit 1;
+  if v_club is null then
+    insert into clubs (tenant_id, name)
+    values ('00000000-0000-0000-0000-00000000000a', 'Oddíl (0080)')
+    returning id into v_club;
+  end if;
+  update clubs set nickname = 'Sokol IV' where id = v_club;
+  update clubs set nickname = null where id = v_club;
+  begin
+    update clubs set nickname = '   ' where id = v_club;
+    raise exception 'FAIL: a blank club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  begin
+    update clubs set nickname = repeat('x', 31) where id = v_club;
+    raise exception 'FAIL: a 31-character club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: a club nickname is 1–30 characters or none (0080)';
+end $$;
+
+-- 0080: what the server writes for people reads with the nickname —
+-- the longest matching club name wins, a name merely starting with it does
+-- not count, another tenant's clubs never apply — and a new nickname puts
+-- the club's future matches back in the calendar queue.
+do $$
+declare
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_other constant uuid := '00000000-0000-0000-0000-00000000000b';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_long uuid;
+  v_short uuid;
+  v_type uuid;
+  v_match uuid;
+  v_row record;
+begin
+  insert into clubs (tenant_id, name, site_name, nickname)
+  values (v_tenant, 'Sokol IV (0080)', 'TJ Sokol Brno IV', 'Sokol IV')
+  returning id into v_long;
+  insert into clubs (tenant_id, name, nickname)
+  values (v_tenant, 'TJ Sokol Brno', 'Sokol')
+  returning id into v_short;
+  if team_shown(v_tenant, 'TJ Sokol Brno IV B') <> 'Sokol IV B'
+     or team_shown(v_tenant, 'TJ Sokol Brno IV') <> 'Sokol IV'
+     or team_shown(v_tenant, 'Sokol IV (0080) A') <> 'Sokol IV A'
+     or team_shown(v_tenant, 'TJ Sokol Brno A') <> 'Sokol A'
+     or team_shown(v_tenant, 'TJ Sokol Brnox A') <> 'TJ Sokol Brnox A'
+     or team_shown(v_tenant, 'KK Blansko') <> 'KK Blansko'
+     or team_shown(v_other, 'TJ Sokol Brno IV B') <> 'TJ Sokol Brno IV B' then
+    raise exception 'FAIL: team_shown maps names wrong (0080)';
+  end if;
+
+  -- A followed future match: the calendar and the reminder see the
+  -- nickname; the follow itself still matches the stored name.
+  insert into google_calendar_links (user_id, status, google_email)
+  values (v_uid, 'linked', 'a@gmail.com')
+  on conflict (user_id) do update set status = 'linked';
+  delete from calendar_teams where user_id = v_uid;
+  insert into calendar_teams (user_id, team) values (v_uid, 'TJ Sokol Brno IV B');
+  update profiles set followed_teams = array['TJ Sokol Brno IV B']
+   where id = v_uid;
+  select id into v_type from priority_slot_types
+   where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     is_away, created_by)
+  values
+    (v_tenant, (now() at time zone 'Europe/Prague')::date + 300, '06:00',
+     '07:00', v_type, 'KK Blansko', 'TJ Sokol Brno IV B', true, v_uid)
+  returning id into v_match;
+  select * into v_row from my_future_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.home_team <> 'KK Blansko'
+     or v_row.away_team <> 'Sokol IV B' then
+    raise exception 'FAIL: my_future_matches does not show the nickname: %',
+      to_jsonb(v_row);
+  end if;
+  select * into v_row from my_upcoming_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.away_team <> 'Sokol IV B' then
+    raise exception 'FAIL: my_upcoming_matches does not show the nickname: %',
+      to_jsonb(v_row);
+  end if;
+
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  update clubs set color = 3 where id = v_long;
+  if exists (select 1 from notification_jobs
+              where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a club change that keeps its names queued a calendar sync (0080)';
+  end if;
+  update clubs set nickname = 'Sokolíci' where id = v_long;
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a new nickname did not queue the calendar sync (0080)';
+  end if;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  delete from clubs where id = v_long;
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: deleting a nicknamed club did not queue the calendar sync (0080)';
+  end if;
+  raise notice 'OK: reminders and calendar read team names with the nickname (0080)';
+end $$;
+
+-- Not callable from the app: it is a helper of the server's own functions.
+do $$
+begin
+  if has_function_privilege('authenticated', 'public.team_shown(uuid, text)', 'execute')
+     or has_function_privilege('anon', 'public.team_shown(uuid, text)', 'execute') then
+    raise exception 'FAIL: team_shown is callable by app roles (0080)';
+  end if;
+  raise notice 'OK: team_shown stays server-side (0080)';
+end $$;
+
 rollback;

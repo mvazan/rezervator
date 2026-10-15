@@ -1870,6 +1870,8 @@ void main() {
       // Both panels as the admin lays them out (0077); null = the layout
       // the drawer settings above convert to, as 0077 converts them.
       KioskPanels? panels,
+      // Clubs' nicknames (0080); null = every name in full.
+      NameDisplay? names,
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith((ref) {
@@ -1964,6 +1966,7 @@ void main() {
         dutyAssignmentsProvider.overrideWith(
           (ref) => Stream.value(dutyAssignments),
         ),
+        if (names != null) nameDisplayProvider.overrideWith((ref) => names),
       ],
       child: const MaterialApp(home: KioskShell()),
     );
@@ -4247,6 +4250,71 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('a club nickname (0080) names the teams in the bar and the '
+          'list; a tap still lists that team\'s matches', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            names: NameDisplay(const [
+              Club(id: 's', name: 'Soupeř', nickname: 'Sok'),
+              Club(id: 'd', name: 'Domácí', nickname: 'Dom'),
+            ]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        expect(bar('Dom'), findsOneWidget);
+        expect(bar('Sok'), findsOneWidget);
+        expect(bar('Soupeř'), findsNothing);
+
+        await tester.tap(bar('Sok'));
+        await tester.pumpAndSettle();
+        final rows = inList(find.byType(ListTile));
+        expect(rows, findsNWidgets(3));
+        expect([
+          for (final t in tester.widgetList<ListTile>(rows))
+            (t.title! as Text).data,
+        ], ['Dom', 'Jiný', 'Dom']);
+
+        await finish(tester);
+      });
+
+      testWidgets('beside the modal, a tap on the sheet\'s nickname lists the '
+          'team it stands for (0080)', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            zapisNav: KioskZapisNav.sides,
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            names: NameDisplay(const [
+              Club(id: 's', name: 'Soupeř', nickname: 'Sok'),
+            ]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(LegacyScoreSheetPage),
+            matching: find.textContaining('Sok', findRichText: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inList(find.byType(ListTile)), findsNWidgets(3));
+
+        await finish(tester);
+      });
+
       testWidgets('a tap on a team lists its played matches, its points first '
           'and the shown one picked out; a tap on one shows it', (
         tester,
@@ -4730,19 +4798,12 @@ void main() {
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
         // The folded duel's card stays in the tree (cross-fade), hidden:
-        // only the visible ones count.
+        // only the visible ones count — and only a visible name is tapped.
         final openCards = find.byType(DuelCard).hitTestable();
-        // A tap opens a duel as the full card with its lane table. More
-        // may be open while they fit; past that the first opened folds.
-        expect(openCards, findsNothing);
-        await tester.tap(find.textContaining('Hráč1').first);
-        await tester.pumpAndSettle();
-        expect(openCards, findsOneWidget);
-        expect(find.text('Plné'), findsWidgets);
-        await tester.tap(find.textContaining('Hráč2').first);
-        await tester.pumpAndSettle();
-        expect(openCards, findsNWidgets(2));
-        // Each opening animates; the fit is measured once it has.
+        Finder name(int pos) => find.textContaining('Hráč$pos').hitTestable();
+        // Each opening animates; the fit is measured once it has, a timer
+        // after the animation — so every tap waits it out, or the check
+        // would race the fold.
         Future<void> settle() async {
           for (var i = 0; i < 6; i++) {
             await tester.pump(const Duration(milliseconds: 320));
@@ -4750,8 +4811,23 @@ void main() {
           }
         }
 
+        // A tap opens a duel as the full card with its lane table.
+        expect(openCards, findsNothing);
+        await tester.tap(name(1).first);
+        await settle();
+        expect(openCards, findsOneWidget);
+        expect(find.text('Plné'), findsWidgets);
+
+        // More may be open while they fit; past that the first opened
+        // folds. Two open cards overflow 1080 px by a few pixels, so the
+        // rest runs 120 px taller: two fit there, a third does not.
+        tester.view.physicalSize = const Size(1920, 1200);
+        await tester.pumpAndSettle();
+        await tester.tap(name(2).first);
+        await settle();
+        expect(openCards, findsNWidgets(2));
         for (var pos = 3; pos <= 6; pos++) {
-          await tester.tap(find.textContaining('Hráč$pos').first);
+          await tester.tap(name(pos).first);
           await settle();
         }
         final scroll = tester

@@ -13,6 +13,7 @@ import 'widgets/blockage_dialog.dart';
 import 'widgets/override_dialog.dart';
 import 'widgets/rental_occurrence_dialog.dart';
 import '../../core/push_screen.dart';
+import '../../core/widgets/shown_names.dart';
 
 /// Admin: manage per-day closures that take precedence over the weekly
 /// training-day rule. An override closes a day with a reason (e.g. "Malování
@@ -39,7 +40,8 @@ class OverridesScreen extends ConsumerWidget {
       confirmDelete(
         context,
         title: 'Smazat blokaci?',
-        message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
+        message: 'Opravdu smazat „${shownNamesNow(context).title(slot)}" '
+            '(${dayLabel(slot.date)})?',
         action: () => Api.deletePrioritySlot(slot.id),
       );
 
@@ -430,7 +432,7 @@ class _BlockageTile extends StatelessWidget {
       title: Text(
         '${dayLabel(slot.date)} · '
         '${slot.startsAt.display()}–${slot.endsAt.display()} · '
-        '${slot.title}',
+        '${shownNamesNow(context).title(slot)}',
       ),
       subtitle: switch ([
         if (slot.type.lanes != null) 'dráhy ${slot.type.lanes!.join(', ')}',

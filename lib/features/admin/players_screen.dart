@@ -197,7 +197,7 @@ class PlayersScreen extends ConsumerWidget {
                   for (final club in clubs)
                     RadioListTile<String?>(
                       value: club.id,
-                      title: Text(club.name),
+                      title: Text(club.shown),
                     ),
                 ],
               ),

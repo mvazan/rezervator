@@ -100,17 +100,21 @@ const appChangelog = <Release>[
     'Kiosk: modul „Napište nám“ — QR kód formuláře na webu, zprávu napíšeš '
         'v mobilu, ne na obrazovce kiosku. Ťuknutí ukáže velký kód. Správce '
         'ho umístí ve Správa → Kiosk → Panely.',
+    'Oddíly mají přezdívku: správce ji zadá ve Správě → Oddíly a aplikace '
+        'ji ukáže místo celého názvu — z „TJ Sokol Brno IV B“ je „Sokol IV '
+        'B“ v rozvrhu, zápasech, výsledcích, na kiosku, v připomínkách i '
+        'v Google kalendáři.',
   ], store: [
     'Kiosk: dva panely (Hráči týdne, Jak začít a Napište nám s QR kódy).',
-    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
-        'výsledky hraného zápasu.',
+    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ '
+        'u hraného zápasu.',
     'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče, '
         'v zápisu listování.',
-    'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
-        'výraznější výsledek.',
+    'Zápasy dne: kuželna, soutěž a kolo, výraznější výsledek.',
     'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
     'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
     'Klubovna: Napište nám — zpráva autorovi.',
+    'Oddíly: přezdívka místo celého názvu.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

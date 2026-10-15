@@ -58,6 +58,7 @@ class MyTeamsCard extends ConsumerWidget {
     final routed = hasCalendar
         ? ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[]
         : const <CalendarTeam>[];
+    final names = ref.watch(nameDisplayProvider);
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -68,10 +69,13 @@ class MyTeamsCard extends ConsumerWidget {
             isThreeLine: hasCalendar,
             subtitle: Text(
               hasCalendar
-                  ? 'Přehled: ${matchTeamsSummary(profile.followedTeams)}\n'
+                  ? 'Přehled: '
+                      '${matchTeamsSummary(profile.followedTeams, names: names)}\n'
                       'Kalendář: '
-                      '${matchTeamsSummary([for (final t in routed) t.team])}'
-                  : matchTeamsSummary(profile.followedTeams),
+                      '${matchTeamsSummary([
+                          for (final t in routed) t.team
+                        ], names: names)}'
+                  : matchTeamsSummary(profile.followedTeams, names: names),
             ),
           ),
           Padding(
