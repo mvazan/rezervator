@@ -74,16 +74,17 @@ const appChangelog = <Release>[
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
     'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
         'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
+    'Kiosk, zápis zápasu: lišta nahoře listuje šipkami k předchozímu '
+        'a dalšímu odehranému zápasu, ťuk na družstvo ukáže jeho zápasy '
+        '(stačí vybrat), a křížek zápis zavře. Správce listování vypne ve '
+        'Správa → Kiosk → Listování v zápisu.',
   ], store: [
-    'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
-        'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
-    'Zápas v rozvrhu: nahoře pohár s časem, pod ním domácí a hosté.',
-    'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
-    'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo; '
-        'seznam zápasů při posunu tabule neskáče.',
+    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, nižší '
+        'řádky drah, seznam zápasů neskáče, v zápisu listování.',
+    'Zápas v rozvrhu: pohár s časem, pod ním domácí a hosté.',
+    'Zápasy dne: kuželna, soutěž a kolo, výraznější výsledek.',
     'Kalendář po dnech: čas bloku jednotně pod sebou.',
-    'Výsledky: filtr nejdřív podle oddílu, pak družstva; KP místo '
-        'Krajského přeboru.',
+    'Výsledky: filtr podle oddílu, pak družstva; KP.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

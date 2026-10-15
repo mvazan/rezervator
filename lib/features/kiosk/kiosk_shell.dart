@@ -242,29 +242,35 @@ class _KioskShellState extends ConsumerState<KioskShell>
   void _openMatch(PrioritySlot match) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
     final play = _play;
+    final settings = ref.read(settingsProvider).value;
     unawaited(
       showKioskZapis(
         context,
         slot: match,
-        brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
+        brightness: (settings?.kioskDark ?? true)
             ? Brightness.dark
             : Brightness.light,
-        percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
+        percent: settings?.kioskZapisPercent ?? 80,
         onTouch: _touch,
-        // The Zápis closes and the stream opens beside the board.
-        play: play != null && hasKioskVideo(match)
-            ? (
-                label: kioskStreamLabel(
-                  match,
-                  ref.read(matchResultsProvider).value?[match.id],
-                  now,
-                ),
-                onPlay: () => play(match),
-              )
-            : null,
+        paging: settings?.kioskZapisNav ?? true,
+        // The ▶ of whichever match the Zápis shows (it pages, 0079): it
+        // closes and the stream opens beside the board.
+        playFor: play == null
+            ? null
+            : (m) => hasKioskVideo(m)
+                  ? (
+                      label: kioskStreamLabel(
+                        m,
+                        ref.read(matchResultsProvider).value?[m.id],
+                        now,
+                      ),
+                      onPlay: () => play(m),
+                    )
+                  : null,
       ),
     );
   }
+
 
   /// The stream windows (0066, 0072) over [board] while a stream is open;
   /// [board] alone otherwise. Their own layer: the players and their

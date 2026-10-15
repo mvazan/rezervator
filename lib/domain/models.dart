@@ -778,6 +778,7 @@ class ScheduleSettings {
     this.kioskWarningFontSize = 22,
     this.kioskDayMatchesWidth = 560,
     this.kioskTodaysMatches = true,
+    this.kioskZapisNav = true,
     this.kioskStreamMax = 1,
     this.kioskDutyHeader = false,
     this.kioskDutyBoard = false,
@@ -878,6 +879,11 @@ class ScheduleSettings {
   /// The kiosk's status bar lists today's matches beside the clock (0071);
   /// off = it says what it says on a day without a match.
   final bool kioskTodaysMatches;
+
+  /// The kiosk's Zápis pages through the matches (0079): ‹ › to the
+  /// previous and the next one with a score, a tap on a team for that
+  /// team's, and a × — on by default.
+  final bool kioskZapisNav;
 
   /// How many stream windows at once, 1–4 (0072): 1 turns through the
   /// open streams in one window, more give each its own.
@@ -1054,6 +1060,7 @@ class ScheduleSettings {
         kioskDayMatchesWidth:
             json['kiosk_day_matches_width'] as int? ?? 560,
         kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
+        kioskZapisNav: json['kiosk_zapis_nav'] as bool? ?? true,
         kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
         kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
         kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,

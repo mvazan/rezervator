@@ -12230,4 +12230,26 @@ begin
   raise notice 'OK: the name picker starts with letters, takes one of three modes, off the public overview (0076)';
 end $$;
 
+-- 0079: paging through the kiosk's Zápis — on for a new alley, and on or
+-- off the public overview does not hand it out. Run again first: the
+-- migration is re-runnable.
+\ir ../migrations/0079_kiosk_zapis_nav.sql
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_new constant uuid := '00000000-0000-0000-0000-000000000079';
+begin
+  insert into tenants (id, name) values (v_new, 'Kuželna (0079)');
+  if (select kiosk_zapis_nav from schedule_settings
+       where tenant_id = v_new) is distinct from true then
+    raise exception 'FAIL: a new alley''s kiosk Zápis has no paging (0079)';
+  end if;
+  update schedule_settings set kiosk_zapis_nav = false where tenant_id = v_a;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_zapis_nav' then
+    raise exception 'FAIL: the public overview hands out the Zápis paging (0079)';
+  end if;
+  update schedule_settings set kiosk_zapis_nav = true where tenant_id = v_a;
+  raise notice 'OK: the Zápis paging is on for a new alley and off the public overview (0079)';
+end $$;
+
 rollback;

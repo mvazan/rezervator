@@ -5713,6 +5713,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_warning_font_size" smallint DEFAULT 22 NOT NULL,
     "kiosk_day_matches_width" smallint DEFAULT 560 NOT NULL,
     "kiosk_picker_mode" "text" DEFAULT 'letters'::"text" NOT NULL,
+    "kiosk_zapis_nav" boolean DEFAULT true NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),

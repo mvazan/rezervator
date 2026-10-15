@@ -73,6 +73,10 @@ void main() {
         isTrue,
       );
       expect(ScheduleSettings.defaults.kioskTodaysMatches, isTrue);
+      // 0079: paging through the Zápis, on unless switched off.
+      expect(settings({}).kioskZapisNav, isTrue);
+      expect(settings({'kiosk_zapis_nav': false}).kioskZapisNav, isFalse);
+      expect(ScheduleSettings.defaults.kioskZapisNav, isTrue);
     });
 
     test('fromJson reads kiosk_dark when present', () {

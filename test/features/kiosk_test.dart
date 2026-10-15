@@ -1845,6 +1845,7 @@ void main() {
       bool nameday = false,
       String? warning,
       bool todaysMatches = true,
+      bool zapisNav = true,
       Set<int>? trainingWeekdays,
       int streamMax = 1,
       bool streamEnabled = true,
@@ -1902,6 +1903,7 @@ void main() {
             kioskNameday: nameday,
             kioskWarning: warning,
             kioskTodaysMatches: todaysMatches,
+            kioskZapisNav: zapisNav,
             kioskStreamMax: streamMax,
             kioskStreamEnabled: streamOn,
             kioskDutyHeader: dutyHeader,
@@ -4026,6 +4028,8 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(
         app(
+          // The bare sheet, as before paging (0079).
+          zapisNav: false,
           slots: [fed('m', day.addDays(-3), 'Domácí')],
           results: {'m': res('m', 'finished', 6, 2)},
           lineups: {'m': lineup},
@@ -4097,6 +4101,8 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(
         app(
+          // The bare sheet, as before paging (0079).
+          zapisNav: false,
           slots: [fed('m', day.addDays(-3), 'Domácí')],
           results: {'m': res('m', 'finished', 6, 2)},
           lineups: {'m': lineup},
@@ -4116,6 +4122,149 @@ void main() {
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
 
       await finish(tester);
+    });
+
+    group('paging through the Zápis (0079)', () {
+      // Three played matches; „Soupeř“ is the away side of all of them.
+      List<PrioritySlot> played() => [
+        fed('a', day.addDays(-10), 'Domácí'),
+        fed('b', day.addDays(-7), 'Jiný'),
+        fed('c', day.addDays(-3), 'Domácí'),
+      ];
+      Map<String, MatchResult> scores() => {
+        'a': res('a', 'finished', 6, 2),
+        'b': res('b', 'finished', 3, 5),
+        'c': res('c', 'finished', 7, 1),
+      };
+      final teamList = find.byKey(const Key('kiosk-zapis-team-matches'));
+      Finder inList(Finder f) => find.descendant(of: teamList, matching: f);
+      Finder bar(String text) => find.descendant(
+        of: find.byType(OutlinedButton),
+        matching: find.text(text),
+      );
+      Finder button(IconData icon) => find.widgetWithIcon(IconButton, icon);
+      bool enabled(WidgetTester tester, IconData icon) =>
+          tester.widget<IconButton>(button(icon)).onPressed != null;
+
+      testWidgets('a bar of ‹, the teams, the day, › and ×; the arrows step '
+          'through the played matches in time', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(bar('Domácí'), findsOneWidget);
+        expect(bar('Soupeř'), findsOneWidget);
+        expect(find.text(dayFull(day.addDays(-3))), findsOneWidget);
+        // The last one: no further.
+        expect(enabled(tester, Icons.chevron_right), isFalse);
+        expect(enabled(tester, Icons.chevron_left), isTrue);
+
+        await tester.tap(button(Icons.chevron_left));
+        await tester.pumpAndSettle();
+        expect(bar('Jiný'), findsOneWidget);
+        expect(find.text(dayFull(day.addDays(-7))), findsOneWidget);
+        // Its players are not on the site yet.
+        expect(find.text('Zápis zápasu zatím není k dispozici.'), findsOneWidget);
+
+        await tester.tap(button(Icons.chevron_left));
+        await tester.pumpAndSettle();
+        expect(find.text(dayFull(day.addDays(-10))), findsOneWidget);
+        expect(enabled(tester, Icons.chevron_left), isFalse);
+
+        await tester.tap(button(Icons.chevron_right));
+        await tester.pumpAndSettle();
+        expect(bar('Jiný'), findsOneWidget);
+
+        // × closes it at any size.
+        await tester.tap(button(Icons.close));
+        await tester.pumpAndSettle();
+        expect(bar('Jiný'), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a tap on a team lists its played matches, its points first '
+          'and the shown one picked out; a tap on one shows it', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(bar('Soupeř'));
+        await tester.pumpAndSettle();
+        final rows = inList(find.byType(ListTile));
+        expect(rows, findsNWidgets(3));
+        // Chronological; the away side's points first; the shown one picked.
+        final titles = [
+          for (final t in tester.widgetList<ListTile>(rows))
+            (t.title! as Text).data,
+        ];
+        expect(titles, ['Domácí', 'Jiný', 'Domácí']);
+        expect(
+          [for (final t in tester.widgetList<ListTile>(rows)) t.selected],
+          [false, false, true],
+        );
+        expect(inList(find.text('2 : 6')), findsOneWidget);
+        expect(inList(find.text('5 : 3')), findsOneWidget);
+
+        await tester.tap(find.descendant(of: rows.at(1), matching: find.text('Jiný')));
+        await tester.pumpAndSettle();
+        expect(rows, findsNothing);
+        expect(find.text(dayFull(day.addDays(-7))), findsOneWidget);
+
+        // The home side lists only its own matches.
+        await tester.tap(bar('Jiný'));
+        await tester.pumpAndSettle();
+        expect(rows, findsOneWidget);
+        // A tap beside the list closes it; the Zápis stays.
+        final list = tester.getRect(teamList);
+        await tester.tapAt(Offset(list.right + 200, list.bottom + 100));
+        await tester.pumpAndSettle();
+        expect(rows, findsNothing);
+        expect(bar('Jiný'), findsOneWidget);
+
+        await finish(tester);
+      });
+
+      testWidgets('switched off: the bare sheet, no bar', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            zapisNav: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(button(Icons.chevron_left), findsNothing);
+        expect(bar('Domácí'), findsNothing);
+
+        await finish(tester);
+      });
     });
 
     testWidgets('the idle reset closes the Zápis', (tester) async {
@@ -4146,6 +4295,8 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(
         app(
+          // The bare sheet, as before paging (0079).
+          zapisNav: false,
           slots: [fed('m', day.addDays(-3), 'Domácí')],
           results: {'m': res('m', 'finished', 6, 2)},
           drawerOpen: true,

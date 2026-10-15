@@ -486,6 +486,16 @@ class KioskSettingsScreen extends ConsumerWidget {
                       'Kolik obrazovky zabere zápis otevřený klepnutím na '
                       'zápas; 100 = celá obrazovka s křížkem.',
                 ),
+                _switch(
+                  context,
+                  settings,
+                  'Listování v zápisu',
+                  settings?.kioskZapisNav ?? true,
+                  'kiosk_zapis_nav',
+                  subtitle:
+                      'Šipky k předchozímu a dalšímu zápasu, ťuk na družstvo '
+                      'ukáže jeho zápasy, a křížek.',
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Celý den na obrazovku'),

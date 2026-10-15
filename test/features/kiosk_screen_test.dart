@@ -68,7 +68,7 @@ void main() {
   // The page is long (the panel options sit above the address): a tall
   // window keeps every section built.
   void tall(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 5600);
+    tester.view.physicalSize = const Size(800, 6000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
   }
@@ -720,6 +720,26 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_stream_max': 3});
+  });
+
+  testWidgets('paging through the Zápis: on by default, under its size; the '
+      'switch PATCHes its own column (0079)', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    final paging = find.widgetWithText(SwitchListTile, 'Listování v zápisu');
+    expect(tester.widget<SwitchListTile>(paging).value, isTrue);
+    expect(
+      tester.getTopLeft(paging).dy,
+      greaterThan(tester.getTopLeft(find.text('Velikost zápisu')).dy),
+    );
+    await tester.ensureVisible(paging);
+    await tester.tap(paging);
+    await tester.pumpAndSettle();
+    final patch = jsonDecode(
+      requests.lastWhere((r) => r.method == 'PATCH').body,
+    ) as Map<String, dynamic>;
+    expect(patch, {'kiosk_zapis_nav': false});
   });
 
   testWidgets('today\'s matches in the header: on by default, in the '
