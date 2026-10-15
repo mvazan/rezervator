@@ -107,6 +107,12 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskNoticesMode.both => 'V záhlaví i v panelu',
   };
 
+  static String _pickerLabel(KioskPickerMode m) => switch (m) {
+    KioskPickerMode.letters => 'Podle písmen',
+    KioskPickerMode.clubs => 'Podle oddílu',
+    KioskPickerMode.both => 'Podle oddílu i písmen',
+  };
+
   static String _bandLabel(KioskDutyBandPosition p) => switch (p) {
     KioskDutyBandPosition.top => 'Nad datem',
     KioskDutyBandPosition.middle => 'Mezi datem a zápasy',
@@ -387,6 +393,39 @@ class KioskSettingsScreen extends ConsumerWidget {
                           }),
                         ),
                     ],
+                  ),
+                ),
+                // How the name picker starts (0076): letters, the clubs,
+                // or both — beside the note that stands under them.
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 12),
+                  child: DropdownButtonFormField<KioskPickerMode>(
+                    initialValue:
+                        settings?.kioskPickerMode ?? KioskPickerMode.letters,
+                    decoration: const InputDecoration(
+                      labelText: 'Výběr hráče',
+                      helperText:
+                          'Podle oddílu: dlaždice oddílů v jejich barvě, ťuk '
+                          'ukáže hráče oddílu; hráči bez oddílu jsou pod '
+                          '„Ostatní“. Jen když je z čeho vybírat — aspoň dva '
+                          'oddíly, nebo oddíl a hráči bez něj.',
+                      helperMaxLines: 4,
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      for (final m in KioskPickerMode.values)
+                        DropdownMenuItem(
+                          value: m,
+                          child: Text(_pickerLabel(m)),
+                        ),
+                    ],
+                    onChanged: settings == null
+                        ? null
+                        : (m) => m == null
+                              ? null
+                              : _panel(context, settings, {
+                                  'kiosk_picker_mode': m.name,
+                                }),
                   ),
                 ),
                 _number(
