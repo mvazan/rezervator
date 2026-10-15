@@ -4,6 +4,8 @@
 /// render it.
 library;
 
+import 'dart:math' as math;
+
 import 'collation.dart';
 import 'labels.dart' show czechCount;
 import 'models.dart';
@@ -186,12 +188,13 @@ List<Venue> venuesMatching(List<Venue> venues, String query) {
 
 /// The Klubovna "Výsledky" list: federation matches (never manual/xlsx rows,
 /// never their úklid children) grouped by day, days ascending and each day's
-/// matches by start time then title. [team] (an exact team name) wins over
-/// [mineOnly]/[followedTeams]/[exceptions] when given; otherwise [mineOnly]
+/// matches by start time then title. [teams] (exact team names — one team,
+/// or an oddíl's) win over [mineOnly]/[followedTeams]/[exceptions] when
+/// given: a match of any of them, on either side; otherwise [mineOnly]
 /// applies the same "is this mine" rule as Můj přehled ([matchIsMine]).
 List<({Day day, List<PrioritySlot> matches})> resultsTimeline({
   required List<PrioritySlot> slots,
-  String? team,
+  Set<String>? teams,
   required bool mineOnly,
   required List<String> followedTeams,
   required Map<String, bool> exceptions,
@@ -199,8 +202,8 @@ List<({Day day, List<PrioritySlot> matches})> resultsTimeline({
   final filtered = [
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && s.fromFederation)
-        if (team != null
-            ? (s.homeTeam == team || s.awayTeam == team)
+        if (teams != null
+            ? (teams.contains(s.homeTeam) || teams.contains(s.awayTeam))
             : (!mineOnly || matchIsMine(s, followedTeams, exceptions)))
           s,
   ];
@@ -221,6 +224,81 @@ List<({Day day, List<PrioritySlot> matches})> resultsTimeline({
       ),
   ];
 }
+
+/// One oddíl of the Výsledky filter and its [teams], Czech-sorted; [clubId]
+/// null = „Ostatní“, the teams of no oddíl.
+typedef ResultsClub = ({String? clubId, String name, List<String> teams});
+
+/// The Výsledky filter's first row: [teams] (the alley's, as the teams
+/// filter lists them) by the oddíl each belongs to — a team row's clubId
+/// ([teamRows]) names it in [clubs] — the oddíly Czech-sorted by name and
+/// „Ostatní“ last: a team of no oddíl, or a name with no team row at all
+/// (a team only the matches know). An oddíl with none of [teams] is left
+/// out.
+List<ResultsClub> resultsClubs({
+  required List<String> teams,
+  required List<Team> teamRows,
+  required List<Club> clubs,
+}) {
+  final clubOf = {
+    for (final t in teamRows)
+      if (t.clubId != null) t.name: t.clubId!,
+  };
+  final names = {for (final c in clubs) c.id: c.name};
+  final byClub = <String?, List<String>>{};
+  for (final team in teams) {
+    final id = clubOf[team];
+    (byClub[names.containsKey(id) ? id : null] ??= []).add(team);
+  }
+  final named = [
+    for (final e in byClub.entries)
+      if (e.key != null)
+        (
+          clubId: e.key,
+          name: names[e.key]!,
+          teams: e.value..sort(compareCzech),
+        ),
+  ]..sort((a, b) => compareCzech(a.name, b.name));
+  return [
+    ...named,
+    if (byClub[null] case final rest?)
+      (clubId: null, name: 'Ostatní', teams: rest..sort(compareCzech)),
+  ];
+}
+
+/// Short chip labels for one oddíl's [teams]: what follows the words all of
+/// them share — „SKK Veverky Brno A/B/C“ → A, B, C — and A for the one with
+/// nothing after them (an oddíl's first team often carries no letter: „TJ
+/// Sokol Husovice“ beside „TJ Sokol Husovice B“). Every team keeps its full
+/// name when that would not read as letters: a single team, a rest longer
+/// than three characters, two teams with no rest, or an A already taken.
+Map<String, String> teamChipLabels(List<String> teams) {
+  final full = {for (final t in teams) t: t};
+  if (teams.length < 2) return full;
+  final words = [for (final t in teams) t.split(' ')];
+  var shared = words.map((w) => w.length).reduce(math.min);
+  for (final w in words) {
+    var i = 0;
+    while (i < shared && w[i] == words.first[i]) {
+      i++;
+    }
+    shared = i;
+  }
+  if (shared == 0) return full;
+  final rest = [for (final w in words) w.sublist(shared).join(' ')];
+  if (rest.any((r) => r.length > 3)) return full;
+  if (rest.where((r) => r.isEmpty).length > 1) return full;
+  if (rest.contains('') && rest.contains('A')) return full;
+  return {
+    for (var i = 0; i < teams.length; i++)
+      teams[i]: rest[i].isEmpty ? 'A' : rest[i],
+  };
+}
+
+/// A competition's name on a chip: „Krajský přebor“ as KP — „KP Jmk 1.
+/// třídy Sever“; anything else as it is.
+String competitionChipLabel(String name) =>
+    name.replaceFirst(RegExp(r'^Krajský přebor(?=\s|$)'), 'KP');
 
 /// Which day of [days] (as [resultsTimeline] returns them, ascending) the
 /// list should open on: the first at or after [today], else the last one

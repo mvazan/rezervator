@@ -71,6 +71,9 @@ const appChangelog = <Release>[
         'v každém řádku stejně, i při větším písmu.',
     'Kiosk: seznam zápasů při posunu tabule neskáče — ukáže jen zápasy dnů, '
         'které na tabuli přibyly, a posune se jen o tolik, aby byly vidět.',
+    'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
+    'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
+        'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
@@ -79,6 +82,8 @@ const appChangelog = <Release>[
     'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo; '
         'seznam zápasů při posunu tabule neskáče.',
     'Kalendář po dnech: čas bloku jednotně pod sebou.',
+    'Výsledky: filtr nejdřív podle oddílu, pak družstva; KP místo '
+        'Krajského přeboru.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
