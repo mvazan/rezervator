@@ -423,9 +423,10 @@ class _Disc extends StatelessWidget {
   );
 }
 
-/// The paging bar: ‹, the home team, the day, the away team, › — centred —
-/// with the ▶ and the × at the right. The teams are buttons that list
-/// their matches.
+/// The paging bar: the home team at the left and the away team at the
+/// right — over their halves of the sheet below — and ‹ the day › in the
+/// middle, the arrows beside the day they page from; the ▶ and the × at
+/// the right end. The teams are buttons that list their matches.
 class _Bar extends StatelessWidget {
   const _Bar({
     required this.slot,
@@ -445,10 +446,14 @@ class _Bar extends StatelessWidget {
   final void Function(PrioritySlot match) onShow;
   final void Function(String team) onTeam;
 
+  /// The middle's width — ‹, the day, › — that the teams keep clear of.
+  static const _middle = 320.0;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    Widget team(String name) => Flexible(
+    Widget team(String name, double maxWidth) => ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
       child: OutlinedButton(
         onPressed: () => onTeam(name),
         style: OutlinedButton.styleFrom(
@@ -475,63 +480,68 @@ class _Bar extends StatelessWidget {
     final previous = this.previous;
     final next = this.next;
     final play = this.play;
-    final end = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (play != null) ...[_PlayButton(play: play), const SizedBox(width: 4)],
-        IconButton(
-          iconSize: 32,
-          tooltip: 'Zavřít',
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.close),
-        ),
-      ],
-    );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+      padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // The middle stays clear of the right end on both sides, so it
-          // is centred on the bar, not on what the end leaves.
-          final reserve = play == null ? 56.0 : 260.0;
+          // Each team gets its half of what the middle leaves; the away
+          // team shares its half with the ▶ and the ×.
+          final half = (constraints.maxWidth - _middle) / 2 - 8;
+          final end = (play == null ? 0.0 : 220.0) + 56;
           return Stack(
             alignment: Alignment.center,
             children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: math.max(0, constraints.maxWidth - 2 * reserve),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    iconSize: 32,
+                    tooltip: 'Předchozí zápas',
+                    onPressed: previous == null
+                        ? null
+                        : () => onShow(previous),
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      dayFull(slot.date),
+                      maxLines: 1,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                  IconButton(
+                    iconSize: 32,
+                    tooltip: 'Další zápas',
+                    onPressed: next == null ? null : () => onShow(next),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: team(slot.homeTeam, half),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    team(slot.awayTeam, half - end),
+                    const SizedBox(width: 8),
+                    if (play != null) ...[
+                      _PlayButton(play: play),
+                      const SizedBox(width: 4),
+                    ],
                     IconButton(
                       iconSize: 32,
-                      tooltip: 'Předchozí zápas',
-                      onPressed: previous == null
-                          ? null
-                          : () => onShow(previous),
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    team(slot.homeTeam),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        dayFull(slot.date),
-                        maxLines: 1,
-                        style: TextStyle(color: scheme.onSurfaceVariant),
-                      ),
-                    ),
-                    team(slot.awayTeam),
-                    IconButton(
-                      iconSize: 32,
-                      tooltip: 'Další zápas',
-                      onPressed: next == null ? null : () => onShow(next),
-                      icon: const Icon(Icons.chevron_right),
+                      tooltip: 'Zavřít',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
                     ),
                   ],
                 ),
               ),
-              Align(alignment: Alignment.centerRight, child: end),
             ],
           );
         },

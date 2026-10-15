@@ -4189,6 +4189,19 @@ void main() {
         expect(bar('Domácí'), findsOneWidget);
         expect(bar('Soupeř'), findsOneWidget);
         expect(find.text(dayFull(day.addDays(-3))), findsOneWidget);
+        // The teams over their halves of the sheet, ‹ the day › between.
+        final sheet = tester.getRect(find.byType(LegacyScoreSheetPage));
+        final dayAt = tester.getCenter(find.text(dayFull(day.addDays(-3))));
+        expect(dayAt.dx, closeTo(sheet.center.dx, 2));
+        expect(tester.getCenter(bar('Domácí')).dx, lessThan(sheet.left + 250));
+        expect(
+          tester.getCenter(bar('Soupeř')).dx,
+          greaterThan(sheet.right - 350),
+        );
+        expect(
+          tester.getCenter(button(Icons.chevron_left)).dx,
+          allOf(greaterThan(sheet.left + 250), lessThan(dayAt.dx)),
+        );
         // The last one: no further.
         expect(enabled(tester, Icons.chevron_right), isFalse);
         expect(enabled(tester, Icons.chevron_left), isTrue);
