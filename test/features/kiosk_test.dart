@@ -3601,9 +3601,11 @@ void main() {
         await finish(tester);
       });
 
-      testWidgets('a narrow kiosk with large text: every module on, no '
-          'overflow — the modules shrink, the names are cut, „Rezervovat“ '
-          'stays whole', (tester) async {
+      testWidgets('a narrow kiosk with large text: every module on and a '
+          'home and an away match, no overflow — the modules shrink, the '
+          'names and the matches are cut, „Rezervovat“ stays whole', (
+        tester,
+      ) async {
         tester.view.physicalSize = const Size(1024, 600);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
@@ -3625,10 +3627,43 @@ void main() {
               for (final p in players)
                 DutyAssignment(periodId: 'now', userId: p.id),
             ],
+            slots: [fed('m', day, 'Domácí'), away],
           ),
         );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
+        // The board's day header, listing the matches too, runs out of
+        // height at this text size — as it did before 0081; only what the
+        // header lays out counts here.
+        final errors = <FlutterErrorDetails>[];
+        final reported = FlutterError.onError;
+        FlutterError.onError = errors.add;
+        try {
+          await tester.pumpAndSettle();
+        } finally {
+          FlutterError.onError = reported;
+        }
+        expect(
+          [
+            for (final e in errors)
+              if (!e.toString().contains('calendar_board.dart')) e.toString(),
+          ],
+          isEmpty,
+        );
+        // Each match keeps one line, cut, home over away.
+        for (final label in [homeLabel, awayLabel]) {
+          expect(
+            tester
+                .renderObject<RenderParagraph>(
+                  find.descendant(of: label, matching: find.byType(RichText)),
+                )
+                .didExceedMaxLines,
+            isTrue,
+            reason: '$label',
+          );
+        }
+        expect(
+          tester.getRect(homeLabel).bottom,
+          lessThanOrEqualTo(tester.getRect(awayLabel).top),
+        );
         final button = tester.getRect(find.byType(GradientButton));
         expect(button.right, lessThanOrEqualTo(1024));
         for (final module in [

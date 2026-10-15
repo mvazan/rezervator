@@ -578,6 +578,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
 /// shrink, at text scale 1.
 const _centreRoom = 200.0;
 
+/// What [KioskHeadline] puts before a title: its 26 px icon and the 10 px
+/// after it.
+const _headlineIcon = 36.0;
+
 /// [text] with its first letter upper-cased: „Čtvrtek 8. 10.“ over the
 /// clock.
 String _capitalized(String text) =>
@@ -670,9 +674,9 @@ class _StatusBar extends ConsumerWidget {
   /// the [left] modules, the [centre], the [right] modules. A module with
   /// a short value takes at most a fifth of the screen — and on a narrow
   /// kiosk with large text no more than its part of what the clock and
-  /// the button leave, keeping [_centreRoom] for the centre or the
-  /// notices: the names are cut and the weather shrinks, the button is
-  /// never pushed off the screen.
+  /// the button leave, keeping [_centreRoom] for the centre and as much
+  /// again for the notices: the names are cut and the weather shrinks, the
+  /// button is never pushed off the screen.
   List<Widget> _middle({
     required double width,
     required TextScaler textScaler,
@@ -688,9 +692,11 @@ class _StatusBar extends ConsumerWidget {
         i == 0 && centre != null ? 24 : kioskHeaderGap,
     ];
     final short = [...left, ...right].where((w) => w is! Expanded).length;
-    final room = centre != null || flexible
-        ? math.min(width / 3, textScaler.scale(_centreRoom))
-        : 0.0;
+    // Each of the two that is there keeps its room: the matches beside the
+    // notices would squeeze the headline under its icon.
+    final room =
+        ((centre != null ? 1 : 0) + (flexible ? 1 : 0)) *
+        math.min(width / 3, textScaler.scale(_centreRoom));
     final share = short == 0
         ? double.infinity
         : math.max(
@@ -794,14 +800,25 @@ class _StatusBar extends ConsumerWidget {
                 flex: 3,
                 child: KioskHeaderModuleFrame(
                   title: 'Nástěnka',
-                  child: KioskHeadline(
-                    notices: notices,
-                    turn: Duration(
-                      seconds: settings?.kioskNoticesRotationSeconds ?? 12,
-                    ),
-                    onOpen: onOpenNotice,
-                    alignment: Alignment.centerLeft,
-                    padding: EdgeInsets.zero,
+                  // Too narrow for the icon and a glyph or two (a small
+                  // kiosk with large text and a busy header): the title
+                  // alone, rather than a headline that overflows.
+                  child: LayoutBuilder(
+                    builder: (context, constraints) =>
+                        constraints.maxWidth <
+                            _headlineIcon +
+                                2 * MediaQuery.textScalerOf(context).scale(22)
+                        ? const SizedBox.shrink()
+                        : KioskHeadline(
+                            notices: notices,
+                            turn: Duration(
+                              seconds:
+                                  settings?.kioskNoticesRotationSeconds ?? 12,
+                            ),
+                            onOpen: onOpenNotice,
+                            alignment: Alignment.centerLeft,
+                            padding: EdgeInsets.zero,
+                          ),
                   ),
                 ),
               ),
@@ -828,7 +845,14 @@ class _StatusBar extends ConsumerWidget {
             borderRadius: BorderRadius.circular(6),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: EmojiText(headerEventLabel(matches[i]), style: infoStyle),
+              // One line each: on a narrow kiosk with large text a long
+              // label is cut, never broken letter by letter down the bar.
+              child: EmojiText(
+                headerEventLabel(matches[i]),
+                style: infoStyle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
         ],
