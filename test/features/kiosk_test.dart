@@ -4014,11 +4014,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // The newest first: the long one, cut to its share.
+      expect(drawerText('Dlouhý'), findsOneWidget);
       final before = tester.getTopLeft(find.text('ZÁPASY'));
 
+      // It fades out over the short one's smaller block — clipped, not
+      // overflowing it.
       await tester.pump(const Duration(seconds: 13));
       await tester.pumpAndSettle();
-      expect(drawerText('Krátký'), findsNothing);
+      expect(drawerText('Dlouhý'), findsNothing);
+      expect(drawerText('Krátký'), findsOneWidget);
       expect(tester.getTopLeft(find.text('ZÁPASY')), before);
 
       await finish(tester);
@@ -4243,16 +4248,17 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(drawerText('První'), findsOneWidget);
+      // The newest first.
+      expect(drawerText('Druhý'), findsOneWidget);
 
-      await tester.fling(drawerText('První'), const Offset(-300, 0), 1000);
+      await tester.fling(drawerText('Druhý'), const Offset(-300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(drawerText('První'), findsOneWidget);
+      expect(drawerText('Druhý'), findsNothing);
+
+      await tester.fling(drawerText('První'), const Offset(300, 0), 1000);
       await tester.pumpAndSettle();
       expect(drawerText('Druhý'), findsOneWidget);
-      expect(drawerText('První'), findsNothing);
-
-      await tester.fling(drawerText('Druhý'), const Offset(300, 0), 1000);
-      await tester.pumpAndSettle();
-      expect(drawerText('První'), findsOneWidget);
 
       await finish(tester);
     });
@@ -5252,8 +5258,8 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('the status bar shows one notice title at a time, in turn',
-        (tester) async {
+    testWidgets('the status bar shows one notice title at a time, in turn, '
+        'the newest first', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
@@ -5268,7 +5274,7 @@ void main() {
       await tester.pumpAndSettle();
       final bar = find.byType(KioskHeadline);
       Finder inBar(String t) => find.descendant(of: bar, matching: find.text(t));
-      expect(inBar('Brigáda'), findsOneWidget);
+      expect(inBar('Zámek'), findsOneWidget);
       expect(inBar('1/2'), findsOneWidget);
       expect(find.textContaining('Skryté'), findsNothing);
       // Left of „Rezervovat“.
@@ -5279,15 +5285,17 @@ void main() {
 
       // Within one turn (settling already ran part of the clock) it fades
       // to the next.
-      for (var i = 0; i < 7 && inBar('Zámek').evaluate().isEmpty; i++) {
+      for (var i = 0; i < 7 && inBar('Brigáda').evaluate().isEmpty; i++) {
         await tester.pump(const Duration(seconds: 1));
         await tester.pump(const Duration(milliseconds: 700));
       }
-      expect(inBar('Zámek'), findsOneWidget);
-      expect(inBar('Brigáda'), findsNothing);
+      // The fade over (the last pump may have only started it).
+      await tester.pumpAndSettle();
+      expect(inBar('Brigáda'), findsOneWidget);
+      expect(inBar('Zámek'), findsNothing);
 
       // A tap reads the notice in full.
-      await tester.tap(inBar('Zámek'));
+      await tester.tap(inBar('Brigáda'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
 

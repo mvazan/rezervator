@@ -845,28 +845,35 @@ class _NoticesCardState extends State<_NoticesCard> {
                           alignment: Alignment.topLeft,
                           children: [...previous, ?current],
                         ),
-                        child: Column(
+                        // Each notice laid out at its own height: the one
+                        // fading out keeps its lines, clipped to the next
+                        // one's block rather than squeezed into it.
+                        child: OverflowBox(
                           key: ValueKey(m.id),
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              m.title ?? '',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: _noticeTitleStyle,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              m.body,
-                              maxLines: fit.bodyLines,
-                              // An ellipsis without a line limit makes Skia
-                              // cut the text to its first line.
-                              overflow: fit.bodyLines == null
-                                  ? TextOverflow.clip
-                                  : TextOverflow.ellipsis,
-                              style: _noticeBodyStyle,
-                            ),
-                          ],
+                          alignment: Alignment.topLeft,
+                          maxHeight: double.infinity,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                m.title ?? '',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: _noticeTitleStyle,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                m.body,
+                                maxLines: fit.bodyLines,
+                                // An ellipsis without a line limit makes
+                                // Skia cut the text to its first line.
+                                overflow: fit.bodyLines == null
+                                    ? TextOverflow.clip
+                                    : TextOverflow.ellipsis,
+                                style: _noticeBodyStyle,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
