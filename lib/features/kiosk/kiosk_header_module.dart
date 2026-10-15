@@ -91,10 +91,18 @@ class KioskHeaderModuleFrame extends StatelessWidget {
       ],
     );
     if (onTap != null) {
-      module = InkWell(
-        onTap: onTap,
+      // Its own (transparent) Material: the ink paints on the nearest one,
+      // and the Scaffold's lies under the bar's opaque background — a tap
+      // would show nothing (as GradientButton has it).
+      module = Material(
+        type: MaterialType.transparency,
         borderRadius: BorderRadius.circular(8),
-        child: module,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: module,
+        ),
       );
     }
     final cap = maxWidth;

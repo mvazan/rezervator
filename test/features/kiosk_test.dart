@@ -3530,6 +3530,46 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('a tap on a module shows: its ink paints on the module\'s '
+          'own Material, above the bar\'s opaque background', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.right);
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: forecast,
+            dutyPeriods: [current],
+            dutyAssignments: serving,
+          ),
+        );
+        await tester.pumpAndSettle();
+        for (final module in [KioskWeatherModule, KioskDutyModule]) {
+          final ink = find.descendant(
+            of: find.byType(module),
+            matching: find.byType(InkWell),
+          );
+          expect(ink, findsOneWidget, reason: '$module');
+          // The Material the ink paints on is the nearest one above it; it
+          // must sit in the module, not be the Scaffold's under the bar.
+          final material = find
+              .ancestor(of: ink, matching: find.byType(Material))
+              .first;
+          expect(
+            find.descendant(of: find.byType(module), matching: material),
+            findsOneWidget,
+            reason: '$module',
+          );
+          expect(
+            tester.widget<Material>(material).type,
+            MaterialType.transparency,
+            reason: '$module',
+          );
+        }
+        await finish(tester);
+      });
+
       testWidgets('a narrow kiosk with large text: every module on, no '
           'overflow — the modules shrink, the names are cut, „Rezervovat“ '
           'stays whole', (tester) async {
