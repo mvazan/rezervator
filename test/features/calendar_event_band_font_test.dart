@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/text_size.dart';
 import 'package:rezervator/core/theme.dart';
-import 'package:rezervator/domain/labels.dart' show BandLine;
+import 'package:rezervator/domain/labels.dart' show BandLine, bandGap;
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
 /// The app's own font: the test font's lines are not Manrope's, and a line
@@ -21,8 +21,8 @@ Future<void> _loadManrope() async {
 
 /// A match band stacks its lines only when every one of them fits: with the
 /// app's font and theme, at any text size and any of the kiosk's band fonts
-/// (0069), in any height, the stack never runs past the band — the time row
-/// at its bottom is not cut off.
+/// (0069), in any height, the stack never runs past the band — the away
+/// team at its bottom is not cut off.
 void main() {
   setUpAll(_loadManrope);
 
@@ -30,7 +30,8 @@ void main() {
   const away = 'KK Orel Ivančice B';
   const time = '18:51–21:51';
   const lines = <BandLine>[
-    (text: '🏆', wraps: false),
+    (text: '🏆 $time', wraps: true),
+    bandGap,
     (text: home, wraps: true),
     (text: '–', wraps: false),
     (text: away, wraps: true),
@@ -74,7 +75,6 @@ void main() {
                     foreground: Colors.white,
                     text: '🏆 $home – $away\n$time',
                     lines: lines,
-                    time: time,
                     bold: true,
                     fontSize: fontSize,
                   ),

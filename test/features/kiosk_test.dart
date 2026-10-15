@@ -4924,18 +4924,19 @@ void main() {
       });
     }
 
-    testWidgets('a match band on the board stacks home, dash and away, so '
-        'no team name breaks in half', (tester) async {
+    testWidgets('a match band on the board stacks the cup with the time, '
+        'then home, dash and away, so no team name breaks in half', (
+      tester,
+    ) async {
       fullHd(tester);
       await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
       await tester.pumpAndSettle();
       Finder inBand(Finder f) =>
           find.descendant(of: find.byType(CalendarEventBand), matching: f);
-      expect(inBand(findEmojiText('🏆')), findsOneWidget);
+      expect(inBand(findEmojiText('🏆 14:00–17:00')), findsOneWidget);
       expect(inBand(find.text('Domácí')), findsOneWidget);
       expect(inBand(find.text('–')), findsOneWidget);
       expect(inBand(find.text('Soupeř')), findsOneWidget);
-      expect(inBand(find.text('14:00–17:00')), findsOneWidget);
       await finish(tester);
     });
 

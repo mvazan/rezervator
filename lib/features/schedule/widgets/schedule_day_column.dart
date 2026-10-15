@@ -286,10 +286,9 @@ class ScheduleDayColumn extends StatelessWidget {
           background: bg,
           foreground: fg,
           text: '${slotEventLabel(m)}\n$time',
-          // A match: home, dash, away, each on its own line when the band
-          // is tall enough.
+          // A match: the cup with the time, a blank line, then home, dash,
+          // away, each on its own line when the band is tall enough.
           lines: matchBandLines(m),
-          time: time,
           bold: true,
           fontSize: bandFontSize,
         );

@@ -13,7 +13,7 @@ import '../../../core/widgets/emoji_text.dart';
 import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
-import '../../../domain/labels.dart' show BandLine;
+import '../../../domain/labels.dart' show BandLine, bandGap;
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
 import 'day_matches_dialog.dart';
@@ -307,7 +307,6 @@ class CalendarEventBand extends StatelessWidget {
     required this.text,
     this.bold = false,
     this.lines,
-    this.time,
     this.fontSize = 10,
   });
 
@@ -318,13 +317,13 @@ class CalendarEventBand extends StatelessWidget {
   final String text;
   final bool bold;
 
-  /// The same, line by line ([matchBandLines]: the cup, home, dash, away),
-  /// with [time] under them — shown when the band is tall enough for every
-  /// line; a team's name then wraps within its own line, onto as many as
+  /// The same, line by line ([matchBandLines]: the cup with the time, a
+  /// blank line, home, dash, away) — shown when the band is tall enough for
+  /// every line, else without its blank lines ([bandGap]) when that is
+  /// enough; a team's name then wraps within its own line, onto as many as
   /// the band has to spare, rather than the pair breaking in the middle of
   /// one.
   final List<BandLine>? lines;
-  final String? time;
 
   /// The text's size in px — the app's 10, the kiosk admin's choice on the
   /// kiosk board (0069).
@@ -374,12 +373,15 @@ class CalendarEventBand extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final fit = (constraints.maxHeight / lineHeight).floor();
-          final stacked = lines;
-          final rows = <BandLine>[
-            ...?stacked,
-            if (time case final t?) (text: t, wraps: false),
-          ];
-          if (stacked == null || fit < rows.length) {
+          var rows = lines;
+          // A line short: the blank lines go before the stack does.
+          if (rows != null && fit < rows.length) {
+            rows = [
+              for (final r in rows)
+                if (r != bandGap) r,
+            ];
+          }
+          if (rows == null || fit < rows.length) {
             return EmojiText(
               text,
               textAlign: TextAlign.center,
@@ -388,33 +390,37 @@ class CalendarEventBand extends StatelessWidget {
               style: style,
             );
           }
-          // The lines to spare go to the names, shared evenly: a name
-          // wraps onto as many as it gets, then ellipsizes.
+          // The lines to spare go to the lines that wrap (the names, the
+          // cup with the time), shared evenly: each wraps onto as many as
+          // it gets, then ellipsizes.
           final wrapping = rows.where((r) => r.wraps).length;
-          final nameLines = wrapping == 0
+          final wrapLines = wrapping == 0
               ? 1
               : 1 + (fit - rows.length) ~/ wrapping;
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final row in rows)
-                // Each row held to the lines it was given, so the stack is
-                // never taller than the band whatever a row draws: the
-                // cup's image sets its line a pixel taller than the text's
-                // at some sizes (12 px: 18 against 17) — that pixel goes,
-                // empty under the image, which stays whole.
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: (row.wraps ? nameLines : 1) * lineHeight,
+                if (row == bandGap)
+                  SizedBox(height: lineHeight)
+                else
+                  // Each row held to the lines it was given, so the stack
+                  // is never taller than the band whatever a row draws: the
+                  // cup's image sets its line a pixel taller than the
+                  // text's at some sizes (12 px: 18 against 17) — that pixel
+                  // goes, empty under the image, which stays whole.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: (row.wraps ? wrapLines : 1) * lineHeight,
+                    ),
+                    child: EmojiText(
+                      row.text,
+                      textAlign: TextAlign.center,
+                      maxLines: row.wraps ? wrapLines : 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: style,
+                    ),
                   ),
-                  child: EmojiText(
-                    row.text,
-                    textAlign: TextAlign.center,
-                    maxLines: row.wraps ? nameLines : 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: style,
-                  ),
-                ),
             ],
           );
         },
