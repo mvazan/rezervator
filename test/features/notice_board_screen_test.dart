@@ -22,12 +22,12 @@ void main() {
     role: Role.admin, status: ProfileStatus.approved,
   );
 
-  Message notice(String id, {DateTime? expiresAt, DateTime? createdAt, String? authorId = 'admin',
-      String body = ''}) => Message(
+  Message notice(String id, {DateTime? expiresAt, DateTime? createdAt, DateTime? visibleFrom,
+      String? authorId = 'admin', String body = ''}) => Message(
         id: id, kind: MessageKind.notice, audience: MessageAudience.all,
         authorId: authorId, authorRole: MessageAuthorRole.admin, onDate: null, blockId: null,
         title: 'Nové dráhy $id', body: body.isEmpty ? 'Text oznamu $id.' : body,
-        expiresAt: expiresAt, notify: true,
+        expiresAt: expiresAt, notify: true, visibleFrom: visibleFrom,
         createdAt: createdAt ?? DateTime(2026, 9, 1), updatedAt: createdAt ?? DateTime(2026, 9, 1),
       );
 
@@ -86,6 +86,40 @@ void main() {
     await tester.tap(find.text('Starší (1)'));
     await tester.pumpAndSettle();
     expect(find.text('Nové dráhy e1'), findsOneWidget);
+  });
+
+  // Newest first since 2026-10-15: the active notices and „Starší“ by when
+  // each went up, the newest on top; the admin's „Naplánované“ by when each
+  // will show, the soonest on top.
+  testWidgets('the newest notice is on top, under „Starší“ too; '
+      '„Naplánované“ go by when they show', (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(app(profile: admin, notices: [
+      notice('a-old', createdAt: DateTime(2026, 9, 1)),
+      notice('a-new', createdAt: DateTime(2026, 9, 20)),
+      // Posted on 25. 8. ahead of time, up since 25. 9.: it counts from
+      // when it went up.
+      notice('a-up', createdAt: DateTime(2026, 8, 25),
+          visibleFrom: DateTime(2026, 9, 25)),
+      notice('e-old', createdAt: DateTime(2026, 8, 1),
+          expiresAt: DateTime(2026, 9, 15)),
+      notice('e-new', createdAt: DateTime(2026, 8, 20),
+          expiresAt: DateTime(2026, 9, 15)),
+      // Posted later, shown later — and the other way round.
+      notice('s-later', createdAt: DateTime(2026, 10, 1),
+          visibleFrom: DateTime(2026, 10, 9, 8)),
+      notice('s-sooner', createdAt: DateTime(2026, 9, 30),
+          visibleFrom: DateTime(2026, 10, 5, 8)),
+    ]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Starší (2)'));
+    await tester.pumpAndSettle();
+    double top(String id) => tester.getTopLeft(find.byKey(ValueKey(id))).dy;
+    final ids = ['a-old', 'a-new', 'a-up', 'e-old', 'e-new', 's-later', 's-sooner']
+      ..sort((a, b) => top(a).compareTo(top(b)));
+    expect(ids, ['s-sooner', 's-later', 'a-up', 'a-new', 'a-old', 'e-new', 'e-old']);
   });
 
   testWidgets('empty board shows the empty state', (tester) async {
@@ -309,16 +343,17 @@ void main() {
     // The hidden one says so; the other does not.
     expect(find.textContaining('skrytý na kiosku'), findsOneWidget);
 
+    // Newest first: the hidden one (2. 9.) is above a1 (1. 9.).
     await openMenu(tester);
-    await tester.tap(find.text('Skrýt na kiosku'));
+    await tester.tap(find.text('Zobrazit na kiosku'));
     await tester.pumpAndSettle();
-    expect(calls, [('a1', false)]);
+    expect(calls, [('h1', true)]);
 
     await tester.tap(find.byType(PopupMenuButton<String>).last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Zobrazit na kiosku'));
+    await tester.tap(find.text('Skrýt na kiosku'));
     await tester.pumpAndSettle();
-    expect(calls.last, ('h1', true));
+    expect(calls.last, ('a1', false));
   });
 
   testWidgets('a notice posted ahead of time: the admin sees it under '
