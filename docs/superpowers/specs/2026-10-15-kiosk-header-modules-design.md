@@ -196,6 +196,54 @@ ve Správě → Služby; ťuk ukáže plán.
   v Záhlaví, kartu do panelu v Panelech (výš).“ „V kalendáři“ and „Kde je pás“
   stay.
 
+## Weather values (added after the first review)
+
+The user asked whether the weather can show other values, the admin choosing
+— e.g. only the temperature now, or today's high and low as now — and picked
+all four offered, in this PR (0082 is not deployed yet, so it grows a column).
+
+- **Data (0082):** `schedule_settings.kiosk_weather_items text[] not null
+  default '{range,rain}'` — what the weather module shows beside the
+  temperature now (always shown): `range` (today's high / low), `feels`
+  (feels-like now), `wind` (wind now, km/h, with gusts), `rain` (today's
+  rain or snow). Named check `schedule_settings_kiosk_weather_items_check`:
+  `kiosk_weather_items <@ array['range','feels','wind','rain']`. The default is
+  what the kiosk showed before (high/low and the umbrella), so nothing changes
+  for an alley until its admin picks.
+- **Fetch:** Open-Meteo (ČHMÚ ALADIN, verified 2026-10-15 for Brno) also asks
+  `current` `apparent_temperature,wind_speed_10m,wind_gusts_10m` and `daily`
+  `precipitation_sum` (km/h is Open-Meteo's default wind unit). Missing values
+  read as null and their item shows nothing.
+- **Model:** `enum KioskWeatherItem { range, feels, wind, rain }` (names = DB
+  values, never rename), `ScheduleSettings.kioskWeatherItems` (a `Set`, unknown
+  strings skipped, a missing column = `{range, rain}`, an empty array = only the
+  temperature); `KioskWeather` gains `feelsLike`, `wind`, `gusts`,
+  `precipitationSum`.
+- **Kiosk, in this order after the icon and the temperature now:**
+  - `range`: „16° / 6°“ (as today);
+  - `feels`: „pocitově 6°“;
+  - `wind`: air icon + „12 km/h“, and „, nárazy 25“ when the gusts are at
+    least 10 km/h above the wind;
+  - `rain`: as today — the umbrella only when rain or snow is likely: chance
+    at least 30 % or a sum of at least 0.1 mm; then „60 %“ and/or „3 mm“
+    (sum rounded to whole mm, „< 1 mm“ under 1).
+  - The semantics label lists the same values in words („pocitově …“, „vítr …
+    km/h, nárazy …“, „srážky … %, … mm“).
+  - The weather module may take up to 0.3 of the screen's width (the others
+    0.2); the row still scales down to fit.
+- **Admin (Záhlaví, under „Nadpis počasí“, only while the weather is
+  placed):** label „Údaje počasí“ and four `FilterChip`s in a `Wrap`:
+  „Nejvyšší a nejnižší“, „Pocitová teplota“, „Vítr“, „Srážky“; a tap PATCHes
+  `{'kiosk_weather_items': [...]}` — the whole set, in the enum's order. The
+  note under the table adds: „Teplota teď je vždy; ostatní údaje vybereš
+  u počasí.“ (or similar, short).
+- **Tests:** weather parse of the new fields (`weather_test.dart`), settings
+  parse (`models_test.dart`), the module per item set incl. empty set and
+  rain threshold (`kiosk_day_info_test.dart`), the admin chips' PATCH
+  (`kiosk_screen_test.dart`), tenancy suite: default `{range,rain}` for a new
+  alley, an unknown item refused (`check_violation`), the admin saves the
+  items.
+
 ## Changelog
 
 One bullet first in today's unreleased entry (15. 10. 2026) and a short store
