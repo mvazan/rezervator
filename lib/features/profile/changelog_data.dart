@@ -56,7 +56,9 @@ const appChangelog = <Release>[
         'nově „Službu má:“ (místo řádku pod hodinami) a nástěnka. Ve Správě '
         '→ Kiosk → Záhlaví '
         'každému zvolíš, jestli je vlevo, nebo vpravo, a pořadí; dnešní '
-        'zápasy jsou uprostřed, domácí nad venkovními.',
+        'zápasy jsou uprostřed, domácí nad venkovními. Počasí ukáže vedle '
+        'teploty, co správce vybere: pocitovou teplotu, vítr, srážky, '
+        'nejvyšší a nejnižší.',
     'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '
         'Panely správce každému modulu (služba na kantýně, nástěnka, zápasy, '
         'Jak začít, Hráči týdne) určí panel, podíl na výšce a pořadí; každý '
