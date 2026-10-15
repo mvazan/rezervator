@@ -75,6 +75,30 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// The cards of [fresh] carry the „Nové“ chip (`primaryContainer`) and
+  /// the 4 px `primary` stripe; the cards of [plain] neither.
+  void expectNew(WidgetTester tester,
+      {required Set<String> fresh, required List<String> plain}) {
+    final scheme =
+        Theme.of(tester.element(find.byType(NoticeBoardScreen))).colorScheme;
+    expect(find.text('Nové'), findsNWidgets(fresh.length));
+    for (final id in fresh) {
+      final chip = find.descendant(
+          of: find.byKey(ValueKey(id)), matching: find.widgetWithText(Chip, 'Nové'));
+      expect(chip, findsOneWidget, reason: id);
+      expect(tester.widget<Chip>(chip).backgroundColor, scheme.primaryContainer);
+      expect(tester.widget<Chip>(chip).labelStyle?.color, scheme.onPrimaryContainer);
+      final stripe = tester.widget<Container>(find.byKey(ValueKey('notice-new-$id')));
+      expect(((stripe.decoration! as BoxDecoration).border! as Border).left,
+          BorderSide(color: scheme.primary, width: 4), reason: id);
+    }
+    for (final id in plain) {
+      expect(find.descendant(of: find.byKey(ValueKey(id)), matching: find.text('Nové')),
+          findsNothing, reason: id);
+      expect(find.byKey(ValueKey('notice-new-$id')), findsNothing, reason: id);
+    }
+  }
+
   testWidgets('active notices show, expired collapse under "Starší"', (tester) async {
     final active = notice('a1');
     final expired = notice('e1', expiresAt: DateTime(2026, 9, 15));
@@ -566,6 +590,115 @@ void main() {
     mine.add([old, row('a1', 'me')]);
     await tester.pumpAndSettle();
     expect(marked, [['a1']]);
+  });
+
+  // „Nové“ = what this visit found unread and marked read, not read_at:
+  // the optimistic write clears that within a frame, and the next visit
+  // finds the notice read — plain, like the badge.
+  testWidgets('the notices unread on opening are „Nové“ for the visit, also '
+      'once the read lands; read, unknown and expired ones are not; the next '
+      'visit shows none', (tester) async {
+    final mine = StreamController<List<MessageRecipient>>();
+    addTearDown(mine.close);
+    final marked = <List<String>>[];
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(me)),
+        messagesProvider.overrideWith((ref) => Stream.value([
+              notice('n1'),
+              notice('r1'),
+              notice('x1'),
+              notice('e1', expiresAt: DateTime(2026, 9, 15)),
+            ])),
+        myMessageRecipientsProvider.overrideWith((ref) => mine.stream),
+        nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+      ],
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => NoticeBoardScreen(markRead: (ids) async => marked.add(ids)),
+              )),
+              child: const Text('KLUBOVNA'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    // n1 unread, r1 read, x1 posted before I joined (no row for me), e1
+    // expired while still unread.
+    mine.add([
+      row('n1', 'me'),
+      row('r1', 'me', readAt: DateTime(2026, 9, 2)),
+      row('e1', 'me'),
+    ]);
+    await tester.tap(find.text('KLUBOVNA'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Starší (1)'));
+    await tester.pumpAndSettle();
+    expect(marked, [['n1']]);
+    expectNew(tester, fresh: {'n1'}, plain: ['r1', 'x1', 'e1']);
+
+    // The optimistic write's echo: n1 is read now, and still new on this
+    // visit.
+    mine.add([
+      row('n1', 'me', readAt: DateTime(2026, 10, 2, 12)),
+      row('r1', 'me', readAt: DateTime(2026, 9, 2)),
+      row('e1', 'me'),
+    ]);
+    await tester.pumpAndSettle();
+    expectNew(tester, fresh: {'n1'}, plain: ['r1', 'x1', 'e1']);
+
+    // The next visit finds it read: plain, and not marked again.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('KLUBOVNA'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nové dráhy n1'), findsOneWidget);
+    expectNew(tester, fresh: const {}, plain: ['n1', 'r1', 'x1']);
+    expect(marked, [['n1']]);
+  });
+
+  // message_send gives every member a row but the author: an admin's own
+  // notice is never unread to them, so never new — the badge's rule.
+  testWidgets('an admin\'s own notice is never „Nové“, another admin\'s '
+      'unread one is', (tester) async {
+    await tester.pumpWidget(app(
+      profile: admin,
+      notices: [notice('own'), notice('other', authorId: 'admin2')],
+      recipients: [row('own', 'p1'), row('other', 'admin'), row('other', 'p1')],
+    ));
+    await tester.pumpAndSettle();
+    expectNew(tester, fresh: {'other'}, plain: ['own']);
+  });
+
+  // Posted while the board is open: listed, marked read on this visit
+  // (above) — and new on this visit too.
+  testWidgets('a notice that arrives while the board is open is „Nové“', (tester) async {
+    final messages = StreamController<List<Message>>();
+    final mine = StreamController<List<MessageRecipient>>();
+    addTearDown(messages.close);
+    addTearDown(mine.close);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(me)),
+        messagesProvider.overrideWith((ref) => messages.stream),
+        myMessageRecipientsProvider.overrideWith((ref) => mine.stream),
+        nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+      ],
+      child: const MaterialApp(home: NoticeBoardScreen(markRead: _noMark)),
+    ));
+    final old = row('o1', 'me', readAt: DateTime(2026, 9, 2));
+    messages.add([notice('o1')]);
+    mine.add([old]);
+    await tester.pumpAndSettle();
+    expectNew(tester, fresh: const {}, plain: ['o1']);
+
+    messages.add([notice('o1'), notice('a1', createdAt: DateTime(2026, 10, 2, 11))]);
+    mine.add([old, row('a1', 'me')]);
+    await tester.pumpAndSettle();
+    expectNew(tester, fresh: {'a1'}, plain: ['o1']);
   });
 
   // Each seen count is its own realtime channel, and notices are never
