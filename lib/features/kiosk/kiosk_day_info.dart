@@ -93,8 +93,9 @@ class _KioskDayInfoState extends ConsumerState<KioskDayInfo> {
     final scheme = Theme.of(context).colorScheme;
     final quiet = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
     // At most a quarter of the screen: the status bar's middle (today's
-    // matches, the notices) and „Rezervovat“ keep their room on a narrow
-    // kiosk with large text — the weather shrinks, the name day ellipsizes.
+    // matches, the notices) and „Rezervace tréninku“ (at most two fifths,
+    // scaled down to fit) keep their room on a narrow kiosk with large
+    // text — the weather shrinks, the name day ellipsizes.
     return ConstrainedBox(
       constraints: BoxConstraints(
         maxWidth: MediaQuery.sizeOf(context).width * kioskDayInfoShare,

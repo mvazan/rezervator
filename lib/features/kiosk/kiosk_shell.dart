@@ -6,6 +6,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,6 +37,9 @@ import '../../core/widgets/emoji_text.dart';
 
 /// How long before the idle reset the bar starts running out.
 const _warnFor = Duration(seconds: 10);
+
+/// The kiosk's main action, in the status bar: what the wall tablet is for.
+const kioskReserveLabel = 'Rezervace tréninku';
 
 class KioskShell extends ConsumerStatefulWidget {
   const KioskShell({super.key});
@@ -325,6 +329,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
         (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
     final open = _drawerOverride ?? restingOpen;
     void toggle() => setState(() => _drawerOverride = !open);
+    // A visitor picked their name: the board is what they came for — the
+    // drawer and its button step aside until the pick is cleared (or the
+    // idle reset), then the drawer is as it was, live match and all.
+    final picking = _selected != null;
     // The board and the drawer each on their own layer: the drawer's turns
     // (a notice, the live match) do not re-record the board, nor the
     // board's scroll the drawer. On the web the GPU still redraws every
@@ -339,6 +347,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
               child: KioskDrawer(
                 content: content,
                 open: open,
+                hidden: picking,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatch,
                 onPlay: play,
@@ -354,20 +363,21 @@ class _KioskShellState extends ConsumerState<KioskShell>
         ),
         // Floats over the board, vertically centred, at the drawer's left
         // edge — or at the screen's, once the drawer is gone.
-        AnimatedPositioned(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-          top: 0,
-          bottom: 0,
-          right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
-          child: Center(
-            child: KioskDrawerButton(
-              open: open,
-              onTap: toggle,
-              breathe: settings?.kioskAnimations ?? true,
+        if (!picking)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            top: 0,
+            bottom: 0,
+            right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
+            child: Center(
+              child: KioskDrawerButton(
+                open: open,
+                onTap: toggle,
+                breathe: settings?.kioskAnimations ?? true,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -674,62 +684,57 @@ class _StatusBar extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 16),
+            // The kiosk's main action, the bar's largest control — scaled
+            // down, never cut, on a screen too narrow for it (at most two
+            // fifths of the bar).
             selected == null
-                ? GradientButton(
-                    onPressed: onReserve,
-                    icon: Icons.person_add,
-                    minHeight: 56,
-                    child: const Text('Rezervovat'),
+                ? ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.sizeOf(context).width * 0.4,
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: GradientButton(
+                        onPressed: onReserve,
+                        icon: Icons.person_add,
+                        minHeight: 72,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        iconSize: 34,
+                        child: const Text(kioskReserveLabel),
+                      ),
+                    ),
                   )
-                : Container(
-                    // Capped, so a long name ellipsizes in its chip rather
-                    // than push the bar wider than the screen — the middle
-                    // is all that gives way (it may shrink to nothing).
-                    constraints: const BoxConstraints(
-                      minHeight: 56,
-                      maxWidth: 360,
+                // Who books: the name the board shows (the nick), plain on
+                // the bar. Capped like the button, so a long name
+                // ellipsizes rather than push the bar wider than the
+                // screen — the middle is all that gives way.
+                : ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: 72,
+                      maxWidth: math.min(
+                        420,
+                        MediaQuery.sizeOf(context).width * 0.4,
+                      ),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    // No avatar: the players have no pictures yet.
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: scheme.onPrimaryContainer.withValues(
-                            alpha: 0.16,
-                          ),
-                          child: Text(
-                            initialsOf(selected!.displayName),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onPrimaryContainer,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
                         Flexible(
                           child: Text(
-                            'Rezervuje: ${selected!.displayName}',
+                            'Rezervuje: ${selected!.boardName}',
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onPrimaryContainer,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
                         IconButton(
                           iconSize: 40,
+                          tooltip: 'Zrušit výběr',
                           icon: const Icon(Icons.close),
-                          color: scheme.onPrimaryContainer,
                           onPressed: onClearSelection,
                         ),
                       ],

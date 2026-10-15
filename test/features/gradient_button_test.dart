@@ -34,4 +34,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(labelColor(tester), Colors.white);
   });
+
+  testWidgets('the gradient paints on the button\'s own Material: an opaque '
+      'background under the button (the kiosk status bar) does not hide it',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Container(
+            key: const ValueKey('bar'),
+            color: Colors.grey,
+            child: GradientButton(
+              onPressed: () {},
+              child: const Text('Rezervace tréninku'),
+            ),
+          ),
+        ),
+      ),
+    );
+    // The Material the Ink paints on is the nearest one above it; it must
+    // sit above the opaque bar, not be the Scaffold's beneath it.
+    final material = find
+        .ancestor(of: find.byType(Ink), matching: find.byType(Material))
+        .first;
+    expect(
+      find.descendant(of: find.byKey(const ValueKey('bar')), matching: material),
+      findsOneWidget,
+    );
+    expect(tester.widget<Material>(material).type, MaterialType.transparency);
+  });
 }

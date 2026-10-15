@@ -13,7 +13,7 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
 - **Kiosek** — sdílený dotykový tablet zavěšený přímo na kuželně: kdokoliv
   schválený si najde svoje jméno a rezervuje bez přihlašování vlastním
   účtem. Kiosek nikdy nic neruší a nikomu jinému nic neukazuje — jen
-  vlastní rozvrh a tlačítko „Rezervovat".
+  vlastní rozvrh a tlačítko „Rezervace tréninku“.
 
 ## Stack
 

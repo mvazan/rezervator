@@ -1,5 +1,5 @@
 /// The notices in the kiosk's status bar, between the clock and
-/// „Rezervovat“: the title of one notice, large enough to read from across
+/// „Rezervace tréninku“: the title of one notice, large enough to read from across
 /// the room, and every few seconds (the admin's notice rotation) a soft
 /// cross-fade to the next, right where it stays. Nothing moves in between —
 /// a running news strip pulled the eye all the time. A tap opens the notice

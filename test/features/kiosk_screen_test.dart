@@ -1126,7 +1126,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(
-        find.text('Žádné. Upozornění pod písmeny při výběru jména na kiosku.'),
+        find.text('Žádné. Upozornění na první stránce výběru hráče na kiosku.'),
         findsOneWidget,
       );
       expect(find.byTooltip('Odstranit upozornění při rezervaci'), findsNothing);
@@ -1212,6 +1212,64 @@ void main() {
       await tester.tap(find.byTooltip('Odstranit upozornění při rezervaci'));
       await tester.pumpAndSettle();
       expect(lastPatch(), {'kiosk_picker_note': null});
+    });
+
+    testWidgets('how the picker starts (0076): by letters by default, right '
+        'under the note; PATCHes kiosk_picker_mode', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      final dropdown = find.byType(DropdownButtonFormField<KioskPickerMode>);
+      expect(
+        find.descendant(of: dropdown, matching: find.text('Výběr hráče')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dropdown, matching: find.text('Podle písmen')),
+        findsOneWidget,
+      );
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(
+        top(dropdown),
+        greaterThan(top(find.text('Upozornění při rezervaci'))),
+      );
+      expect(top(dropdown), lessThan(top(find.text('Písmo upozornění'))));
+
+      await tester.ensureVisible(dropdown);
+      await tester.tap(find.text('Podle písmen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Podle oddílu i písmen').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_picker_mode': 'both'});
+
+      await tester.tap(find.text('Podle oddílu i písmen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Podle oddílu').last);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_picker_mode': 'clubs'});
+    });
+
+    testWidgets('the admin\'s picker mode shows chosen', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskPickerMode: KioskPickerMode.clubs,
+          tenantId: 't',
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(DropdownButtonFormField<KioskPickerMode>),
+          matching: find.text('Podle oddílu'),
+        ),
+        findsOneWidget,
+      );
     });
   });
 

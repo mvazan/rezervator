@@ -7,8 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
-import 'package:rezervator/core/ui.dart' show dayFull, dayLabel, today;
+import 'package:rezervator/core/ui.dart'
+    show dayFull, dayLabel, initialsOf, today;
 import 'package:rezervator/core/widgets/emoji_text.dart';
+import 'package:rezervator/core/widgets/gradient_button.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/duties.dart'
@@ -177,12 +179,13 @@ void main() {
   }
 
   testWidgets(
-    'a: shell shows status bar with Rezervovat and no logout/admin icons',
+    'a: shell shows status bar with „Rezervace tréninku“ and no '
+    'logout/admin icons',
     (tester) async {
       await tester.pumpWidget(kioskApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('Rezervovat'), findsOneWidget);
+      expect(find.text(kioskReserveLabel), findsOneWidget);
       expect(find.byIcon(Icons.logout), findsNothing);
       expect(find.byIcon(Icons.admin_panel_settings), findsNothing);
       expect(find.byType(AppBar), findsNothing);
@@ -221,13 +224,14 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('b: tapping Rezervovat opens picker with first-letter tiles', (
+  testWidgets('b: tapping „Rezervace tréninku“ opens picker with '
+      'first-letter tiles', (
     tester,
   ) async {
     await tester.pumpWidget(kioskApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
 
     // 26 candidates > the picker's fixed capacity → root shows one
@@ -255,7 +259,7 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(kioskApp());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
 
     final hint = find.text(firstLetterHint);
@@ -274,7 +278,7 @@ void main() {
     // Few players: their names straight away, no letters to explain.
     await tester.pumpWidget(kioskApp(roster: [anna, petr]));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(find.text(anna.displayName), findsOneWidget);
     expect(hint, findsNothing);
@@ -291,7 +295,7 @@ void main() {
       kioskApp(kioskPickerNote: ScheduleSettings.defaultPickerNote),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
 
     final note = find.byType(KioskWarning);
@@ -309,8 +313,9 @@ void main() {
       greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
     );
     expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(1080));
-    // Not stretched across a wide screen: centred, at most 1000 px.
-    expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
+    // Wide, so it takes few lines, yet not across the whole wall display:
+    // centred, at most 1600 px.
+    expect(tester.getSize(note).width, lessThanOrEqualTo(1600));
     expect(tester.getCenter(note).dx, closeTo(960, 1));
     expect(tester.takeException(), isNull);
 
@@ -337,7 +342,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(note, findsOneWidget);
     expect(hint, findsOneWidget);
@@ -357,7 +362,7 @@ void main() {
       kioskApp(kioskPickerNote: 'Zrušit jde jen v aplikaci.'),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(
       find.descendant(
@@ -370,7 +375,7 @@ void main() {
 
     await tester.pumpWidget(kioskApp());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(hint, findsOneWidget);
     expect(note, findsNothing);
@@ -397,7 +402,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Rezervovat'));
+      await tester.tap(find.text(kioskReserveLabel));
       await tester.pumpAndSettle();
 
       expect(find.text(anna.displayName), findsOneWidget);
@@ -411,7 +416,7 @@ void main() {
         greaterThan(tester.getBottomLeft(find.text(roster.last.displayName)).dy),
       );
       expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(1080));
-      expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
+      expect(tester.getSize(note).width, lessThanOrEqualTo(1600));
       expect(tester.getCenter(note).dx, closeTo(960, 1));
       expect(tester.takeException(), isNull);
       await finish(tester);
@@ -422,7 +427,7 @@ void main() {
       kioskApp(kioskPickerNote: ScheduleSettings.defaultPickerNote),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     await tester.tap(find.text('A'));
     await tester.pumpAndSettle();
@@ -433,7 +438,7 @@ void main() {
     // No note set: the names alone.
     await tester.pumpWidget(kioskApp(roster: [anna, petr]));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(find.text(anna.displayName), findsOneWidget);
     expect(note, findsNothing);
@@ -496,7 +501,7 @@ void main() {
       await tester.pumpWidget(kioskApp());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Rezervovat'));
+      await tester.tap(find.text(kioskReserveLabel));
       await tester.pumpAndSettle();
       await tester.tap(find.text('A')); // drill into the 'A' prefix tile
       await tester.pumpAndSettle();
@@ -508,18 +513,82 @@ void main() {
         findsOneWidget,
       );
       // The picker button is replaced by the selection banner.
-      expect(find.text('Rezervovat'), findsNothing);
+      expect(find.text(kioskReserveLabel), findsNothing);
 
       await finish(tester);
     },
   );
+
+  testWidgets('the main action: „Rezervace tréninku“ in 26 px extra bold, '
+      'on its gradient in a button 72 px tall', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(kioskApp());
+    await tester.pumpAndSettle();
+    final style = DefaultTextStyle.of(
+      tester.element(find.text(kioskReserveLabel)),
+    ).style;
+    expect(style.fontSize, 26);
+    expect(style.fontWeight, FontWeight.w800);
+    // As drawn — after the scaling that fits it to a narrow bar.
+    expect(tester.getRect(find.byType(GradientButton)).height,
+        greaterThanOrEqualTo(72));
+    await finish(tester);
+  });
+
+  testWidgets('the banner names who books by their nick — the name the '
+      'board shows — plain on the bar, without a box', (tester) async {
+    const bobo = PlayerName(id: 'bobo', displayName: 'Jan Novák', nick: 'Bobo');
+    await tester.pumpWidget(kioskApp(roster: [...players, bobo]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(kioskReserveLabel));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bobo'));
+    await tester.pumpAndSettle();
+
+    final banner = find.text('Rezervuje: Bobo');
+    expect(banner, findsOneWidget);
+    expect(find.textContaining('Jan Novák'), findsNothing);
+    // No avatar, no initials: the players have no pictures yet.
+    expect(find.byType(CircleAvatar), findsNothing);
+    expect(find.text(initialsOf('Bobo')), findsNothing);
+    // No box: nothing between the banner and the bar's own background
+    // paints one.
+    final bar = Theme.of(tester.element(banner)).colorScheme
+        .surfaceContainerHighest;
+    expect(
+      find.ancestor(
+        of: banner,
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is DecoratedBox ||
+              w is Card ||
+              w is Chip ||
+              (w is ColoredBox && w.color.a > 0 && w.color != bar) ||
+              (w is Material &&
+                  w.type != MaterialType.canvas &&
+                  w.type != MaterialType.transparency),
+        ),
+      ),
+      findsNothing,
+      reason: 'no box around the banner',
+    );
+    await tester.tap(find.byTooltip('Zrušit výběr'));
+    await tester.pumpAndSettle();
+    expect(find.text(kioskReserveLabel), findsOneWidget);
+    await finish(tester);
+  });
 
   testWidgets('d: with a selected player, tapping a + cell opens the booking '
       'confirm dialog containing the player\'s name', (tester) async {
     await tester.pumpWidget(kioskApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     await tester.tap(find.text('A'));
     await tester.pumpAndSettle();
@@ -546,7 +615,7 @@ void main() {
     'limit free slots offer it',
     (tester) async {
       Future<void> selectAnna() async {
-        await tester.tap(find.text('Rezervovat'));
+        await tester.tap(find.text(kioskReserveLabel));
         await tester.pumpAndSettle();
         await tester.tap(find.text('A'));
         await tester.pumpAndSettle();
@@ -612,7 +681,7 @@ void main() {
       await tester.pumpWidget(kioskApp(roster: [...players, ghost]));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Rezervovat'));
+      await tester.tap(find.text(kioskReserveLabel));
       await tester.pumpAndSettle();
       await tester.tap(find.text('B'));
       await tester.pumpAndSettle();
@@ -650,7 +719,7 @@ void main() {
     );
     await tester.pumpWidget(kioskApp(roster: [...players, ghost]));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     await tester.tap(find.text('B'));
     await tester.pumpAndSettle();
@@ -758,7 +827,7 @@ void main() {
       'searching for their name is not sent back to the board', (tester) async {
     await tester.pumpWidget(kioskApp(kioskIdleSeconds: 30));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(find.text('Kdo si rezervuje?'), findsOneWidget);
 
@@ -786,7 +855,7 @@ void main() {
       roster: [...players, const PlayerName(id: 'ch', displayName: 'Chalupa')],
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
 
     final tiles = find.byWidgetPredicate(
@@ -825,7 +894,7 @@ void main() {
     const note = 'Odhlásit se tu nedá.';
     await tester.pumpWidget(kioskApp(kioskPickerNote: note));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     final hint = tester
         .widget<Text>(find.text(firstLetterHint))
@@ -840,7 +909,7 @@ void main() {
       kioskApp(kioskPickerNote: note, kioskWarningFontSize: 30),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
     expect(size(note), 30);
     await tester.tap(find.byIcon(Icons.close));
@@ -864,7 +933,7 @@ void main() {
     await tester.pumpWidget(kioskApp(theme: buildTheme(Brightness.light)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Rezervovat'));
+    await tester.tap(find.text(kioskReserveLabel));
     await tester.pumpAndSettle();
 
     // showNamePicker(context) in kiosk_shell.dart uses the shell State's
@@ -893,7 +962,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Rezervovat'));
+      await tester.tap(find.text(kioskReserveLabel));
       await tester.pumpAndSettle();
 
       expect(
@@ -1885,6 +1954,35 @@ void main() {
       addTearDown(tester.view.reset);
     }
 
+    testWidgets('a visitor who picked their name gets the board alone: the '
+        'drawer and its button step aside, and are back as they were once '
+        'the pick is cleared', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(notices: [notice('1', 'Brigáda')], drawerOpen: true),
+      );
+      await tester.pumpAndSettle();
+      // Open = as wide as its columns; shut = nothing of it on screen.
+      bool open() => tester.getSize(find.byType(KioskDrawer)).width > 0;
+      expect(open(), isTrue);
+      expect(find.byType(KioskDrawerButton), findsOneWidget);
+
+      await tester.tap(find.text(kioskReserveLabel));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(players.first.displayName));
+      await tester.pumpAndSettle();
+      expect(open(), isFalse);
+      expect(find.byType(KioskDrawerButton), findsNothing);
+
+      await tester.tap(find.byTooltip('Zrušit výběr'));
+      await tester.pumpAndSettle();
+      expect(open(), isTrue);
+      expect(find.byType(KioskDrawerButton), findsOneWidget);
+      await finish(tester);
+    });
+
     final openButton = find.byIcon(Icons.keyboard_double_arrow_left);
     final closeButton = find.byIcon(Icons.keyboard_double_arrow_right);
     // The match being played across the drawer: its scoreboard there (the
@@ -1896,6 +1994,42 @@ void main() {
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+
+    testWidgets('hidden for a pick, the drawer keeps the match being played: '
+        'it still asks for the score, and is back as it was — not opened '
+        'anew — once the pick is cleared', (tester) async {
+      fullHd(tester);
+      final asked = <String>[];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+          liveRefresh: 30,
+          onRefresh: asked.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(liveView, findsOneWidget);
+      expect(asked, ['m']);
+
+      await tester.tap(find.text(kioskReserveLabel));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(players.first.displayName));
+      await tester.pumpAndSettle();
+      expect(liveView, findsNothing, reason: 'out of sight');
+      await tester.pump(const Duration(seconds: 31));
+      expect(asked, ['m', 'm'], reason: 'still asking while hidden');
+
+      await tester.tap(find.byTooltip('Zrušit výběr'));
+      await tester.pumpAndSettle();
+      expect(liveView, findsOneWidget);
+      // A live view opened anew would ask at once.
+      expect(asked, ['m', 'm']);
+      await finish(tester);
+    });
 
     group('stream window', () {
       const video = 'https://www.youtube.com/watch?v=wOq9EODb8w8';
@@ -2022,7 +2156,7 @@ void main() {
           app(stream: true, slots: onAir, results: playing),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Rezervovat'));
+        await tester.tap(find.text(kioskReserveLabel));
         await tester.pumpAndSettle();
         expect(find.byType(NamePicker), findsOneWidget);
         expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
@@ -2040,7 +2174,7 @@ void main() {
           app(stream: true, slots: onAir, results: playing),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Rezervovat'));
+        await tester.tap(find.text(kioskReserveLabel));
         await tester.pumpAndSettle();
         await tester.tap(find.text('A'));
         await tester.pumpAndSettle();
@@ -2917,7 +3051,7 @@ void main() {
       );
       expect(
         tester.getTopRight(nameday).dx,
-        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+        lessThan(tester.getTopLeft(find.text(kioskReserveLabel)).dx),
       );
       await finish(tester);
 
@@ -2942,7 +3076,7 @@ void main() {
       );
       expect(
         tester.getTopRight(text).dx,
-        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+        lessThan(tester.getTopLeft(find.text(kioskReserveLabel)).dx),
       );
       await finish(tester);
 
@@ -4680,7 +4814,7 @@ void main() {
       // Left of „Rezervovat“.
       expect(
         tester.getCenter(bar).dx,
-        lessThan(tester.getCenter(find.text('Rezervovat')).dx),
+        lessThan(tester.getCenter(find.text(kioskReserveLabel)).dx),
       );
 
       // Within one turn (settling already ran part of the clock) it fades
@@ -5557,7 +5691,7 @@ void main() {
         }
 
         await expectBoard('before');
-        await tester.tap(find.text('Rezervovat'));
+        await tester.tap(find.text(kioskReserveLabel));
         await tester.pumpAndSettle();
         await tester.tap(find.text('A'));
         await tester.pumpAndSettle();

@@ -235,6 +235,43 @@ void main() {
       expect(KioskDutyBandPosition.parse(null), KioskDutyBandPosition.middle);
     });
 
+    test('fromJson reads how the name picker starts (0076); with the letters '
+        'when absent or unknown', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      for (final (name, mode, clubs, letters) in [
+        ('letters', KioskPickerMode.letters, false, true),
+        ('clubs', KioskPickerMode.clubs, true, false),
+        ('both', KioskPickerMode.both, true, true),
+      ]) {
+        final read = ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_picker_mode': name,
+        }).kioskPickerMode;
+        expect(read, mode);
+        // The name is the column's value.
+        expect(mode.name, name);
+        expect(mode.showsClubs, clubs);
+        expect(mode.showsLetters, letters);
+      }
+      expect(
+        ScheduleSettings.fromJson(base).kioskPickerMode,
+        KioskPickerMode.letters,
+      );
+      expect(
+        ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_picker_mode': 'teams',
+        }).kioskPickerMode,
+        KioskPickerMode.letters,
+      );
+      expect(ScheduleSettings.defaults.kioskPickerMode, KioskPickerMode.letters);
+    });
+
     test('fromJson reads the streams master switch (0072); on when absent',
         () {
       const base = {

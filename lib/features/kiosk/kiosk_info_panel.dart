@@ -155,6 +155,7 @@ class KioskDrawer extends ConsumerWidget {
     super.key,
     required this.content,
     required this.open,
+    this.hidden = false,
     required this.onOpenNotice,
     required this.onOpenMatch,
     this.onPlay,
@@ -179,6 +180,12 @@ class KioskDrawer extends ConsumerWidget {
 
   final KioskPanelContent content;
   final bool open;
+
+  /// Out of the way while a visitor books: shut like a closed drawer, yet
+  /// an [open] one keeps its contents built behind the scenes — the match
+  /// being played keeps asking for its score, its pin and its turn, and is
+  /// there as it was once the pick is cleared.
+  final bool hidden;
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
 
@@ -245,7 +252,7 @@ class KioskDrawer extends ConsumerWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
-      width: open ? width : 0,
+      width: open && !hidden ? width : 0,
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(color: scheme.surfaceContainer),
       // Laid out at its full width even while it grows or shrinks, so the
@@ -256,39 +263,44 @@ class KioskDrawer extends ConsumerWidget {
         maxWidth: width,
         child: !open
             ? const SizedBox.shrink()
-            : content.live.isNotEmpty && (showLive || matches == null)
-            ? _LiveView(
-                matches: content.live,
-                turn: liveTurn,
-                onOpenMatch: onOpenMatch,
-                onPlay: onPlay,
-                onShowList: matches == null || onShowLive == null
-                    ? null
-                    : () => onShowLive!(false),
-              )
-            : Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // The canteen duty on top, its share of the height (the
-                    // rest keeps its own split below); alone it fills.
-                    if (duty != null && rest.isNotEmpty) ...[
-                      Expanded(flex: dutyShare, child: duty),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        flex: 100 - dutyShare,
+            : Offstage(
+                offstage: hidden,
+                child:
+                    content.live.isNotEmpty && (showLive || matches == null)
+                    ? _LiveView(
+                        matches: content.live,
+                        turn: liveTurn,
+                        onOpenMatch: onOpenMatch,
+                        onPlay: onPlay,
+                        onShowList: matches == null || onShowLive == null
+                            ? null
+                            : () => onShowLive!(false),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: rest,
+                          children: [
+                            // The canteen duty on top, its share of the
+                            // height (the rest keeps its own split below);
+                            // alone it fills.
+                            if (duty != null && rest.isNotEmpty) ...[
+                              Expanded(flex: dutyShare, child: duty),
+                              const SizedBox(height: 12),
+                              Expanded(
+                                flex: 100 - dutyShare,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: rest,
+                                ),
+                              ),
+                            ] else if (duty != null)
+                              Expanded(child: duty)
+                            else
+                              ...rest,
+                          ],
                         ),
                       ),
-                    ] else if (duty != null)
-                      Expanded(child: duty)
-                    else
-                      ...rest,
-                  ],
-                ),
               ),
       ),
     );

@@ -90,6 +90,28 @@ void main() {
     });
   }
 
+  testWidgets('on the kiosk the note is wide, so it takes few lines: the '
+      'default text two at most, 300 characters three', (tester) async {
+    double height(String note) => tester
+        .getSize(
+          find.descendant(of: find.text(note), matching: find.byType(RichText)),
+        )
+        .height;
+    // A fresh scope each time: a kept one keeps its first settings.
+    Future<void> fresh(String note) async {
+      await tester.pumpWidget(const SizedBox());
+      await pump(tester, const Size(1920, 1080), note);
+    }
+
+    await fresh('Odhlásit se tu nedá.');
+    final line = height('Odhlásit se tu nedá.');
+    await fresh(ScheduleSettings.defaultPickerNote);
+    expect(height(ScheduleSettings.defaultPickerNote) / line,
+        lessThanOrEqualTo(2.01));
+    await fresh(note300);
+    expect(height(note300) / line, lessThanOrEqualTo(3.01));
+  });
+
   testWidgets('a 300 character warning is whole in the status bar (4 lines at 22 px)',
       (tester) async {
     tester.view.physicalSize = const Size(1280, 800);

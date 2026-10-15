@@ -12194,4 +12194,40 @@ begin
   raise notice 'OK: the notice font and the day dialog width keep to their ranges, off the public overview (0075)';
 end $$;
 
+-- 0076: the name picker starts with letters unless the admin says
+-- otherwise — on every alley, a new one too; only the three modes go in,
+-- and the mode stays off the public overview. 0076 runs twice (it re-runs).
+\ir ../migrations/0076_kiosk_picker_mode.sql
+\ir ../migrations/0076_kiosk_picker_mode.sql
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000000076', 'Kuželna P (0076)');
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_p constant uuid := '00000000-0000-0000-0000-000000000076';
+begin
+  if exists (select 1 from schedule_settings
+              where tenant_id in (v_a, v_p)
+                and kiosk_picker_mode <> 'letters') then
+    raise exception 'FAIL: an alley does not start with the letters in the name picker (0076)';
+  end if;
+  update schedule_settings set kiosk_picker_mode = 'clubs' where tenant_id = v_a;
+  update schedule_settings set kiosk_picker_mode = 'both' where tenant_id = v_a;
+  begin
+    update schedule_settings set kiosk_picker_mode = 'teams' where tenant_id = v_a;
+    raise exception 'FAIL: an unknown name picker mode was accepted (0076)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_picker_mode = null where tenant_id = v_a;
+    raise exception 'FAIL: no name picker mode was accepted (0076)';
+  exception when not_null_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_picker_mode' then
+    raise exception 'FAIL: the public overview hands out the name picker mode (0076)';
+  end if;
+  update schedule_settings set kiosk_picker_mode = 'letters' where tenant_id = v_a;
+  raise notice 'OK: the name picker starts with letters, takes one of three modes, off the public overview (0076)';
+end $$;
+
 rollback;
