@@ -35,6 +35,7 @@ import 'kiosk_stream_window.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
+import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
 
 /// How long before the idle reset the bar starts running out.
 const _warnFor = Duration(seconds: 10);
@@ -64,11 +65,12 @@ class _KioskShellState extends ConsumerState<KioskShell>
   );
   PlayerName? _selected;
 
-  /// What a visitor did to the drawer (true = open); null = the admin's
-  /// resting state. The idle reset puts it back.
-  bool? _drawerOverride;
+  /// What a visitor did to each panel (true = open); a side missing = the
+  /// admin's resting state. The idle reset puts both back.
+  final _drawerOverride = <PanelSide, bool>{};
 
-  /// Bumped on every idle reset; the drawer's match list starts over on it.
+  /// Bumped on every idle reset; the panels' cards that scroll or page
+  /// (the match list, the duty plan) start over on it.
   int _resets = 0;
 
   /// A visitor switched from the match being played to the list of
@@ -128,7 +130,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
     setState(() {
       _selected = null;
-      _drawerOverride = null;
+      _drawerOverride.clear();
       _boardDays = null;
       _liveHidden = false;
       _resets++;
@@ -298,87 +300,157 @@ class _KioskShellState extends ConsumerState<KioskShell>
     );
   }
 
-  /// The board with the drawer (notices and matches) on its right — no
-  /// drawer at all when there is nothing to put in it.
+  /// The board between the two panels (0077) — a side with nothing to show
+  /// has neither a panel nor a button; with nothing on either side the
+  /// board is alone.
   Widget _boardWithPanel() {
-    final content = ref.watch(kioskPanelContentProvider);
+    final left = ref.watch(kioskPanelContentProvider(PanelSide.left));
+    final right = ref.watch(kioskPanelContentProvider(PanelSide.right));
     final settings = ref.watch(settingsProvider).value;
+    final panels = settings?.kioskPanels ?? KioskPanels.defaults;
+    final visibleDays = settings?.kioskVisibleDays ?? 7;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final play = _play;
-    final drawerWidth = kioskDrawerWidthFor(
+    // Worked out once for both: each panel whole day columns, the two
+    // together leaving at least one day of the board in view.
+    final widths = kioskPanelWidths(
       screenWidth,
-      columns: settings?.kioskDrawerColumns ?? 2,
-      visibleDays: settings?.kioskVisibleDays ?? 7,
+      rulerWidth: calendarRulerWidth,
+      visibleDays: visibleDays,
+      left: left == null ? null : panels.left.days,
+      right: right == null ? null : panels.right.days,
     );
     final board = KioskBoardView(
       key: _boardKey,
       selected: _selected,
       onOpenMatch: _openMatchOrStream,
       onPlayVideo: play,
-      // The columns are sized on the whole screen, the drawer is a whole
-      // number of them (kioskDrawerWidthFor): open or closed, the board
-      // shows whole days, and the columns never resize mid-slide.
+      // The columns are sized on the whole screen, a panel is a whole
+      // number of them (kioskPanelWidths): open or closed, either panel
+      // leaves the board whole days, and the columns never resize
+      // mid-slide.
       columnBasisWidth: screenWidth,
       onVisibleDays: (first, last) =>
           setState(() => _boardDays = (first: first, last: last)),
       onOpenDuty: _openDuty,
     );
-    if (content == null) return board;
-    // A match being played keeps the drawer open: a visitor may close it,
-    // and it opens again after the idle time.
-    final restingOpen =
-        (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
-    final open = _drawerOverride ?? restingOpen;
-    void toggle() => setState(() => _drawerOverride = !open);
-    // A visitor picked their name: the board is what they came for — the
-    // drawer and its button step aside until the pick is cleared (or the
-    // idle reset), then the drawer is as it was, live match and all.
+    if (left == null && right == null) return board;
+    // A match being played keeps the panel holding the matches open: a
+    // visitor may close it, and it opens again after the idle time.
+    bool resting(PanelSide side, KioskPanelContent content) =>
+        panels.panel(side).open || content.live.isNotEmpty;
+    var leftOpen =
+        left != null &&
+        (_drawerOverride[PanelSide.left] ?? resting(PanelSide.left, left));
+    var rightOpen =
+        right != null &&
+        (_drawerOverride[PanelSide.right] ?? resting(PanelSide.right, right));
+    // Two days on the screen leave room for one open panel only.
+    final exclusive = kioskPanelsExclusive(
+      visibleDays: visibleDays,
+      hasLeft: left != null,
+      hasRight: right != null,
+    );
+    if (exclusive && leftOpen && rightOpen) {
+      // Both rest open (a visitor's tap closes the other one itself, see
+      // toggle): the one with the match being played stays, else the right.
+      if (left.live.isNotEmpty && right.live.isEmpty) {
+        rightOpen = false;
+      } else {
+        leftOpen = false;
+      }
+    }
+    void toggle(PanelSide side, bool open) => setState(() {
+      _drawerOverride[side] = !open;
+      // Opened where only one fits: the other one closes.
+      final other = side == PanelSide.left ? PanelSide.right : PanelSide.left;
+      if (!open && exclusive) _drawerOverride[other] = false;
+    });
+    // A visitor picked their name: the board is what they came for — both
+    // panels and their buttons step aside until the pick is cleared (or the
+    // idle reset), then the panels are as they were, live match and all.
     final picking = _selected != null;
-    // The board and the drawer each on their own layer: the drawer's turns
-    // (a notice, the live match) do not re-record the board, nor the
-    // board's scroll the drawer. On the web the GPU still redraws every
-    // layer each frame — this spares the Dart side (0065).
+    // The match being played, the switch back to it and the board's days
+    // belong to the panel holding the matches.
+    final matchesSide = panels.sideOf(KioskModule.matches);
+    // The board and each panel on their own layer: a panel's turns (a
+    // notice, the live match) do not re-record the board, nor the board's
+    // scroll a panel. On the web the GPU still redraws every layer each
+    // frame — this spares the Dart side (0065). Keyed by side: a panel
+    // coming or going on one side leaves the other one its state.
+    Widget panel(
+      PanelSide side,
+      KioskPanelContent content,
+      double width,
+      bool open,
+    ) {
+      final holdsMatches = side == matchesSide;
+      return RepaintBoundary(
+        key: ValueKey(side),
+        child: KioskPanelView(
+          side: side,
+          width: width,
+          content: content,
+          open: open,
+          hidden: picking,
+          onOpenNotice: _openNotice,
+          onOpenMatch: _openMatch,
+          onPlay: play,
+          resetToken: _resets,
+          showLive: !(holdsMatches && _liveHidden),
+          onShowLive: holdsMatches
+              ? (live) => setState(() => _liveHidden = !live)
+              : null,
+          boardDays: holdsMatches && (settings?.kioskFollowBoard ?? true)
+              ? _boardDays
+              : null,
+        ),
+      );
+    }
+
+    // Each button floats over the board, vertically centred, at its
+    // panel's inner edge — or at the board's edge, once the panel is gone:
+    // the right one at the right edge, the left one centred on the hour
+    // ruler, never over today's column (where visitors book).
+    Widget button(PanelSide side, bool open) => KioskDrawerButton(
+      side: side,
+      open: open,
+      onTap: () => toggle(side, open),
+      breathe: settings?.kioskAnimations ?? true,
+    );
     return Stack(
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (left != null)
+              panel(PanelSide.left, left, widths.left, leftOpen),
             Expanded(child: RepaintBoundary(child: board)),
-            RepaintBoundary(
-              child: KioskDrawer(
-                content: content,
-                open: open,
-                hidden: picking,
-                onOpenNotice: _openNotice,
-                onOpenMatch: _openMatch,
-                onPlay: play,
-                resetToken: _resets,
-                showLive: !_liveHidden,
-                onShowLive: (live) => setState(() => _liveHidden = !live),
-                boardDays: (settings?.kioskFollowBoard ?? true)
-                    ? _boardDays
-                    : null,
-              ),
-            ),
+            if (right != null)
+              panel(PanelSide.right, right, widths.right, rightOpen),
           ],
         ),
-        // Floats over the board, vertically centred, at the drawer's left
-        // edge — or at the screen's, once the drawer is gone.
-        if (!picking)
+        if (!picking && left != null)
           AnimatedPositioned(
+            key: const ValueKey(PanelSide.left),
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeOutCubic,
             top: 0,
             bottom: 0,
-            right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
-            child: Center(
-              child: KioskDrawerButton(
-                side: PanelSide.right,
-                open: open,
-                onTap: toggle,
-                breathe: settings?.kioskAnimations ?? true,
-              ),
-            ),
+            left:
+                (leftOpen ? widths.left : 0) +
+                (calendarRulerWidth - KioskDrawerButton.size) / 2,
+            child: Center(child: button(PanelSide.left, leftOpen)),
+          ),
+        if (!picking && right != null)
+          AnimatedPositioned(
+            key: const ValueKey(PanelSide.right),
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            top: 0,
+            bottom: 0,
+            right: (rightOpen ? widths.right : 0) + KioskDrawerButton.margin,
+            child: Center(child: button(PanelSide.right, rightOpen)),
           ),
       ],
     );
@@ -559,7 +631,7 @@ class _StatusBar extends ConsumerWidget {
     final infoStyle = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
     final notices =
         warning == null &&
-            (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
+            (ref.watch(settingsProvider).value?.kioskNoticesHeader ?? true)
         ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
         : const <Message>[];
     final clock =

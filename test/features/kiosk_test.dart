@@ -15,6 +15,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/duties.dart'
     show KioskDutyEntry, dutyRangeLabel;
+import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
@@ -1853,6 +1854,9 @@ void main() {
       List<DutyAssignment> dutyAssignments = const [],
       List<Reservation> reservations = const [],
       int? maxActiveReservations,
+      // Both panels as the admin lays them out (0077); null = the layout
+      // the drawer settings above convert to, as 0077 converts them.
+      KioskPanels? panels,
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith((ref) {
@@ -1862,6 +1866,20 @@ void main() {
             bookingHorizonDays: settings.bookingHorizonDays,
             maxActiveReservations:
                 maxActiveReservations ?? settings.maxActiveReservations,
+            kioskPanels:
+                panels ??
+                kioskPanelsFromLegacy(
+                  panelEnabled: panelEnabled,
+                  drawerOpen: drawerOpen,
+                  drawerColumns: drawerColumns,
+                  noticesMode: showNotices ? 'drawer' : 'off',
+                  noticesShare: share,
+                  showMatches: showMatches,
+                  liveMode: liveMode,
+                  dutyDrawer: dutyDrawer,
+                  dutyShare: dutyShare,
+                ),
+            kioskNoticesHeader: headerNotices,
             kioskDrawerOpen: drawerOpen,
             kioskNoticesMode: switch ((showNotices, headerNotices)) {
               (true, true) => KioskNoticesMode.both,
@@ -1963,7 +1981,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       // Open = as wide as its columns; shut = nothing of it on screen.
-      bool open() => tester.getSize(find.byType(KioskDrawer)).width > 0;
+      bool open() => tester.getSize(find.byType(KioskPanelView)).width > 0;
       expect(open(), isTrue);
       expect(find.byType(KioskDrawerButton), findsOneWidget);
 
@@ -1988,12 +2006,12 @@ void main() {
     // The match being played across the drawer: its scoreboard there (the
     // full view's; the compact ones draw their own score).
     final liveView = find.descendant(
-      of: find.byType(KioskDrawer),
+      of: find.byType(KioskPanelView),
       matching: find.byType(MatchScoreboard),
     );
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
-        find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+        find.descendant(of: find.byType(KioskPanelView), matching: find.text(t));
 
     testWidgets('hidden for a pick, the drawer keeps the match being played: '
         'it still asks for the score, and is back as it was — not opened '
@@ -2140,12 +2158,12 @@ void main() {
         results.add(const {});
         await tester.pumpAndSettle();
         expect(player, findsNothing);
-        final drawer = tester.element(find.byType(KioskDrawer));
+        final drawer = tester.element(find.byType(KioskPanelView));
 
         results.add({'m': res('m', 'in_progress', 0, 0)});
         await tester.pumpAndSettle();
         expect(player, findsOneWidget);
-        expect(identical(tester.element(find.byType(KioskDrawer)), drawer), isTrue);
+        expect(identical(tester.element(find.byType(KioskPanelView)), drawer), isTrue);
         await finish(tester);
       });
 
@@ -2481,7 +2499,7 @@ void main() {
           animations: animations,
         );
         final badge = find.descendant(
-          of: find.byType(KioskDrawer),
+          of: find.byType(KioskPanelView),
           matching: find.byType(MatchLeading),
         );
         bool pulsing(WidgetTester tester) =>
@@ -2519,7 +2537,7 @@ void main() {
           'right edge — against the live badge, or alone — and gives way '
           'only when nothing is left', (tester) async {
         fullHd(tester);
-        final inDrawer = find.byType(KioskDrawer);
+        final inDrawer = find.byType(KioskPanelView);
         // „⟳ před … dny“: its icon and text, in a row of their own.
         final age = find
             .ancestor(
@@ -2669,7 +2687,7 @@ void main() {
         expect(find.byTooltip('Přehrát záznam'), findsNothing);
         expect(
           find.descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.byIcon(Icons.play_circle_outline),
           ),
           findsNothing,
@@ -2698,7 +2716,7 @@ void main() {
         expect(liveView, findsOneWidget);
         expect(
           find.descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.byType(MatchLeading),
           ),
           findsNothing,
@@ -3185,14 +3203,14 @@ void main() {
 
       expect(drawerText('Brigáda'), findsNothing);
       expect(openButton, findsOneWidget);
-      expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
+      expect(tester.getSize(find.byType(KioskPanelView)).width, 0);
 
       await tester.tap(openButton);
       await tester.pumpAndSettle();
       expect(drawerText('Brigáda'), findsOneWidget);
       // Two of seven day columns over 1920 − 46 px.
       expect(
-        tester.getSize(find.byType(KioskDrawer)).width,
+        tester.getSize(find.byType(KioskPanelView)).width,
         closeTo(2 * (1920 - 46) / 7, 0.5),
       );
 
@@ -3250,7 +3268,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(openButton);
         await tester.pumpAndSettle();
-        final drawer = tester.getSize(find.byType(KioskDrawer)).width;
+        final drawer = tester.getSize(find.byType(KioskPanelView)).width;
         // The columns keep their width with the drawer open.
         expect(
           tester.getSize(find.byType(BoardColumnHeader).first).width,
@@ -3274,11 +3292,11 @@ void main() {
       // A visitor closes the drawer by hand…
       await tester.tap(closeButton);
       await tester.pumpAndSettle();
-      expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
+      expect(tester.getSize(find.byType(KioskPanelView)).width, 0);
       // …the idle reset reopens it…
       await tester.pump(const Duration(seconds: 31));
       await tester.pumpAndSettle();
-      expect(tester.getSize(find.byType(KioskDrawer)).width, greaterThan(0));
+      expect(tester.getSize(find.byType(KioskPanelView)).width, greaterThan(0));
       // …and after it only a wheel moves: the reset must come again.
       await tester.tap(closeButton);
       await tester.pump(const Duration(seconds: 25));
@@ -3289,10 +3307,10 @@ void main() {
       await tester.sendEventToBinding(wheel.scroll(const Offset(0, 200)));
       await tester.pump(const Duration(seconds: 20));
       // 45 s after the tap, but 20 s after the wheel: not yet.
-      expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
+      expect(tester.getSize(find.byType(KioskPanelView)).width, 0);
       await tester.pump(const Duration(seconds: 11));
       await tester.pumpAndSettle();
-      expect(tester.getSize(find.byType(KioskDrawer)).width, greaterThan(0));
+      expect(tester.getSize(find.byType(KioskPanelView)).width, greaterThan(0));
       await finish(tester);
     });
 
@@ -3435,7 +3453,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(
-        tester.getSize(find.byType(KioskDrawer)).width,
+        tester.getSize(find.byType(KioskPanelView)).width,
         closeTo(3 * (1920 - 46) / 7, 0.5),
       );
 
@@ -3475,12 +3493,15 @@ void main() {
       expect(find.text('ZÁPASY'), findsOneWidget);
       await finish(tester);
 
+      // Live mode off too: on, it keeps the matches in the panel (the match
+      // being played takes over the panel that holds them, 0077).
       await tester.pumpWidget(
         app(
           notices: [notice('1', 'Brigáda')],
           slots: slots,
           drawerOpen: true,
           showMatches: false,
+          liveMode: false,
         ),
       );
       await tester.pumpAndSettle();
@@ -3519,7 +3540,7 @@ void main() {
         // The list opens on the current match; look at what lies above it.
         await tester.drag(
           find.descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.byType(CustomScrollView),
           ),
           const Offset(0, 400),
@@ -3534,7 +3555,7 @@ void main() {
           }) &&
           find
               .descendant(
-                of: find.byType(KioskDrawer),
+                of: find.byType(KioskPanelView),
                 matching: find.textContaining(team),
               )
               .evaluate()
@@ -3578,13 +3599,13 @@ void main() {
       expect(find.text('Zobrazit další'), findsNothing);
       expect(find.textContaining('JedenZpět'), findsNothing);
       final list = find.descendant(
-        of: find.byType(KioskDrawer),
+        of: find.byType(KioskPanelView),
         matching: find.byType(CustomScrollView),
       );
       await tester.drag(list, const Offset(0, 200));
       await tester.pumpAndSettle();
       Finder inDrawer(String t) => find.descendant(
-        of: find.byType(KioskDrawer),
+        of: find.byType(KioskPanelView),
         matching: find.textContaining(t),
       );
       final before = tester.getTopLeft(inDrawer('Tento').first);
@@ -3624,7 +3645,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       final list = find.descendant(
-        of: find.byType(KioskDrawer),
+        of: find.byType(KioskPanelView),
         matching: find.byType(CustomScrollView),
       );
       await tester.drag(list, const Offset(0, 200));
@@ -3667,13 +3688,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       final list = find.descendant(
-        of: find.byType(KioskDrawer),
+        of: find.byType(KioskPanelView),
         matching: find.byType(CustomScrollView),
       );
       final listBox = tester.getRect(list);
       Rect? rowOf(String t) {
         final f = find.descendant(
-          of: find.byType(KioskDrawer),
+          of: find.byType(KioskPanelView),
           matching: find.textContaining(t),
         );
         return f.evaluate().isEmpty ? null : tester.getRect(f.first);
@@ -3730,7 +3751,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         Finder inList(String t) => find.descendant(
-          of: find.byType(KioskDrawer),
+          of: find.byType(KioskPanelView),
           matching: find.textContaining(t),
         );
         expect(inList('DávnýZápas'), findsNothing);
@@ -3747,7 +3768,7 @@ void main() {
         if (follow) {
           final list = tester.getRect(
             find.descendant(
-              of: find.byType(KioskDrawer),
+              of: find.byType(KioskPanelView),
               matching: find.byType(CustomScrollView),
             ),
           );
@@ -3851,7 +3872,7 @@ void main() {
       await tester.pumpAndSettle();
       bool inDrawer(String t) => find
           .descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.textContaining(t),
           )
           .evaluate()
@@ -4100,7 +4121,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(
         find.descendant(
-          of: find.byType(KioskDrawer),
+          of: find.byType(KioskPanelView),
           matching: find.textContaining('Příští'),
         ),
       );
@@ -4197,7 +4218,7 @@ void main() {
       await tester.pumpAndSettle();
       bool inDrawer(String t) => find
           .descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.textContaining(t),
           )
           .evaluate()
@@ -4275,7 +4296,7 @@ void main() {
         expect(liveView, findsNothing);
         expect(find.byType(DuelCard).hitTestable(), findsNothing);
         // All six duels in view, without scrolling.
-        final drawer = tester.getRect(find.byType(KioskDrawer));
+        final drawer = tester.getRect(find.byType(KioskPanelView));
         final last = find.textContaining('Hráč6').first;
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
@@ -4307,7 +4328,7 @@ void main() {
         final scroll = tester
             .state<ScrollableState>(
               find.descendant(
-                of: find.byType(KioskDrawer),
+                of: find.byType(KioskPanelView),
                 matching: find.byType(Scrollable),
               ).last,
             )
@@ -4353,7 +4374,7 @@ void main() {
         await tester.tap(
           find
               .descendant(
-                of: find.byType(KioskDrawer),
+                of: find.byType(KioskPanelView),
                 // The full scoreboard sets the points as separate digits.
                 matching: layout == MatchLayout.full
                     ? find.text('průběžně')
@@ -4405,7 +4426,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       final cards = find.descendant(
-        of: find.byType(KioskDrawer),
+        of: find.byType(KioskPanelView),
         matching: find.byType(DuelCard),
       );
       expect(cards, findsNWidgets(2));
@@ -4451,7 +4472,7 @@ void main() {
       await tester.pumpAndSettle();
       bool inDrawer(String t) => find
           .descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.textContaining(t),
           )
           .evaluate()
@@ -4538,7 +4559,7 @@ void main() {
       await tester.pumpAndSettle();
       bool inDrawer(String t) => find
           .descendant(
-            of: find.byType(KioskDrawer),
+            of: find.byType(KioskPanelView),
             matching: find.textContaining(t),
           )
           .evaluate()
@@ -4642,7 +4663,7 @@ void main() {
         find.ancestor(of: of, matching: find.byType(RepaintBoundary)).first,
       );
       expect(nearest(find.byType(KioskBoardView)).child, isA<KioskBoardView>());
-      expect(nearest(find.byType(KioskDrawer)).child, isA<KioskDrawer>());
+      expect(nearest(find.byType(KioskPanelView)).child, isA<KioskPanelView>());
       await finish(tester);
     });
 
@@ -4800,7 +4821,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.descendant(
-          of: find.byType(KioskDrawer),
+          of: find.byType(KioskPanelView),
           matching: find.byType(Image),
         ),
         findsOneWidget,
@@ -4977,6 +4998,321 @@ void main() {
       expect(closeButton, findsNothing);
 
       await finish(tester);
+    });
+
+    group('two panels (0077)', () {
+      // The notices left, the matches right: a panel on either side.
+      final split = KioskPanels.defaults.withSide(
+        KioskModule.notices,
+        PanelSide.left,
+      );
+      // One of seven day columns, on the whole screen.
+      const column = (1920 - 46) / 7;
+      Finder panelOn(PanelSide side) => find.byWidgetPredicate(
+        (w) => w is KioskPanelView && w.side == side,
+      );
+      Finder onPanel(PanelSide side, String text) =>
+          find.descendant(of: panelOn(side), matching: find.text(text));
+      Finder cardOn(PanelSide side, String title) => find
+          .ancestor(of: onPanel(side, title), matching: find.byType(KioskCard))
+          .first;
+      double width(WidgetTester tester, PanelSide side) =>
+          tester.getSize(panelOn(side)).width;
+      // The buttons by what a screen reader says: their arrows alone are
+      // the same on both sides, pointing opposite ways.
+      Finder button(String label) => find.bySemanticsLabel(label);
+
+      testWidgets('a panel on either side, each with its own button; the '
+          'left one slides out of the screen\'s left edge, its content laid '
+          'out from its inner edge', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('next', day.addDays(1), 'Příští')],
+            panels: split,
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Both rest closed, as the admin set them: only the two buttons,
+        // each arrow pointing the way its panel opens.
+        expect(width(tester, PanelSide.left), 0);
+        expect(width(tester, PanelSide.right), 0);
+        expect(
+          find.descendant(
+            of: button('Zobrazit levý panel'),
+            matching: find.byIcon(Icons.keyboard_double_arrow_right),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: button('Zobrazit pravý panel'),
+            matching: find.byIcon(Icons.keyboard_double_arrow_left),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(button('Zobrazit levý panel'));
+        // The frame that starts the slide, then 100 ms of its 250.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        // Mid-slide: the panel grows from the left edge, its card laid out
+        // at its full width against the panel's right edge.
+        final sliding = tester.getRect(panelOn(PanelSide.left));
+        expect(sliding.left, 0);
+        expect(sliding.width, inExclusiveRange(0, 2 * column));
+        final card = tester.getRect(cardOn(PanelSide.left, 'NÁSTĚNKA'));
+        expect(card.right, closeTo(sliding.right - 12, 0.5));
+        expect(card.width, closeTo(2 * column - 24, 0.5));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        expect(onPanel(PanelSide.left, 'Brigáda'), findsOneWidget);
+        // The board moved over, its hour ruler first.
+        expect(
+          tester.getRect(find.byType(HourRuler)).left,
+          closeTo(2 * column, 0.5),
+        );
+        expect(
+          find.descendant(
+            of: button('Skrýt levý panel'),
+            matching: find.byIcon(Icons.keyboard_double_arrow_left),
+          ),
+          findsOneWidget,
+        );
+
+        // Seven days leave room for both.
+        await tester.tap(button('Zobrazit pravý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.right), closeTo(2 * column, 0.5));
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        expect(onPanel(PanelSide.right, 'ZÁPASY'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: button('Skrýt pravý panel'),
+            matching: find.byIcon(Icons.keyboard_double_arrow_right),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(button('Skrýt levý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), 0);
+        expect(width(tester, PanelSide.right), closeTo(2 * column, 0.5));
+        await finish(tester);
+      });
+
+      testWidgets('the left button sits on the hour ruler, not over today\'s '
+          'column: a visitor books today\'s first lane as ever', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(notices: [notice('1', 'Brigáda')], panels: split),
+        );
+        await tester.pumpAndSettle();
+        final ruler = tester.getRect(find.byType(HourRuler));
+        expect(
+          tester.getCenter(button('Zobrazit levý panel')).dx,
+          closeTo(ruler.center.dx, 0.5),
+        );
+        final arrow = tester.getRect(
+          find.descendant(
+            of: button('Zobrazit levý panel'),
+            matching: find.byType(Icon),
+          ),
+        );
+        expect(arrow.left, greaterThanOrEqualTo(ruler.left));
+        expect(arrow.right, lessThanOrEqualTo(ruler.right));
+
+        await tester.tap(find.text(kioskReserveLabel));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(players.first.displayName));
+        await tester.pumpAndSettle();
+        // Today's first lane: the board's first ＋, right of the ruler.
+        final lane = find.byIcon(Icons.add).first;
+        await tester.ensureVisible(lane);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(lane).left, greaterThan(ruler.right));
+        await tester.tap(lane);
+        await tester.pumpAndSettle();
+        expect(find.text('Rezervovat termín?'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a match being played takes over the panel holding the '
+          'matches — on the left too — and keeps it open', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            // The matches left, the notices right.
+            panels: KioskPanels.defaults.withSide(
+              KioskModule.matches,
+              PanelSide.left,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final liveLeft = find.descendant(
+          of: panelOn(PanelSide.left),
+          matching: find.byType(MatchScoreboard),
+        );
+        // Open although it rests closed; the right panel is left alone.
+        expect(liveLeft, findsOneWidget);
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        expect(width(tester, PanelSide.right), 0);
+        expect(button('Zobrazit pravý panel'), findsOneWidget);
+
+        // A visitor may close it; after the idle time it is back.
+        await tester.tap(button('Skrýt levý panel'));
+        await tester.pumpAndSettle();
+        expect(liveLeft, findsNothing);
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(liveLeft, findsOneWidget);
+
+        // The list of matches is under it, and leads back to it.
+        await tester.tap(find.byTooltip('Všechny zápasy'));
+        await tester.pumpAndSettle();
+        expect(liveLeft, findsNothing);
+        expect(onPanel(PanelSide.left, 'ZÁPASY'), findsOneWidget);
+        await tester.tap(find.text('Právě se hraje'));
+        await tester.pumpAndSettle();
+        expect(liveLeft, findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a visitor who picked their name gets the board alone: '
+          'both panels and both buttons step aside, and are back as they '
+          'were once the pick is cleared', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('next', day.addDays(1), 'Příští')],
+            panels: split
+                .withPanel(PanelSide.left, open: true)
+                .withPanel(PanelSide.right, open: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        expect(width(tester, PanelSide.right), closeTo(2 * column, 0.5));
+
+        await tester.tap(find.text(kioskReserveLabel));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(players.first.displayName));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), 0);
+        expect(width(tester, PanelSide.right), 0);
+        expect(find.byType(KioskDrawerButton), findsNothing);
+
+        await tester.tap(find.byTooltip('Zrušit výběr'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        expect(width(tester, PanelSide.right), closeTo(2 * column, 0.5));
+        expect(button('Skrýt levý panel'), findsOneWidget);
+        expect(button('Skrýt pravý panel'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the idle reset puts both panels back as the admin set '
+          'them and starts their cards over', (tester) async {
+        fullHd(tester);
+        // The matches left, resting open; the notices right, closed.
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [
+              fed('b1', Day(2026, 10, 1), 'JedenZpět'),
+              fed('cur', Day(2026, 10, 9), 'Tento'),
+            ],
+            weeksBack: 0,
+            weeksAhead: 0,
+            panels: KioskPanels.defaults
+                .withSide(KioskModule.matches, PanelSide.left)
+                .withPanel(PanelSide.left, open: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        Finder inLeft(String t) => find.descendant(
+          of: panelOn(PanelSide.left),
+          matching: find.textContaining(t),
+        );
+        // A visitor brings an older week into the list and opens the right
+        // panel.
+        await tester.drag(
+          find.descendant(
+            of: panelOn(PanelSide.left),
+            matching: find.byType(CustomScrollView),
+          ),
+          const Offset(0, 200),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Zobrazit předchozí'));
+        await tester.pumpAndSettle();
+        expect(inLeft('JedenZpět'), findsWidgets);
+        await tester.tap(button('Zobrazit pravý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.right), closeTo(2 * column, 0.5));
+
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        // The right panel rests closed again; the left one, open all along,
+        // starts its list over, without the older week.
+        expect(width(tester, PanelSide.right), 0);
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        expect(inLeft('Tento'), findsWidgets);
+        expect(inLeft('JedenZpět'), findsNothing);
+
+        // Closed by a visitor, the left one reopens after the idle time.
+        await tester.tap(button('Skrýt levý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), 0);
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), closeTo(2 * column, 0.5));
+        await finish(tester);
+      });
+
+      testWidgets('two days on the screen leave room for one panel: opening '
+          'one closes the other', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('next', day.addDays(1), 'Příští')],
+            visibleDays: 2,
+            panels: split
+                .withPanel(PanelSide.left, open: true)
+                .withPanel(PanelSide.right, open: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        // One day each; both rest open, the right one is.
+        const oneDay = (1920 - 46) / 2;
+        expect(width(tester, PanelSide.right), closeTo(oneDay, 0.5));
+        expect(width(tester, PanelSide.left), 0);
+
+        await tester.tap(button('Zobrazit levý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.left), closeTo(oneDay, 0.5));
+        expect(width(tester, PanelSide.right), 0);
+
+        await tester.tap(button('Zobrazit pravý panel'));
+        await tester.pumpAndSettle();
+        expect(width(tester, PanelSide.right), closeTo(oneDay, 0.5));
+        expect(width(tester, PanelSide.left), 0);
+        await finish(tester);
+      });
     });
 
     group('canteen duty (0073)', () {
@@ -5934,8 +6270,8 @@ void main() {
         await finish(tester);
       });
 
-      testWidgets('the card takes the admin\'s share of the drawer; the '
-          'notices and the matches split the rest as before', (tester) async {
+      testWidgets('the card takes its share of the panel; the notices and '
+          'the matches keep their split of the rest', (tester) async {
         fullHd(tester);
         for (final dutyShare in [30, 60]) {
           await tester.pumpWidget(
@@ -5951,17 +6287,17 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
-          final drawer = tester.getRect(find.byType(KioskDrawer));
+          final drawer = tester.getRect(find.byType(KioskPanelView));
           final duty = tester.getRect(cardTitled(dutyTitle));
           final notices = tester.getRect(cardTitled('NÁSTĚNKA'));
           final matches = tester.getRect(cardTitled('ZÁPASY'));
           expect(duty.top, closeTo(drawer.top + 12, 0.01));
           expect(notices.top, closeTo(duty.bottom + 12, 0.01));
           expect(matches.bottom, closeTo(drawer.bottom - 12, 0.01));
-          final rest = matches.bottom - notices.top;
+          // One stack of three shares (0077): the gaps come off first.
           expect(
-            duty.height / rest,
-            closeTo(dutyShare / (100 - dutyShare), 0.001),
+            duty.height / (duty.height + notices.height + matches.height),
+            closeTo(dutyShare / 100, 0.001),
           );
           // The notices keep their 40 % of what is left.
           expect(
@@ -5989,7 +6325,7 @@ void main() {
         expect(openButton, findsOneWidget);
         await tester.tap(openButton);
         await tester.pumpAndSettle();
-        final drawer = tester.getRect(find.byType(KioskDrawer));
+        final drawer = tester.getRect(find.byType(KioskPanelView));
         final card = tester.getRect(cardTitled(dutyTitle));
         expect(card.top, closeTo(drawer.top + 12, 0.01));
         expect(card.bottom, closeTo(drawer.bottom - 12, 0.01));
