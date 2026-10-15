@@ -1,10 +1,34 @@
 /// Small form pieces the admin dialogs repeat: a label/value tile that opens
-/// a picker, the lane chips, and the colour dot lists show beside a name.
+/// a picker, the lane chips, a rental's note, and the colour dot lists show
+/// beside a name.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../../domain/palette.dart';
+
+/// A rental's note, on several lines: the calendar shows it under the
+/// renter and the time line by line — which lanes play which match, say —
+/// so Enter starts a new line rather than saving.
+class RentalNoteField extends StatelessWidget {
+  const RentalNoteField({super.key, required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: controller,
+    minLines: 2,
+    maxLines: 6,
+    keyboardType: TextInputType.multiline,
+    textInputAction: TextInputAction.newline,
+    decoration: const InputDecoration(
+      labelText: 'Poznámka',
+      helperText: 'V kalendáři pod časem, řádek po řádku.',
+      alignLabelWithHint: true,
+    ),
+  );
+}
 
 /// "Datum · čt 23. 4." style tile: [label] left, [value] right, tap opens
 /// the picker.

@@ -299,10 +299,7 @@ class _RentalOccurrenceDialogState extends State<RentalOccurrenceDialog> {
           onChanged: (lanes) => setState(() => _lanes = lanes),
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _note,
-          decoration: const InputDecoration(labelText: 'Poznámka'),
-        ),
+        RentalNoteField(controller: _note),
       ],
     );
   }

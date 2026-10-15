@@ -138,4 +138,87 @@ void main() {
     );
     expect(findEmojiText(oneLine), findsOneWidget);
   });
+
+  group('a rental band with a note', () {
+    const renter = '🔒 Odboráři - trenál';
+    const when = '14:30–16:30';
+    const note = 'dráhy 1-2:\nÁčko × Béčko\n888:777\n\ndráhy 3-4:\n'
+        'Cečko×Déčko\n666:555';
+    Widget rental({
+      required double height,
+      double width = 400,
+      String? text = note,
+    }) => MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: width,
+                height: height,
+                child: CalendarEventBand(
+                  background: Colors.teal,
+                  foreground: Colors.white,
+                  text: '$renter\n$when',
+                  lines: const [
+                    (text: renter, wraps: true),
+                    (text: when, wraps: false),
+                  ],
+                  note: text,
+                ),
+              ),
+            ),
+          ),
+        );
+
+    testWidgets('tall: the renter, the time, a blank line, the note line by '
+        'line', (tester) async {
+      await tester.pumpWidget(rental(height: 300));
+      final name = findEmojiText(renter);
+      final time = find.text(when);
+      final body = findEmojiText(note);
+      for (final f in [name, time, body]) {
+        expect(f, findsOneWidget);
+      }
+      expect(tester.getTopLeft(time).dy, greaterThan(tester.getTopLeft(name).dy));
+      // A whole line between the time and the note.
+      expect(
+        tester.getTopLeft(body).dy - tester.getBottomLeft(time).dy,
+        greaterThanOrEqualTo(14),
+      );
+      // Every line of it shown: 7 lines of 14 px.
+      expect(tester.getSize(body).height, greaterThanOrEqualTo(7 * 14));
+    });
+
+    testWidgets('a shorter band shows what fits of the note, cut with …', (
+      tester,
+    ) async {
+      // 6 lines: renter, time, blank, three of the note.
+      await tester.pumpWidget(rental(height: 6 * 14 + 4));
+      final body = tester.widget<EmojiText>(findEmojiText(note));
+      expect(body.maxLines, 3);
+      expect(body.overflow, TextOverflow.ellipsis);
+
+      // A narrow column: the renter takes the two lines it needs first.
+      await tester.pumpWidget(rental(height: 6 * 14 + 4, width: 120));
+      expect(tester.widget<EmojiText>(findEmojiText(note)).maxLines, 2);
+      expect(tester.widget<EmojiText>(findEmojiText(renter)).maxLines, 2);
+    });
+
+    testWidgets('no room for a line of it: the band as without a note', (
+      tester,
+    ) async {
+      await tester.pumpWidget(rental(height: 3 * 14 + 4));
+      expect(findEmojiText(note), findsNothing);
+      expect(findEmojiText(renter), findsOneWidget);
+      expect(find.text(when), findsOneWidget);
+    });
+
+    testWidgets('no note: the renter and the time, nothing under them', (
+      tester,
+    ) async {
+      await tester.pumpWidget(rental(height: 300, text: '  '));
+      expect(findEmojiText(renter), findsOneWidget);
+      expect(find.text(when), findsOneWidget);
+      expect(find.byType(EmojiText), findsNWidgets(2));
+    });
+  });
 }

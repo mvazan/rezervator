@@ -87,6 +87,9 @@ const appChangelog = <Release>[
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
     'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
         'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
+    'Pronájmy: poznámka má víc řádků a kalendář ji ukáže pod nájemcem '
+        'a časem, řádek po řádku (třeba které dráhy hrají který zápas). '
+        'V seznamu termínů je pod časem a drahami.',
   ], store: [
     'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
         'Hráči týdne a Jak začít s QR kódem aplikace.',
@@ -95,7 +98,7 @@ const appChangelog = <Release>[
     'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
     'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
         'výraznější výsledek.',
-    'Kalendář po dnech: čas bloku pod sebou.',
+    'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
     'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
   ]),
   Release(null, '14. 10. 2026', [
