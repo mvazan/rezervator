@@ -136,7 +136,7 @@ final kioskPanelContentProvider =
       // card here; a week without a line has nothing to rank.
       final hasWeek =
           here(KioskModule.week) &&
-          (ref.watch(weekPlayersProvider).value?.isNotEmpty ?? false);
+          (ref.watch(weekPlayersProvider).value?.lines.isNotEmpty ?? false);
       final entries = <KioskPanelEntry>[];
       for (final placement in placed) {
         final module = placement.module!;

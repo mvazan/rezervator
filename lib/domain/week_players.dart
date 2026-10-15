@@ -261,6 +261,12 @@ String weekRangeLabel(Day monday) {
   return '$start–${sunday.day}. ${sunday.month}.';
 }
 
+/// One week's lines as the kiosk read them, with the Monday they are of:
+/// the card's and the detail's titles name this week, not the clock's, so
+/// lines kept from an earlier read — one still under way at the week's
+/// turn, or a failed one — never stand under another week's dates.
+typedef WeekLines = ({Day monday, List<WeekLine> lines});
+
 /// How many times one read asks for the week's genders: each ask covers
 /// a limited number of players (regnum-lookup's budget).
 const weekGenderRounds = 4;

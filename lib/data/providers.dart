@@ -2461,9 +2461,9 @@ final profileRegnumsProvider = FutureProvider.autoDispose<int>(
 /// all change a past week — and read again every hour, at the week's turn
 /// (Monday 00:00 is an hour's turn too) and when the app wakes. While lines
 /// lack a gender, each read first lets the server look them up
-/// ([loadWeekLines]). A failed read keeps the lines shown before it.
-final weekPlayersProvider = FutureProvider<List<WeekLine>>((ref) async {
-  if (ref.watch(_authUidProvider) == null) return const [];
+/// ([loadWeekLines]). A failed read keeps the lines shown before it — with
+/// the Monday they are of ([WeekLines]), which the titles name.
+final weekPlayersProvider = FutureProvider<WeekLines>((ref) async {
   // The minute clock reaches this provider only when the hour or the week
   // turns.
   final (monday, _) = ref.watch(
@@ -2472,14 +2472,18 @@ final weekPlayersProvider = FutureProvider<List<WeekLine>>((ref) async {
       return (previousWeekMonday(t), t.hour);
     }),
   );
+  if (ref.watch(_authUidProvider) == null) {
+    return (monday: monday, lines: const <WeekLine>[]);
+  }
   final wake = LiveRefresh.stream.listen((_) => ref.invalidateSelf());
   ref.onDispose(wake.cancel);
-  return loadWeekLines(
+  final lines = await loadWeekLines(
     monday,
     read: Api.kioskWeekPlayers,
     lookup: Api.lookupWeekGenders,
     onError: (e) => debugPrint('Hráči týdne $monday: $e'),
   );
+  return (monday: monday, lines: lines);
 });
 
 /// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped

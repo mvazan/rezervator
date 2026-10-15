@@ -13,7 +13,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
@@ -32,12 +31,6 @@ const _footerHeight = 32.0;
 
 /// How many players of a category the card lists.
 const _cardTop = 3;
-
-/// The week's Monday by the app clock: what the title names — the same one
-/// [weekPlayersProvider] reads, flipping with it at Monday 00:00.
-Day _monday(WidgetRef ref) => ref.watch(
-  nowProvider.select((now) => previousWeekMonday(now.value ?? DateTime.now())),
-);
 
 /// „doma“ / „venku“: the alley's home or away, as on the board.
 String _where(WeekLine line) => line.isAway ? 'venku' : 'doma';
@@ -61,11 +54,12 @@ List<({String title, List<WeekLine> lines})> _cardBlocks(
   ];
 }
 
-/// The card: „HRÁČI TÝDNE · 5.–11. 10.“, then the categories that fit
-/// whole, each its best three — „1. Jan Novák 598“ and, smaller, „Termínátor
-/// A · doma“ — and „Více“ when some were left out (the first one is shown
-/// even when cut). A tap anywhere opens the whole week ([onOpen]). The
-/// panel shows it only while the week has lines.
+/// The card: „HRÁČI TÝDNE · 5.–11. 10.“ (the week the lines were read for,
+/// [WeekLines]), then the categories that fit whole, each its best three —
+/// „1. Jan Novák 598“ and, smaller, „Termínátor A · doma“ — and „Více“ when
+/// some were left out (the first one is shown even when cut). A tap
+/// anywhere opens the whole week ([onOpen]). The panel shows it only while
+/// the week has lines.
 class KioskWeekCard extends ConsumerWidget {
   const KioskWeekCard({super.key, required this.onOpen});
 
@@ -74,14 +68,16 @@ class KioskWeekCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final lines = ref.watch(weekPlayersProvider).value ?? const <WeekLine>[];
-    final blocks = _cardBlocks(lines);
+    final week = ref.watch(weekPlayersProvider).value;
+    final blocks = _cardBlocks(week?.lines ?? const <WeekLine>[]);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onOpen,
       child: KioskCard(
         icon: Icons.emoji_events_outlined,
-        title: 'HRÁČI TÝDNE · ${weekRangeLabel(_monday(ref))}',
+        title: week == null
+            ? 'HRÁČI TÝDNE'
+            : 'HRÁČI TÝDNE · ${weekRangeLabel(week.monday)}',
         fill: true,
         child: LayoutBuilder(
           builder: (context, box) {
@@ -297,7 +293,8 @@ class _KioskWeekPlayersPageState extends ConsumerState<KioskWeekPlayersPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final all = ref.watch(weekPlayersProvider).value ?? const <WeekLine>[];
+    final week = ref.watch(weekPlayersProvider).value;
+    final all = week?.lines ?? const <WeekLine>[];
     // Until the visitor picks, the page opens as the card shows the week:
     // by category — or, while no line has a known gender and number of
     // throws, by competition, never on an empty page (as [_cardBlocks]).
@@ -340,7 +337,9 @@ class _KioskWeekPlayersPageState extends ConsumerState<KioskWeekPlayersPage> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Hráči týdne ${weekRangeLabel(_monday(ref))}',
+                      week == null
+                          ? 'Hráči týdne'
+                          : 'Hráči týdne ${weekRangeLabel(week.monday)}',
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),

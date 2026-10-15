@@ -110,9 +110,16 @@ void main() {
         ),
   ];
 
-  List<Override> overrides(List<WeekLine> lines) => [
+  // The week the clock shows: 5. 10.
+  final lastWeek = previousWeekMonday(now);
+
+  /// [lines] as the provider read them for [monday] (the clock's week when
+  /// null).
+  List<Override> overrides(List<WeekLine> lines, {Day? monday}) => [
     nowProvider.overrideWith((ref) => Stream.value(now)),
-    weekPlayersProvider.overrideWith((ref) async => lines),
+    weekPlayersProvider.overrideWith(
+      (ref) async => (monday: monday ?? lastWeek, lines: lines),
+    ),
   ];
 
   Future<void> pumpCard(
@@ -120,10 +127,11 @@ void main() {
     Size size,
     List<WeekLine> lines, {
     VoidCallback? onOpen,
+    Day? monday,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: overrides(lines),
+        overrides: overrides(lines, monday: monday),
         child: MaterialApp(
           theme: buildTheme(Brightness.dark),
           home: Scaffold(
@@ -160,6 +168,22 @@ void main() {
       expect(find.text('Termínátor A · doma'), findsNWidgets(8));
       expect(find.text('Termínátor A · venku'), findsNWidgets(4));
       expect(more, findsNothing);
+    });
+
+    testWidgets('the title names the week the lines were read for, not the '
+        'clock\'s: lines kept while a read is under way or failed keep their '
+        'dates', (tester) async {
+      fullHd(tester);
+      // The clock is past the turn to 5.–11. 10.; the lines are still the
+      // ones read for 28. 9.
+      await pumpCard(
+        tester,
+        cardSize(days: 2, share: 100),
+        week,
+        monday: Day(2026, 9, 28),
+      );
+      expect(find.text('HRÁČI TÝDNE · 28. 9.–4. 10.'), findsOneWidget);
+      expect(find.text('HRÁČI TÝDNE · 5.–11. 10.'), findsNothing);
     });
 
     testWidgets('at 30 % only the categories that fit whole, „Více“ for '
@@ -231,12 +255,13 @@ void main() {
       WidgetTester tester,
       List<WeekLine> lines, {
       List<PrioritySlot>? slots,
+      Day? monday,
     }) async {
       final opened = <PrioritySlot>[];
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            ...overrides(lines),
+            ...overrides(lines, monday: monday),
             prioritySlotsProvider.overrideWithValue(
               slots ?? [slot('m1'), slot('m2')],
             ),
@@ -296,6 +321,14 @@ void main() {
       await tester.tap(find.byTooltip('Zavřít'));
       await tester.pumpAndSettle();
       expect(page, findsNothing);
+    });
+
+    testWidgets('the title names the week the lines were read for, not the '
+        'clock\'s', (tester) async {
+      fullHd(tester);
+      await pumpDetail(tester, week, monday: Day(2026, 9, 28));
+      expect(find.text('Hráči týdne 28. 9.–4. 10.'), findsOneWidget);
+      expect(find.text('Hráči týdne 5.–11. 10.'), findsNothing);
     });
 
     testWidgets('Doma / Venku keep the lines played there; Vše all', (
