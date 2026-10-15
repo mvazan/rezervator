@@ -1246,13 +1246,17 @@ void main() {
     expect(lastPatch(), {'kiosk_stream_max': 3});
   });
 
-  testWidgets('paging through the Zápis: on by default, under its size; the '
-      'switch PATCHes its own column (0079)', (tester) async {
+  testWidgets('paging through the Zápis: the bar by default, one of three, '
+      'under its size; a choice PATCHes its own column (0079)', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    final paging = find.widgetWithText(SwitchListTile, 'Listování v zápisu');
-    expect(tester.widget<SwitchListTile>(paging).value, isTrue);
+    final paging = find.widgetWithText(
+      DropdownButtonFormField<KioskZapisNav>,
+      'Listování v zápisu',
+    );
+    expect(find.descendant(of: paging, matching: find.text('Lišta nad zápisem')),
+        findsOneWidget);
     expect(
       tester.getTopLeft(paging).dy,
       greaterThan(tester.getTopLeft(find.text('Velikost zápisu')).dy),
@@ -1260,10 +1264,12 @@ void main() {
     await tester.ensureVisible(paging);
     await tester.tap(paging);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Šipky po stranách').last);
+    await tester.pumpAndSettle();
     final patch = jsonDecode(
       requests.lastWhere((r) => r.method == 'PATCH').body,
     ) as Map<String, dynamic>;
-    expect(patch, {'kiosk_zapis_nav': false});
+    expect(patch, {'kiosk_zapis_nav': 'sides'});
   });
 
   testWidgets('today\'s matches in the header: on by default, in the '

@@ -1,9 +1,14 @@
 /// The kiosk's „Zápis“: one match's score sheet ([ZapisPage]) in a modal. A
 /// tap anywhere counts as touching the kiosk (the shell's idle timer is
-/// outside this route), and the idle reset closes it. With paging on
-/// (0079) the modal pages through the matches: a bar above the sheet with
-/// ‹ › in time, the two teams — a tap lists that team's matches — and a ×.
+/// outside this route), and the idle reset closes it. With paging (0079)
+/// the modal pages through the matches with a score, one of two ways
+/// ([KioskZapisNav]): a bar above the sheet — ‹ ›, the teams (a tap lists
+/// that team's matches), the day, a × — or ‹ › beside the modal (floating
+/// over the sheet at full screen) with a tap on a team's name in the sheet
+/// for its matches. A swipe across the sheet pages like the arrows.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,12 +25,12 @@ import '../clubhouse/widgets/zapis_page.dart';
 typedef KioskZapisPlay = ({String label, VoidCallback onPlay});
 
 /// Opens [slot]'s Zápis in a modal covering [percent] of the screen, fading
-/// in (no slide); a tap outside closes it. At 100 % there is no outside, so
-/// a close button appears. [onTouch] is the shell's „somebody touched the
-/// kiosk“. [playFor] gives the match shown its ▶ — one with a video — a
-/// button that closes the Zápis and opens the stream („Sledovat živě“,
-/// „Přehrát záznam“); null = none. [paging] (0079) adds the bar that pages
-/// through the matches, with a × at any size.
+/// in (no slide); a tap outside closes it. [onTouch] is the shell's
+/// „somebody touched the kiosk“. [playFor] gives the match shown its ▶ — one
+/// with a video — a button that closes the Zápis and opens the stream
+/// („Sledovat živě“, „Přehrát záznam“); null = none. [nav] (0079): how the
+/// Zápis pages through the matches; [KioskZapisNav.off] = the bare sheet,
+/// with a × only at 100 %, where there is no outside to tap.
 Future<void> showKioskZapis(
   BuildContext context, {
   required PrioritySlot slot,
@@ -33,7 +38,7 @@ Future<void> showKioskZapis(
   required int percent,
   required VoidCallback onTouch,
   KioskZapisPlay? Function(PrioritySlot match)? playFor,
-  bool paging = false,
+  KioskZapisNav nav = KioskZapisNav.off,
 }) {
   return showGeneralDialog<void>(
     context: context,
@@ -45,51 +50,36 @@ Future<void> showKioskZapis(
       opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
       child: child,
     ),
-    pageBuilder: (context, _, _) {
-      final size = MediaQuery.sizeOf(context);
-      final full = percent >= 100;
-      return Listener(
-        onPointerDown: (_) => onTouch(),
-        onPointerSignal: (_) => onTouch(),
-        onPointerPanZoomStart: (_) => onTouch(),
-        behavior: HitTestBehavior.translucent,
-        child: Theme(
-          data: buildTheme(brightness),
-          child: Center(
-            child: SizedBox(
-              width: size.width * percent / 100,
-              height: size.height * percent / 100,
-              child: Material(
-                clipBehavior: Clip.antiAlias,
-                borderRadius: BorderRadius.circular(full ? 0 : 16),
-                elevation: 8,
-                child: _KioskZapis(
-                  slot: slot,
-                  full: full,
-                  playFor: playFor,
-                  paging: paging,
-                ),
-              ),
-            ),
-          ),
+    pageBuilder: (context, _, _) => Listener(
+      onPointerDown: (_) => onTouch(),
+      onPointerSignal: (_) => onTouch(),
+      onPointerPanZoomStart: (_) => onTouch(),
+      behavior: HitTestBehavior.translucent,
+      child: Theme(
+        data: buildTheme(brightness),
+        child: _KioskZapis(
+          slot: slot,
+          percent: percent,
+          playFor: playFor,
+          nav: nav,
         ),
-      );
-    },
+      ),
+    ),
   );
 }
 
 class _KioskZapis extends ConsumerStatefulWidget {
   const _KioskZapis({
     required this.slot,
-    required this.full,
+    required this.percent,
     required this.playFor,
-    required this.paging,
+    required this.nav,
   });
 
   final PrioritySlot slot;
-  final bool full;
+  final int percent;
   final KioskZapisPlay? Function(PrioritySlot match)? playFor;
-  final bool paging;
+  final KioskZapisNav nav;
 
   @override
   ConsumerState<_KioskZapis> createState() => _KioskZapisState();
@@ -101,6 +91,10 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
   /// The team whose matches are listed over the sheet; null = none.
   String? _listFor;
 
+  /// The arrows over the sheet and the ×, beside the arrows: a tap on the
+  /// sheet hides them, another brings them back ([KioskZapisNav.sides]).
+  bool _controls = true;
+
   void _show(PrioritySlot match) => setState(() {
     _slot = match;
     _listFor = null;
@@ -109,38 +103,62 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
   void _toggleList(String team) =>
       setState(() => _listFor = _listFor == team ? null : team);
 
+  /// The side arrows need this much room beside the modal; with less, they
+  /// float over the sheet as at full screen.
+  static const _sideRoom = 56.0;
+
   @override
   Widget build(BuildContext context) {
-    final play = widget.playFor?.call(_slot);
-    final sheet = ZapisPage(
-      key: ValueKey(_slot.id),
-      slot: _slot,
-      // With the bar, its × closes at any size.
-      closeButton: widget.full && !widget.paging,
-      withRegnums: true,
-      // The shell hides the bars for the kiosk's whole stay.
-      hideSystemBars: false,
+    final size = MediaQuery.sizeOf(context);
+    final full = widget.percent >= 100;
+    final box = Size(
+      size.width * widget.percent / 100,
+      size.height * widget.percent / 100,
     );
-    if (!widget.paging) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // A strip of its own above the sheet: the sheet fills its box
-          // edge to edge, a button over it would hide the away team's
-          // totals.
-          if (play != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-              child: SafeArea(
-                bottom: false,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: _PlayButton(play: play),
+    Widget modal(Widget child) => Center(
+      child: SizedBox.fromSize(
+        size: box,
+        child: Material(
+          clipBehavior: Clip.antiAlias,
+          borderRadius: BorderRadius.circular(full ? 0 : 16),
+          elevation: 8,
+          child: child,
+        ),
+      ),
+    );
+    final play = widget.playFor?.call(_slot);
+
+    if (widget.nav == KioskZapisNav.off) {
+      return modal(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // A strip of its own above the sheet: the sheet fills its box
+            // edge to edge, a button over it would hide the away team's
+            // totals.
+            if (play != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                child: SafeArea(
+                  bottom: false,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _PlayButton(play: play),
+                  ),
                 ),
               ),
+            Expanded(
+              child: ZapisPage(
+                key: ValueKey(_slot.id),
+                slot: _slot,
+                closeButton: full,
+                withRegnums: true,
+                // The shell hides the bars for the kiosk's whole stay.
+                hideSystemBars: false,
+              ),
             ),
-          Expanded(child: sheet),
-        ],
+          ],
+        ),
       );
     }
 
@@ -159,51 +177,145 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
     final previous = before > 0 ? matches[before - 1] : null;
     final afterAt = at >= 0 ? at + 1 : before;
     final next = afterAt < matches.length ? matches[afterAt] : null;
-    final listed = _listFor;
+    void page(int direction) {
+      final to = direction > 0 ? next : previous;
+      if (to != null) _show(to);
+    }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SafeArea(
-          bottom: false,
-          child: _Bar(
-            slot: _slot,
-            previous: previous,
-            next: next,
-            listed: listed,
-            play: play,
+    final sheet = ZapisPage(
+      key: ValueKey(_slot.id),
+      slot: _slot,
+      withRegnums: true,
+      hideSystemBars: false,
+      // The bar lists a team from its button; beside, from its name.
+      onTeam: widget.nav == KioskZapisNav.sides ? _toggleList : null,
+      onSwipe: page,
+    );
+    final listed = _listFor;
+    final list = <Widget>[
+      if (listed != null) ...[
+        // A tap beside the list closes it.
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => _listFor = null),
+          child: const ColoredBox(color: Colors.black26),
+        ),
+        Align(
+          alignment: listed == _slot.awayTeam
+              ? Alignment.topRight
+              : Alignment.topLeft,
+          child: _TeamMatches(
+            team: listed,
+            matches: kioskTeamMatches(matches, listed),
+            results: results,
+            shown: _slot,
             onShow: _show,
-            onTeam: _toggleList,
           ),
         ),
-        Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              sheet,
-              if (listed != null) ...[
-                // A tap beside the list closes it.
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => setState(() => _listFor = null),
-                  child: const ColoredBox(color: Colors.black26),
-                ),
-                Align(
-                  alignment: listed == _slot.awayTeam
-                      ? Alignment.topRight
-                      : Alignment.topLeft,
-                  child: _TeamMatches(
-                    team: listed,
-                    matches: kioskTeamMatches(matches, listed),
-                    results: results,
-                    shown: _slot,
-                    onShow: _show,
+      ],
+    ];
+
+    if (widget.nav == KioskZapisNav.bar) {
+      return modal(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SafeArea(
+              bottom: false,
+              child: _Bar(
+                slot: _slot,
+                previous: previous,
+                next: next,
+                listed: listed,
+                play: play,
+                onShow: _show,
+                onTeam: _toggleList,
+              ),
+            ),
+            Expanded(
+              child: Stack(fit: StackFit.expand, children: [sheet, ...list]),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Beside the modal: in the room the screen leaves around it, or — at
+    // full screen, or with too little room — floating over the sheet's
+    // edges, hidden and shown with the × by a tap on the sheet.
+    final room = (size.width - box.width) / 2;
+    final floating = full || room < _sideRoom;
+    Widget faded(Widget child) => AnimatedOpacity(
+      opacity: _controls ? 1 : 0,
+      duration: const Duration(milliseconds: 200),
+      child: IgnorePointer(ignoring: !_controls, child: child),
+    );
+    Widget arrow(bool forward) {
+      final to = forward ? next : previous;
+      return _SideArrow(
+        forward: forward,
+        floating: floating,
+        onTap: to == null ? null : () => _show(to),
+      );
+    }
+
+    final content = Stack(
+      fit: StackFit.expand,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => setState(() => _controls = !_controls),
+          child: sheet,
+        ),
+        if (floating) ...[
+          Align(alignment: Alignment.centerLeft, child: faded(arrow(false))),
+          Align(alignment: Alignment.centerRight, child: faded(arrow(true))),
+        ],
+        Positioned(
+          top: 8,
+          right: 8,
+          child: SafeArea(
+            child: faded(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (play != null) ...[
+                    _PlayButton(play: play),
+                    const SizedBox(width: 8),
+                  ],
+                  Material(
+                    shape: const CircleBorder(),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surface.withValues(alpha: 0.85),
+                    elevation: 2,
+                    child: IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Zavřít',
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
                   ),
-                ),
-              ],
-            ],
+                ],
+              ),
+            ),
           ),
         ),
+        ...list,
+      ],
+    );
+    if (floating) return modal(content);
+    return Stack(
+      children: [
+        modal(content),
+        for (final forward in [false, true])
+          Positioned(
+            top: 0,
+            bottom: 0,
+            left: forward ? null : 0,
+            right: forward ? 0 : null,
+            width: room,
+            child: Center(child: arrow(forward)),
+          ),
       ],
     );
   }
@@ -216,8 +328,67 @@ class _KioskZapisState extends ConsumerState<_KioskZapis> {
   }
 }
 
-/// The paging bar: ‹, the home team, the day, the away team, ›, the ▶ and
-/// the ×. The teams are buttons that list their matches.
+/// ‹ or › beside the Zápis, as the side panel's button (a bare chevron);
+/// floating over the sheet it sits on a disc so the sheet's cells do not
+/// swallow it. Dim with nothing that way.
+class _SideArrow extends StatelessWidget {
+  const _SideArrow({
+    required this.forward,
+    required this.floating,
+    required this.onTap,
+  });
+
+  final bool forward;
+  final bool floating;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final icon = Icon(
+      forward ? Icons.chevron_right : Icons.chevron_left,
+      size: 44,
+      color: floating
+          ? scheme.onSurface.withValues(alpha: onTap == null ? 0.3 : 0.9)
+          : scheme.onSurfaceVariant.withValues(alpha: onTap == null ? 0.15 : 0.6),
+    );
+    final label = forward ? 'Další zápas' : 'Předchozí zápas';
+    if (floating) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Material(
+          shape: const CircleBorder(),
+          color: scheme.surface.withValues(alpha: 0.85),
+          elevation: 2,
+          child: IconButton(
+            iconSize: 44,
+            tooltip: label,
+            onPressed: onTap,
+            icon: icon,
+          ),
+        ),
+      );
+    }
+    return Semantics(
+      button: true,
+      enabled: onTap != null,
+      label: label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: _KioskZapisState._sideRoom,
+          height: 96,
+          child: Center(child: icon),
+        ),
+      ),
+    );
+  }
+}
+
+/// The paging bar: ‹, the home team, the day, the away team, › — centred —
+/// with the ▶ and the × at the right. The teams are buttons that list
+/// their matches.
 class _Bar extends StatelessWidget {
   const _Bar({
     required this.slot,
@@ -267,44 +438,66 @@ class _Bar extends StatelessWidget {
     final previous = this.previous;
     final next = this.next;
     final play = this.play;
+    final end = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (play != null) ...[_PlayButton(play: play), const SizedBox(width: 4)],
+        IconButton(
+          iconSize: 28,
+          tooltip: 'Zavřít',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.close),
+        ),
+      ],
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-      child: Row(
-        children: [
-          IconButton(
-            iconSize: 32,
-            tooltip: 'Předchozí zápas',
-            onPressed: previous == null ? null : () => onShow(previous),
-            icon: const Icon(Icons.chevron_left),
-          ),
-          team(slot.homeTeam),
-          Expanded(
-            child: Text(
-              dayFull(slot.date),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-          ),
-          team(slot.awayTeam),
-          IconButton(
-            iconSize: 32,
-            tooltip: 'Další zápas',
-            onPressed: next == null ? null : () => onShow(next),
-            icon: const Icon(Icons.chevron_right),
-          ),
-          if (play != null) ...[
-            const SizedBox(width: 4),
-            _PlayButton(play: play),
-          ],
-          IconButton(
-            iconSize: 28,
-            tooltip: 'Zavřít',
-            onPressed: () => Navigator.of(context).pop(),
-            icon: const Icon(Icons.close),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // The middle stays clear of the right end on both sides, so it
+          // is centred on the bar, not on what the end leaves.
+          final reserve = play == null ? 56.0 : 260.0;
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: math.max(0, constraints.maxWidth - 2 * reserve),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      iconSize: 32,
+                      tooltip: 'Předchozí zápas',
+                      onPressed: previous == null
+                          ? null
+                          : () => onShow(previous),
+                      icon: const Icon(Icons.chevron_left),
+                    ),
+                    team(slot.homeTeam),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        dayFull(slot.date),
+                        maxLines: 1,
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                    team(slot.awayTeam),
+                    IconButton(
+                      iconSize: 32,
+                      tooltip: 'Další zápas',
+                      onPressed: next == null ? null : () => onShow(next),
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
+              ),
+              Align(alignment: Alignment.centerRight, child: end),
+            ],
+          );
+        },
       ),
     );
   }

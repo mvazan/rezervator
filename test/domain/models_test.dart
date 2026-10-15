@@ -75,10 +75,15 @@ void main() {
         isTrue,
       );
       expect(ScheduleSettings.defaults.kioskTodaysMatches, isTrue);
-      // 0079: paging through the Zápis, on unless switched off.
-      expect(settings({}).kioskZapisNav, isTrue);
-      expect(settings({'kiosk_zapis_nav': false}).kioskZapisNav, isFalse);
-      expect(ScheduleSettings.defaults.kioskZapisNav, isTrue);
+      // 0079: paging through the Zápis — the bar unless set otherwise.
+      expect(settings({}).kioskZapisNav, KioskZapisNav.bar);
+      expect(settings({'kiosk_zapis_nav': 'off'}).kioskZapisNav, KioskZapisNav.off);
+      expect(
+        settings({'kiosk_zapis_nav': 'sides'}).kioskZapisNav,
+        KioskZapisNav.sides,
+      );
+      expect(settings({'kiosk_zapis_nav': 'nové'}).kioskZapisNav, KioskZapisNav.bar);
+      expect(ScheduleSettings.defaults.kioskZapisNav, KioskZapisNav.bar);
     });
 
     test('fromJson reads kiosk_dark when present', () {

@@ -1846,7 +1846,7 @@ void main() {
       bool nameday = false,
       String? warning,
       bool todaysMatches = true,
-      bool zapisNav = true,
+      KioskZapisNav zapisNav = KioskZapisNav.bar,
       Set<int>? trainingWeekdays,
       int streamMax = 1,
       bool streamEnabled = true,
@@ -4054,7 +4054,7 @@ void main() {
       await tester.pumpWidget(
         app(
           // The bare sheet, as before paging (0079).
-          zapisNav: false,
+          zapisNav: KioskZapisNav.off,
           slots: [fed('m', day.addDays(-3), 'Domácí')],
           results: {'m': res('m', 'finished', 6, 2)},
           lineups: {'m': lineup},
@@ -4127,7 +4127,7 @@ void main() {
       await tester.pumpWidget(
         app(
           // The bare sheet, as before paging (0079).
-          zapisNav: false,
+          zapisNav: KioskZapisNav.off,
           slots: [fed('m', day.addDays(-3), 'Domácí')],
           results: {'m': res('m', 'finished', 6, 2)},
           lineups: {'m': lineup},
@@ -4270,6 +4270,140 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('beside the Zápis: no bar, ‹ › in the room beside the '
+          'modal; a tap on a team\'s name in the sheet lists its matches', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            zapisNav: KioskZapisNav.sides,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        final sheet = tester.getRect(find.byType(LegacyScoreSheetPage));
+        // No bar: no team buttons above the sheet.
+        expect(find.byType(OutlinedButton), findsNothing);
+        final back = find.byIcon(Icons.chevron_left);
+        final forth = find.byIcon(Icons.chevron_right);
+        expect(tester.getRect(back).right, lessThan(sheet.left));
+        expect(tester.getRect(forth).left, greaterThan(sheet.right));
+        expect(
+          tester.getCenter(back).dy,
+          closeTo(sheet.center.dy, 2),
+        );
+
+        // ‹: the match before, a sheet without players — its teams buttons.
+        await tester.tap(back);
+        await tester.pumpAndSettle();
+        expect(find.widgetWithText(TextButton, 'Jiný'), findsOneWidget);
+        await tester.tap(forth);
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+        // A tap on the away team's name in the sheet: its matches.
+        await tester.tap(find.text('Soupeř').first);
+        await tester.pumpAndSettle();
+        expect(inList(find.byType(ListTile)), findsNWidgets(3));
+        await tester.tap(
+          find.descendant(
+            of: inList(find.byType(ListTile)).first,
+            matching: find.text('Domácí'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(teamList, findsNothing);
+        expect(find.text('Zápis zápasu zatím není k dispozici.'), findsOneWidget);
+
+        await finish(tester);
+      });
+
+      testWidgets('beside the Zápis at full screen: ‹ › float over the sheet; '
+          'a tap hides them and the ×, another brings them back', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+            zapisNav: KioskZapisNav.sides,
+            zapisPercent: 100,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        final sheet = tester.getRect(find.byType(LegacyScoreSheetPage));
+        final back = find.byIcon(Icons.chevron_left);
+        expect(sheet.contains(tester.getCenter(back)), isTrue);
+        double opacity(Finder f) => tester
+            .widget<AnimatedOpacity>(
+              find.ancestor(of: f, matching: find.byType(AnimatedOpacity)).first,
+            )
+            .opacity;
+        expect(opacity(back), 1);
+        expect(opacity(find.byIcon(Icons.close)), 1);
+
+        // A tap on the sheet (off its team names): gone.
+        await tester.tapAt(sheet.center + const Offset(0, 200));
+        await tester.pumpAndSettle();
+        expect(opacity(back), 0);
+        expect(opacity(find.byIcon(Icons.close)), 0);
+        await tester.tapAt(sheet.center + const Offset(0, 200));
+        await tester.pumpAndSettle();
+        expect(opacity(back), 1);
+
+        await tester.tap(find.byIcon(Icons.close));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a swipe across the sheet pages like the arrows', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: played(),
+            results: scores(),
+            lineups: {'c': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('7 : 1'));
+        await tester.pumpAndSettle();
+        final sheet = tester.getRect(find.byType(LegacyScoreSheetPage));
+        // To the right: the match before.
+        await tester.dragFrom(sheet.center, const Offset(300, 0));
+        await tester.pumpAndSettle();
+        expect(bar('Jiný'), findsOneWidget);
+        // To the left: back to the next one.
+        final none = tester.getRect(
+          find.text('Zápis zápasu zatím není k dispozici.'),
+        );
+        await tester.dragFrom(none.center, const Offset(-300, 0));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        // A slow, mostly downward stroke is no swipe.
+        await tester.dragFrom(sheet.center, const Offset(80, 200));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+        await finish(tester);
+      });
+
       testWidgets('switched off: the bare sheet, no bar', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
@@ -4278,7 +4412,7 @@ void main() {
             results: scores(),
             lineups: {'c': lineup},
             drawerOpen: true,
-            zapisNav: false,
+            zapisNav: KioskZapisNav.off,
           ),
         );
         await tester.pumpAndSettle();
@@ -4321,7 +4455,7 @@ void main() {
       await tester.pumpWidget(
         app(
           // The bare sheet, as before paging (0079).
-          zapisNav: false,
+          zapisNav: KioskZapisNav.off,
           slots: [fed('m', day.addDays(-3), 'Domácí')],
           results: {'m': res('m', 'finished', 6, 2)},
           drawerOpen: true,

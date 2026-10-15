@@ -274,7 +274,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
             : Brightness.light,
         percent: settings?.kioskZapisPercent ?? 80,
         onTouch: _touch,
-        paging: settings?.kioskZapisNav ?? true,
+        nav: settings?.kioskZapisNav ?? KioskZapisNav.bar,
         // The ▶ of whichever match the Zápis shows (it pages, 0079): it
         // closes and the stream opens beside the board.
         playFor: play == null

@@ -115,6 +115,12 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskModule.week => 'Hráči týdne',
   };
 
+  static String _zapisNavLabel(KioskZapisNav m) => switch (m) {
+    KioskZapisNav.off => 'Vypnuto',
+    KioskZapisNav.bar => 'Lišta nad zápisem',
+    KioskZapisNav.sides => 'Šipky po stranách',
+  };
+
   static String _pickerLabel(KioskPickerMode m) => switch (m) {
     KioskPickerMode.letters => 'Podle písmen',
     KioskPickerMode.clubs => 'Podle oddílu',
@@ -807,15 +813,36 @@ class KioskSettingsScreen extends ConsumerWidget {
                       'Kolik obrazovky zabere zápis otevřený klepnutím na '
                       'zápas; 100 = celá obrazovka s křížkem.',
                 ),
-                _switch(
-                  context,
-                  settings,
-                  'Listování v zápisu',
-                  settings?.kioskZapisNav ?? true,
-                  'kiosk_zapis_nav',
-                  subtitle:
-                      'Šipky k předchozímu a dalšímu zápasu, ťuk na družstvo '
-                      'ukáže jeho zápasy, a křížek.',
+                // How the Zápis pages through the matches (0079).
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 12),
+                  child: DropdownButtonFormField<KioskZapisNav>(
+                    initialValue: settings?.kioskZapisNav ?? KioskZapisNav.bar,
+                    decoration: const InputDecoration(
+                      labelText: 'Listování v zápisu',
+                      helperText:
+                          'Šipky k předchozímu a dalšímu odehranému zápasu, '
+                          'ťuk na družstvo ukáže jeho zápasy; listuje i '
+                          'přejetí prstem. Po stranách: šipky vedle zápisu, '
+                          'na celé obrazovce přes něj — ťuk je schová.',
+                      helperMaxLines: 4,
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      for (final m in KioskZapisNav.values)
+                        DropdownMenuItem(
+                          value: m,
+                          child: Text(_zapisNavLabel(m)),
+                        ),
+                    ],
+                    onChanged: settings == null
+                        ? null
+                        : (m) => m == null
+                              ? null
+                              : _panel(context, settings, {
+                                  'kiosk_zapis_nav': m.name,
+                                }),
+                  ),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
