@@ -87,16 +87,28 @@ const appChangelog = <Release>[
     'Výsledky, Soutěže: „Krajský přebor“ je na štítku zkrácený na KP.',
     'Výsledky, Oddíly: místo štítku pro každé družstvo nejdřív oddíl, pak '
         'jeho družstva písmenem (A, B, C…) nebo celý oddíl.',
+    'Nástěnka: nejnovější oznam je nahoře — v aplikaci i na kiosku, také '
+        'mezi sbalenými „Starší“. Naplánované oznamy zůstávají seřazené '
+        'podle toho, kdy se zobrazí.',
+    'Nástěnka v aplikaci: oznamy, které byly při otevření nepřečtené, mají '
+        'štítek „Nové“ a barevný proužek vlevo — do odchodu z nástěnky; '
+        'příště už jsou přečtené a bez označení.',
+    'Kiosk: čerstvý oznam (vyvěšený před méně než 3 dny, počet dní nastaví '
+        'správce) má štítek NOVÉ a barevný proužek, nebo zůstane na obrazovce '
+        'dvakrát déle — volí správce ve Správě → Kiosk → Nástěnka, „Čerstvé '
+        'oznamy“. Nově vyvěšený oznam kiosk ukáže hned.',
   ], store: [
-    'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
-        'Hráči týdne a Jak začít s QR kódem aplikace.',
+    'Kiosk: dva panely vedle tabule, v nich Hráči týdne a Jak začít s QR '
+        'kódem aplikace.',
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
-        'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
-    'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
+        'nebo oddílů, ⟳ obnoví výsledky.',
+    'Kiosk: nižší řádky drah, seznam zápasů neskáče.',
     'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
         'výraznější výsledek.',
     'Kalendář po dnech: čas bloku pod sebou.',
     'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
+    'Nástěnka: nejnovější nahoře, nové oznamy se štítkem v aplikaci i na '
+        'kiosku.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
