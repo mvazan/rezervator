@@ -289,18 +289,26 @@ class KioskWeekPlayersPage extends ConsumerStatefulWidget {
 class _KioskWeekPlayersPageState extends ConsumerState<KioskWeekPlayersPage> {
   /// Home (false), away (true) or all (null).
   bool? _away;
-  _WeekView _view = _WeekView.categories;
+
+  /// The segment the visitor picked; null until he picks one.
+  _WeekView? _view;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final lines = weekWhere(
-      ref.watch(weekPlayersProvider).value ?? const <WeekLine>[],
-      away: _away,
-    );
+    final all = ref.watch(weekPlayersProvider).value ?? const <WeekLine>[];
+    // Until the visitor picks, the page opens as the card shows the week:
+    // by category — or, while no line has a known gender and number of
+    // throws, by competition, never on an empty page (as [_cardBlocks]).
+    final view =
+        _view ??
+        (weekCategories(all).isEmpty
+            ? _WeekView.competitions
+            : _WeekView.categories);
+    final lines = weekWhere(all, away: _away);
     final slots = {for (final s in ref.watch(prioritySlotsProvider)) s.id: s};
-    final List<_Group> groups = switch (_view) {
+    final List<_Group> groups = switch (view) {
       _WeekView.categories => [
         for (final MapEntry(key: category, value: ranked)
             in weekCategories(lines).entries)
@@ -379,7 +387,7 @@ class _KioskWeekPlayersPageState extends ConsumerState<KioskWeekPlayersPage> {
                         label: Text('Oddíly'),
                       ),
                     ],
-                    selected: {_view},
+                    selected: {view},
                     onSelectionChanged: (chosen) =>
                         setState(() => _view = chosen.first),
                   ),

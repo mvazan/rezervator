@@ -607,6 +607,43 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
+    testWidgets('the shell: no gender known yet — the card lists the '
+        'competitions, and a tap opens the week on Soutěže, not on an empty '
+        'Kategorie', (tester) async {
+      fullHd(tester);
+      await pumpShell(tester, [
+        line('Jan Novák', 571, gender: null),
+        line('Petr Malý', 580, gender: null, competition: '1. KLM'),
+      ]);
+      await tester.tap(find.byType(KioskWeekCard));
+      await tester.pumpAndSettle();
+      final page = find.byType(KioskWeekPlayersPage);
+      Finder inPage(Finder f) => find.descendant(of: page, matching: f);
+      expect(page, findsOneWidget);
+      expect(inPage(find.text('1. KLM')), findsOneWidget);
+      expect(inPage(find.text('Divize AS')), findsOneWidget);
+      expect(inPage(find.text('Petr Malý')), findsOneWidget);
+      expect(inPage(find.text('Jan Novák')), findsOneWidget);
+      const empty = 'Žádné výsledky pro tento výběr.';
+      expect(inPage(find.text(empty)), findsNothing);
+      expect(
+        tester
+            .widget<SegmentedButton<Object>>(
+              inPage(find.byWidgetPredicate((w) => w is SegmentedButton)),
+            )
+            .selected
+            .map((v) => (v as Enum).name)
+            .toList(),
+        ['competitions'],
+      );
+
+      // Kategorie is still the visitor's to pick: none there yet.
+      await tester.tap(inPage(find.text('Kategorie')));
+      await tester.pumpAndSettle();
+      expect(inPage(find.text(empty)), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
     testWidgets('the shell: week → line → Zápis → „Přehrát záznam“ leaves '
         'the week and plays the stream on the board, not behind the '
         'week', (tester) async {
