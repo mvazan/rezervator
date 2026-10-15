@@ -16,6 +16,7 @@ import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 import '../../../core/push_screen.dart';
+import 'sheet_swipe.dart';
 
 // kuzelky.com's own fixed sheet colours (measured via getComputedStyle on a
 // real match page) — a literal replica, not app theming. Never route these
@@ -962,11 +963,15 @@ class _ScoreTableBody extends StatelessWidget {
     required this.result,
     required this.players,
     required this.geometry,
+    this.onTeam,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
+
+  /// A tap on a team's name in the summary row; null = the name is text.
+  final void Function(String team)? onTeam;
 
   /// Every column width, row height and name line limit this table renders
   /// at — kuzelky's own ([_SheetGeometry.natural]) or the full-screen
@@ -1087,16 +1092,45 @@ class _ScoreTableBody extends StatelessWidget {
     final total = isHome ? result?.homeTotal : result?.awayTotal;
     final setPoints = isHome ? result?.homeSetPoints : result?.awaySetPoints;
 
+    final onTeam = this.onTeam;
+    final name = _cell(
+      width: m.nameWidth,
+      height: _teamRowHeight,
+      bg: _kHeaderGrey,
+      text: teamName,
+      style: _s16w700,
+      maxLines: geometry.teamNameMaxLines,
+      // A tappable name says so: a ▾ after it, as on a dropdown.
+      span: onTeam == null
+          ? null
+          : TextSpan(
+              style: _s16w700.copyWith(color: _kBlack),
+              children: [
+                TextSpan(text: teamName),
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.middle,
+                  child: Icon(
+                    Icons.expand_more,
+                    size: (_s16w700.fontSize ?? 16) * 1.25,
+                    color: _kBlack,
+                  ),
+                ),
+              ],
+            ),
+    );
     return Row(
       children: [
-        _cell(
-          width: m.nameWidth,
-          height: _teamRowHeight,
-          bg: _kHeaderGrey,
-          text: teamName,
-          style: _s16w700,
-          maxLines: geometry.teamNameMaxLines,
-        ),
+        if (onTeam == null)
+          name
+        else
+          Semantics(
+            button: true,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onTeam(teamName),
+              child: name,
+            ),
+          ),
         _cell(
           width: m.serieWidth,
           height: _teamRowHeight,
@@ -1508,11 +1542,21 @@ class LegacyScoreSheetPage extends StatefulWidget {
     this.showCloseButton = true,
     this.backButton = false,
     this.hideSystemBars = true,
+    this.onTeam,
+    this.onSwipe,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
+
+  /// A tap on a team's name in the sheet (the kiosk lists its matches,
+  /// 0079); null = the names are text.
+  final void Function(String team)? onTeam;
+
+  /// A swipe across the sheet ([SheetSwipe]: 1 = the next, -1 = the
+  /// previous), not while it is zoomed in; null = none.
+  final void Function(int direction)? onSwipe;
 
   /// The floating „×“. A tap on the sheet toggles it.
   final bool showCloseButton;
@@ -1561,6 +1605,8 @@ class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
         slot: widget.slot,
         result: widget.result,
         players: widget.players,
+        onTeam: widget.onTeam,
+        onSwipe: widget.onSwipe,
       ),
     );
     if (!widget.showCloseButton) return Scaffold(body: sheet);
@@ -1620,11 +1666,15 @@ class _FillViewer extends StatefulWidget {
     required this.slot,
     required this.result,
     required this.players,
+    this.onTeam,
+    this.onSwipe,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
+  final void Function(String team)? onTeam;
+  final void Function(int direction)? onSwipe;
 
   @override
   State<_FillViewer> createState() => _FillViewerState();
@@ -1658,24 +1708,32 @@ class _FillViewerState extends State<_FillViewer> {
           players: widget.players,
           area: area,
         );
-        return SizedBox.fromSize(
-          size: area,
-          child: InteractiveViewer(
-            transformationController: _controller,
-            minScale: 1.0,
-            maxScale: 4.0,
-            // The geometry already has [area]'s aspect ratio, so this
-            // uniform scale covers it edge to edge.
-            child: FittedBox(
-              child: _ScoreTableBody(
-                slot: widget.slot,
-                result: widget.result,
-                players: withWalkoverPoints(widget.players),
-                geometry: geometry,
-              ),
+        Widget viewer = InteractiveViewer(
+          transformationController: _controller,
+          minScale: 1.0,
+          maxScale: 4.0,
+          // The geometry already has [area]'s aspect ratio, so this
+          // uniform scale covers it edge to edge.
+          child: FittedBox(
+            child: _ScoreTableBody(
+              slot: widget.slot,
+              result: widget.result,
+              players: withWalkoverPoints(widget.players),
+              geometry: geometry,
+              onTeam: widget.onTeam,
             ),
           ),
         );
+        final onSwipe = widget.onSwipe;
+        if (onSwipe != null) {
+          viewer = SheetSwipe(
+            onSwipe: onSwipe,
+            // Zoomed in, a stroke pans the sheet.
+            active: () => _controller.value.getMaxScaleOnAxis() <= 1.01,
+            child: viewer,
+          );
+        }
+        return SizedBox.fromSize(size: area, child: viewer);
       },
     );
   }
