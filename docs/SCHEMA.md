@@ -1027,7 +1027,7 @@ threads, no player-to-player messages. Every error is a bare code.
 
 ## Edge functions
 
-- **regnum-lookup** (0057, 0059) — registration numbers from the ČKA member
+- **regnum-lookup** (0057, 0059, 0078) — registration numbers from the ČKA member
   register (evidence.kuzelky.cz), called from the app by a signed-in member
   (JWT verified by the platform, then `auth.getUser()`). The two sites share
   no id and the results service publishes no number, so WHO is who is decided
@@ -1050,12 +1050,22 @@ threads, no player-to-player messages. Every error is a bare code.
   up again by the caller's name, so only a real candidate is accepted; a
   number another player of the alley holds is refused, 409 `regnum_taken`). The
   sites are asked at most 25 times per call, 300 ms apart (`more` when the
-  budget ran out). The register is a PHP page: POST `/` with `ffulltext` →
-  302 + a `filter` cookie, then `GET /?aajax=t` is the list for that filter —
-  and the WHOLE register without the cookie, with fields (birth date and
-  number, …) far beyond a number. Only id, name, club, age and number are
-  read; a list longer than 50 rows is treated as an unapplied filter and
-  dropped unread (`_shared/regnum.ts`).
+  budget ran out). Since 0078 a resolve keeps the register's gender with the
+  number (`gender`, `gender_checked_at`), and `{mode: "week", monday}`
+  („Hráči týdne“ on the kiosk) fills in the gender of the week's players. It
+  reads their lines by calling `kiosk_week_players` as the CALLER, so „ours“
+  is defined once, in SQL. For those with a slug and no gender, a `found`
+  player is searched for by name alone and gets the gender of the row with
+  his stored number; his number and status are untouched. A player without a
+  cached row, or with a `none` / `ambiguous` row older than a week, is
+  resolved as for a Zápis. Every attempt stamps `gender_checked_at`, so an
+  unknown gender is asked for again after a week; `{more}` as above. The
+  register is a JSON API: `GET /frontend-api/members?fulltext=<name>` lists
+  the members of that name, and without a filter the WHOLE register, with
+  fields far beyond a number. Only id, name, club, age category, gender,
+  state and number are read. The gender codes are 1 (man) and 2 (woman);
+  anything else is unknown. A list longer than 200 rows is treated as an
+  unapplied filter and dropped unread (`_shared/regnum.ts`).
 - **notify → freed spot** (0058) — on a reservation UPDATE that sets
   `cancelled_at`, whoever cancelled and however, notify first calls
   `claim_freed_spot_watchers` and sends the returned watchers „Uvolnilo se

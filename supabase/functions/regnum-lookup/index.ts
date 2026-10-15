@@ -12,7 +12,22 @@
 //       more } for its players that are known by a results-service slug,
 //       found ones only. The players are read from the match as the CALLER
 //       sees it (RLS), so the function answers for a match the caller may
-//       open, never for a name the caller makes up. Cached per slug.
+//       open, never for a name the caller makes up. Cached per slug, with
+//       the register's gender (0078).
+//
+//   { mode: "week", monday }
+//       „Hráči týdne“ on the kiosk: the genders of the players of the week
+//       starting on that Monday, so its rankings can split men and women.
+//       The lines are read by calling kiosk_week_players AS THE CALLER, so
+//       „our players“ is defined once, in SQL, and the caller's alley and
+//       role are checked there (an approved member or the kiosk). For the
+//       players with a slug and no gender: a `found` one is looked up in the
+//       register by his name alone and gets the gender of the row with his
+//       stored number, which stays as it is. A player without a cached row,
+//       or with a `none` / `ambiguous` one past RETRY_AFTER_MS, is resolved
+//       as in a Zápis, which keeps the gender too. Each attempt stamps
+//       `gender_checked_at`, so a gender the register does not give is asked
+//       for again after GENDER_RETRY_DAYS. { more }: the budget ran out.
 //
 //   { mode: "profiles" }
 //       The alley's approved, non-kiosk, non-placeholder players with no
@@ -36,7 +51,9 @@
 //
 // The register is asked at most BUDGET times per call, one name at a time. Its
 // rows carry personal data beyond a number: only id, name, club, age category,
-// state and number are read, and only club and category leave this function.
+// gender, state and number are read. The number is kept (site_player_regnums,
+// profiles.regnum), and so is a match player's gender (site_player_regnums,
+// 0078); only club and category leave this function.
 //
 // Deployed WITHOUT --no-verify-jwt, like kiosk-password: the app calls it
 // through functions.invoke and the platform checks the JWT first; inside,
@@ -46,8 +63,11 @@ import { createClient } from "@supabase/supabase-js";
 
 import {
   foldName,
+  genderAction,
+  genderForFound,
   isSiteSlug,
   named,
+  type Resolved,
   resolveProfile,
   resolveSitePlayer,
   searchRegister,
@@ -83,7 +103,14 @@ function json(body: unknown, status = 200): Response {
 }
 
 type Status = "found" | "none" | "ambiguous";
-type Cached = { status: Status; regnum: string | null; looked_up_at: string };
+type Cached = {
+  slug: string;
+  status: Status;
+  regnum: string | null;
+  looked_up_at: string;
+  gender: "m" | "f" | null;
+  gender_checked_at: string | null;
+};
 
 /** Whether a remembered match-player answer settles the matter: a number for
  * good, else until [RETRY_AFTER_MS] is over. */
@@ -99,23 +126,83 @@ const pause = (asked: number) =>
 
 type SiteAsk = { name: string; slug: string; team: string };
 
+/** [asks] by slug, the ones that are no slug left out. */
+function bySlugOf(asks: SiteAsk[]): Map<string, SiteAsk> {
+  const bySlug = new Map<string, SiteAsk>();
+  for (const a of asks) if (isSiteSlug(a.slug)) bySlug.set(a.slug, a);
+  return bySlug;
+}
+
+/** The cached rows of [slugs], by slug. */
+async function cachedRows(slugs: string[]): Promise<Map<string, Cached>> {
+  const { data, error } = await admin
+    .from("site_player_regnums")
+    .select("slug, regnum, status, looked_up_at, gender, gender_checked_at")
+    .in("slug", slugs);
+  if (error) throw error;
+  return new Map((data ?? []).map((r) => [r.slug as string, r as Cached]));
+}
+
+/** Resolves one match player against both sites and remembers the answer:
+ * the number, the status and the register's gender — a gender known before
+ * stays when the new answer has none — with both stamps. Null when a site
+ * failed: then nothing is remembered and the next call tries again. */
+async function resolveAndSave(
+  ask: SiteAsk,
+  row: Cached | undefined,
+): Promise<Resolved | null> {
+  let answer: Resolved;
+  try {
+    answer = await resolveSitePlayer(ask.name, ask.slug, ask.team);
+  } catch (e) {
+    console.warn("regnum-lookup: lookup failed:", (e as Error).message);
+    return null;
+  }
+  const now = new Date().toISOString();
+  const { error } = await admin.from("site_player_regnums").upsert({
+    slug: ask.slug,
+    regnum: answer.status === "found" ? answer.regnum : null,
+    status: answer.status,
+    looked_up_at: now,
+    gender: (answer.status === "none" ? null : answer.gender) ?? row?.gender ?? null,
+    gender_checked_at: now,
+  });
+  if (error) console.error("regnum-lookup: save failed:", error.message);
+  return answer;
+}
+
+/** The gender of a player found earlier, from the register alone: the row of
+ * his name that bears his stored number. Number and status are not touched.
+ * `gender_checked_at` is stamped whatever the register says, so a code it
+ * does not give is not asked about on every call; a failing site stamps
+ * nothing and the next call tries again. */
+async function fillFoundGender(ask: SiteAsk, regnum: string): Promise<void> {
+  let gender: "m" | "f" | null;
+  try {
+    gender = genderForFound(await searchRegister(ask.name), regnum);
+  } catch (e) {
+    console.warn("regnum-lookup: gender lookup failed:", (e as Error).message);
+    return;
+  }
+  const { error } = await admin
+    .from("site_player_regnums")
+    .update({ gender, gender_checked_at: new Date().toISOString() })
+    .eq("slug", ask.slug)
+    .eq("status", "found")
+    .is("gender", null);
+  if (error) console.error("regnum-lookup: gender save failed:", error.message);
+}
+
 /** The numbers of [asks] by slug, from `site_player_regnums` and — for the
  * ones missing there — from the sites, at most [budget] questions. */
 async function resolveSitePlayers(
   asks: SiteAsk[],
   budget: number,
 ): Promise<{ found: Map<string, string>; more: boolean }> {
-  const bySlug = new Map<string, SiteAsk>();
-  for (const a of asks) if (isSiteSlug(a.slug)) bySlug.set(a.slug, a);
+  const bySlug = bySlugOf(asks);
   const found = new Map<string, string>();
   if (bySlug.size === 0) return { found, more: false };
-
-  const { data: cached, error } = await admin
-    .from("site_player_regnums")
-    .select("slug, regnum, status, looked_up_at")
-    .in("slug", [...bySlug.keys()]);
-  if (error) throw error;
-  const known = new Map((cached ?? []).map((r) => [r.slug as string, r as Cached & { slug: string }]));
+  const known = await cachedRows([...bySlug.keys()]);
 
   let asked = 0;
   let more = false;
@@ -129,23 +216,41 @@ async function resolveSitePlayers(
     }
     await pause(asked);
     asked++;
-    try {
-      const answer = await resolveSitePlayer(ask.name, slug, ask.team);
-      const { error: saveError } = await admin.from("site_player_regnums").upsert({
-        slug,
-        regnum: answer.status === "found" ? answer.regnum : null,
-        status: answer.status,
-        looked_up_at: new Date().toISOString(),
-      });
-      if (saveError) console.error("regnum-lookup: save failed:", saveError.message);
-      if (answer.status === "found") found.set(slug, answer.regnum);
-    } catch (e) {
-      // A site is down or changed: nothing is remembered, the next call
-      // tries again.
-      console.warn("regnum-lookup: lookup failed:", (e as Error).message);
-    }
+    const answer = await resolveAndSave(ask, row);
+    if (answer?.status === "found") found.set(slug, answer.regnum);
   }
   return { found, more };
+}
+
+/** Fills the genders of [asks], the week's players whose gender is not
+ * known, at most [budget] questions ([genderAction] says which question, if
+ * any). Answers whether any were left for want of budget. */
+async function fillGenders(asks: SiteAsk[], budget: number): Promise<boolean> {
+  const bySlug = bySlugOf(asks);
+  if (bySlug.size === 0) return false;
+  const known = await cachedRows([...bySlug.keys()]);
+  const now = new Date();
+
+  let asked = 0;
+  let more = false;
+  for (const [slug, ask] of bySlug) {
+    const row = known.get(slug);
+    const action = genderAction(row, now, RETRY_AFTER_MS);
+    if (action === "skip") continue;
+    if (asked >= budget) {
+      more = true;
+      continue;
+    }
+    await pause(asked);
+    asked++;
+    if (action === "gender") {
+      // A found row always has its number (site_player_regnums_check).
+      await fillFoundGender(ask, row!.regnum!);
+    } else {
+      await resolveAndSave(ask, row);
+    }
+  }
+  return more;
 }
 
 // --------------------------------------------------------------- profiles
@@ -221,6 +326,37 @@ Deno.serve(async (request) => {
         }));
       const { found, more } = await resolveSitePlayers(asks, BUDGET);
       return json({ regnums: Object.fromEntries(found), more });
+    }
+
+    if (body?.mode === "week") {
+      const monday = typeof body.monday === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(body.monday) &&
+          !Number.isNaN(Date.parse(body.monday))
+        ? body.monday as string
+        : null;
+      if (!monday) return json({ error: "missing_monday" }, 400);
+      // As the caller: the RPC keeps to the caller's alley and its own side,
+      // and refuses anyone but an approved member or the kiosk.
+      const { data: lines, error } = await asUser.rpc("kiosk_week_players", {
+        p_monday: monday,
+      });
+      if (error?.message === "not_allowed") return json({ error: "not_allowed" }, 403);
+      if (error) throw error;
+      const asks: SiteAsk[] = ((lines ?? []) as {
+        player_name: string;
+        player_slug: string | null;
+        team_name: string;
+        gender: string | null;
+      }[])
+        .filter((l) => typeof l.player_slug === "string" && l.gender === null)
+        .map((l) => ({
+          name: l.player_name,
+          slug: l.player_slug as string,
+          // Our side's team stands in for the club when the player's page
+          // names none, as in a Zápis.
+          team: l.team_name,
+        }));
+      return json({ more: await fillGenders(asks, BUDGET) });
     }
 
     if (body?.mode === "profiles") {
