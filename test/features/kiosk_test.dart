@@ -4206,10 +4206,23 @@ void main() {
         expect(enabled(tester, Icons.chevron_right), isFalse);
         expect(enabled(tester, Icons.chevron_left), isTrue);
 
+        final arrowsAt = (
+          tester.getCenter(button(Icons.chevron_left)),
+          tester.getCenter(button(Icons.chevron_right)),
+        );
         await tester.tap(button(Icons.chevron_left));
         await tester.pumpAndSettle();
         expect(bar('Jiný'), findsOneWidget);
         expect(find.text(dayFull(day.addDays(-7))), findsOneWidget);
+        // Another day, the arrows where they were: the day has a box of
+        // the widest day's width.
+        expect(
+          (
+            tester.getCenter(button(Icons.chevron_left)),
+            tester.getCenter(button(Icons.chevron_right)),
+          ),
+          arrowsAt,
+        );
         // Its players are not on the site yet.
         expect(find.text('Zápis zápasu zatím není k dispozici.'), findsOneWidget);
 
@@ -4295,6 +4308,9 @@ void main() {
             lineups: {'c': lineup},
             drawerOpen: true,
             zapisNav: KioskZapisNav.sides,
+            // Still arrows: their breaths keep the wall clock, not the
+            // test's.
+            animations: false,
           ),
         );
         await tester.pumpAndSettle();
@@ -4373,6 +4389,9 @@ void main() {
             lineups: {'c': lineup},
             drawerOpen: true,
             zapisNav: KioskZapisNav.sides,
+            // Still arrows: their breaths keep the wall clock, not the
+            // test's.
+            animations: false,
             zapisPercent: 100,
           ),
         );

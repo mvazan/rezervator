@@ -446,9 +446,25 @@ class _Bar extends StatelessWidget {
   final void Function(PrioritySlot match) onShow;
   final void Function(String team) onTeam;
 
-  /// The middle's width — ‹ (48), the longest day („čtvrtek 30. 12.“) and
-  /// › (48) — that the teams keep clear of.
-  static const _middle = 270.0;
+  /// The day's box: as wide as the widest day can be — every weekday with
+  /// a two-digit day and month, in the bar's style and text size — so the
+  /// arrows beside it stay put whichever day it shows („středa 14. 10.“ is
+  /// narrower than „čtvrtek 15. 10.“).
+  static double _dayWidth(BuildContext context, TextStyle style) {
+    final base = DefaultTextStyle.of(context).style.merge(style);
+    var widest = 0.0;
+    for (var i = 0; i < 7; i++) {
+      final painter = TextPainter(
+        text: TextSpan(text: dayFull(Day(2026, 12, 21).addDays(i)), style: base),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: 1,
+      )..layout();
+      widest = math.max(widest, painter.width);
+      painter.dispose();
+    }
+    return widest.ceilToDouble() + 2;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -485,9 +501,13 @@ class _Bar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final dayStyle = TextStyle(color: scheme.onSurfaceVariant);
+          final dayWidth = _dayWidth(context, dayStyle);
+          // ‹ (48), the day with its padding, › (48).
+          final middle = 48 + 16 + dayWidth + 48;
           // Each team gets its half of what the middle leaves; the away
           // team shares its half with the ▶ and the ×.
-          final half = (constraints.maxWidth - _middle) / 2 - 8;
+          final half = (constraints.maxWidth - middle) / 2 - 8;
           final end = (play == null ? 0.0 : 220.0) + 48 + 8;
           return Stack(
             alignment: Alignment.center,
@@ -505,10 +525,14 @@ class _Bar extends StatelessWidget {
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      dayFull(slot.date),
-                      maxLines: 1,
-                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    child: SizedBox(
+                      width: dayWidth,
+                      child: Text(
+                        dayFull(slot.date),
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                        style: dayStyle,
+                      ),
                     ),
                   ),
                   IconButton(
