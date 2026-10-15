@@ -839,9 +839,10 @@ class KioskSettingsScreen extends ConsumerWidget {
                     min: 9,
                     max: 24,
                     helper:
-                        'Jména v řádcích drah; řádky se písmu přizpůsobí. '
-                        'Appka má 11. Při celém dni na obrazovce se písmo '
-                        'řídí výškou řádků samo.',
+                        'Jména v řádcích drah; řádek je jméno a pár pixelů '
+                        'kolem, takže větší písmo vyplní víc řádku. Appka má '
+                        '11. Při celém dni na obrazovce se písmo řídí výškou '
+                        'řádků samo.',
                   ),
                 _number(
                   context,
@@ -854,8 +855,9 @@ class KioskSettingsScreen extends ConsumerWidget {
                   max: 24,
                   helper:
                       'Pásy zápasů, blokací a pronájmů na tabuli; appka má '
-                      '10. Kde se pás vejde, má zápas pohár, domácí, '
-                      'pomlčku a hosty pod sebou a dlouhý název se zalomí.',
+                      '10. Kde se pás vejde, má zápas nahoře pohár s časem '
+                      'a pod mezerou domácí, „x“ a hosty pod sebou; '
+                      'dlouhý název se zalomí.',
                 ),
                 _number(
                   context,
@@ -1081,8 +1083,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                     settings?.kioskFollowBoard ?? true,
                     'kiosk_follow_board',
                     subtitle:
-                        'Když návštěvník posune tabuli na jiné dny, seznam '
-                        'zápasů naskočí na zápasy těch dnů.',
+                        'Když návštěvník posune tabuli, seznam se posune '
+                        'jen o zápasy dnů, které přibyly.',
                   ),
                   _number(
                     context,

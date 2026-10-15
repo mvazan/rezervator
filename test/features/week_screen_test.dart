@@ -1180,9 +1180,11 @@ void main() {
       await tester.tap(chips.at(t.weekday));
       await tester.pumpAndSettle();
 
-      // A block label reads „15:30–16:30"; the week range „7.9.–13.9." must
-      // not be mistaken for one.
-      final label = find.textContaining(RegExp(r'^\d{1,2}:\d{2}–')).first;
+      // A block label reads „15:30“ / „–“ / „16:30“, its dash alone on a
+      // line; the week range „7.9.–13.9." must not be mistaken for one.
+      final label = find
+          .ancestor(of: find.text('–').first, matching: find.byType(FittedBox))
+          .first;
       final labelBox = tester.getRect(label);
       final cells = find.byType(SlotTile);
       expect(cells, findsWidgets);
@@ -1202,6 +1204,52 @@ void main() {
         lessThan(6),
         reason: 'at ${scale}x the time is not centred on its row',
       );
+    }
+  });
+
+  testWidgets('day view: every time label is the start, a dash and the end, '
+      'each on a line of its own, the dash centred on a short line — the same '
+      'at any text size', (tester) async {
+    // At 130 % the labels used to wrap wherever the width ran out:
+    // „17:00– / 18:00“ in one row, „18:00 / – / 19:00“ in the next.
+    for (final scale in [1.0, 1.15, 1.3]) {
+      portraitSurface(tester);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      final chips = find.descendant(
+        of: find.byType(DayChipStrip),
+        matching: find.byType(InkWell),
+      );
+      await tester.tap(chips.at(t.weekday));
+      await tester.pumpAndSettle();
+
+      final dashes = find.text('–');
+      expect(dashes, findsWidgets, reason: 'at ${scale}x');
+      final heights = <double>{};
+      for (var i = 0; i < tester.widgetList(dashes).length; i++) {
+        final dash = dashes.at(i);
+        final label = find.ancestor(of: dash, matching: find.byType(Column)).first;
+        final times = find.descendant(
+          of: label,
+          matching: find.textContaining(RegExp(r'^\d{2}:\d{2}$')),
+        );
+        expect(times, findsNWidgets(2), reason: 'at ${scale}x');
+        final start = tester.getRect(times.at(0));
+        final end = tester.getRect(times.at(1));
+        final mid = tester.getRect(dash);
+        // Start over dash over end, the dash centred under the start.
+        expect(mid.top, greaterThanOrEqualTo(start.bottom - 0.5));
+        expect(end.top, greaterThanOrEqualTo(mid.bottom - 0.5));
+        expect(mid.center.dx, closeTo(start.center.dx, 1));
+        // The dash's line is short: under a full line of the times.
+        expect(mid.height, lessThan(start.height * 0.8),
+            reason: 'at ${scale}x');
+        heights.add(tester.getSize(label).height);
+      }
+      // Every row's label the same height.
+      expect(heights, hasLength(1), reason: 'at ${scale}x: $heights');
     }
   });
 

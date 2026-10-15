@@ -1573,16 +1573,19 @@ void main() {
   );
 
   testWidgets('q: kiosk_fit_day=false switches to the comfortable fixed scale '
-      '(60 min = laneCount × 40 px) instead of fit-to-screen', (tester) async {
+      '(60 min = laneCount rows for the font) instead of fit-to-screen', (
+    tester,
+  ) async {
     await tester.pumpWidget(kioskApp(kioskFitDay: false));
     await tester.pumpAndSettle();
 
-    // b1 is 61 minutes; at laneCount(2) × 40 / 60 px per minute the card
-    // is 61 × 1.333… ≈ 81.3px tall — independent of the viewport height.
+    // b1 is 61 minutes; at laneCount(2) rows of 11 px text (31.7 px) an
+    // hour the card is 61 × 1.058 ≈ 64.5 px tall — independent of the
+    // viewport height.
     final card = find.byKey(const ValueKey('cal-block-b1')).first;
     expect(
       tester.getSize(card).height,
-      closeTo(61 * settings.laneCount * 40.0 / 60, 0.7),
+      closeTo(61 * settings.laneCount * kioskRowHeightFor(11) / 60, 0.7),
     );
 
     await finish(tester);
@@ -1702,10 +1705,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(
-        find.descendant(of: dialog, matching: find.text('5 : 3')),
-        findsOneWidget,
-      );
+      // The score, side by side around its colon.
+      for (final part in ['5', '3']) {
+        expect(
+          find.descendant(of: dialog, matching: find.text(part)),
+          findsOneWidget,
+        );
+      }
       // A video the kiosk cannot play (not YouTube): no video control at
       // all — the fallback trophy instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
@@ -1827,6 +1833,8 @@ void main() {
       bool followBoard = true,
       bool Function()? socketOpen,
       void Function(String id)? onRefresh,
+      // refresh_match's answer; a Completer's future holds it back.
+      Future<String?> Function(String id)? refreshAnswer,
       int liveRefresh = 60,
       MatchLayout liveLayout = MatchLayout.full,
       int visibleDays = 7,
@@ -1936,9 +1944,10 @@ void main() {
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
         kioskSocketOpenProvider.overrideWithValue(socketOpen ?? () => true),
-        kioskRefreshMatchProvider.overrideWithValue(
-          (id) async => onRefresh?.call(id),
-        ),
+        kioskRefreshMatchProvider.overrideWithValue((id) async {
+          onRefresh?.call(id);
+          return refreshAnswer == null ? 'fresh' : await refreshAnswer(id);
+        }),
         matchResultsProvider.overrideWith(
           (ref) => resultsStream ?? Stream.value(results),
         ),
@@ -2629,12 +2638,15 @@ void main() {
           closeTo(tester.getTopLeft(badge).dx - 4, 0.5),
         );
         // The dots' tap target (the lock and the dots, padded) ends where
-        // the age begins.
+        // the age's own (the refresh button, padded on its left) begins.
         final dotsTarget = find
             .ancestor(of: dots, matching: find.byType(GestureDetector))
             .first;
+        final ageTarget = find
+            .ancestor(of: age, matching: find.byType(InkWell))
+            .first;
         expect(
-          tester.getTopLeft(age).dx,
+          tester.getTopLeft(ageTarget).dx,
           closeTo(tester.getTopRight(dotsTarget).dx, 0.5),
         );
         await finish(tester);
@@ -3319,8 +3331,10 @@ void main() {
       final at22 = await boardWith(22);
       expect(at11.scale, 1);
       expect(at22.scale, 2);
-      // Twice the text, about twice the rows.
-      expect(at22.day, greaterThan(at11.day * 1.5));
+      // Twice the text, taller rows — not twice as tall: the spacing
+      // around the text stays.
+      expect(at22.day, greaterThan(at11.day * 1.3));
+      expect(at22.day, lessThan(at11.day * 2));
     });
 
     testWidgets('with the day on the screen the font follows the rows: the '
@@ -3338,16 +3352,25 @@ void main() {
       final a = await scaleWith(9);
       final b = await scaleWith(24);
       expect(a, b);
-      // Within reason: 9 to 20 px.
-      expect(a * kioskRowFontRef, inInclusiveRange(9, 20));
+      // Within reason: 9 to 24 px.
+      expect(a * kioskRowFontRef, inInclusiveRange(9, 24));
     });
 
-    test('the row height follows the font, the fitted font follows the row', () {
-      expect(kioskRowHeightFor(11), 40);
-      expect(kioskRowHeightFor(22), 80);
-      expect(kioskRowFont(40), 11);
+    test('a row is its line of text and the same few pixels around it; the '
+        'fitted font is whatever the row leaves', () {
+      expect(kioskRowHeightFor(11), closeTo(31.7, 0.1));
+      expect(kioskRowHeightFor(22), closeTo(47.5, 0.1));
+      // The larger the text, the more of the row it fills — at 11 px about
+      // half (the old 40 px row: 0.39).
+      double share(int font) => font * 1.43 / kioskRowHeightFor(font);
+      expect(share(11), greaterThan(0.45));
+      expect(share(22), greaterThan(share(11)));
+      // Back and forth.
+      for (final font in [9, 11, 16, 24]) {
+        expect(kioskRowFont(kioskRowHeightFor(font)), closeTo(font, 0.001));
+      }
       expect(kioskRowFont(10), 9);
-      expect(kioskRowFont(400), 20);
+      expect(kioskRowFont(400), 24);
     });
 
     testWidgets('the day columns keep their width while the drawer slides', (
@@ -3769,6 +3792,74 @@ void main() {
         await finish(tester);
       });
     }
+
+    testWidgets('the match list follows the board a day at a time: a day back '
+        'whose match the list shows already leaves it be; day by day it moves '
+        'no further than the match that came into view', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [
+            for (var i = 1; i <= 14; i++) fed('p$i', day.addDays(-i), 'Den$i '),
+            fed('n', day.addDays(2), 'Příští '),
+          ],
+          results: {
+            for (var i = 1; i <= 14; i++) 'p$i': res('p$i', 'finished', 5, 3),
+          },
+          drawerOpen: true,
+          showNotices: false,
+          weeksBack: 2,
+          weeksAhead: 1,
+          pastDays: 14,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final list = find.descendant(
+        of: find.byType(KioskPanelView),
+        matching: find.byType(CustomScrollView),
+      );
+      final listBox = tester.getRect(list);
+      bool visible(String t) {
+        final f = find.descendant(
+          of: find.byType(KioskPanelView),
+          matching: find.textContaining(t),
+        );
+        if (f.evaluate().isEmpty) return false;
+        final r = tester.getRect(f.first);
+        return r.top >= listBox.top - 1 && r.bottom <= listBox.bottom + 1;
+      }
+
+      double pixels() => tester
+          .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)),
+          )
+          .position
+          .pixels;
+      final column = tester.getSize(find.byType(ScheduleDayColumn).first).width;
+      // Most of a column, past the touch slop: the board snaps one day.
+      Future<void> dayBack() async {
+        await tester.dragFrom(const Offset(400, 600), Offset(column * 0.7 + 18, 0));
+        await tester.pumpAndSettle();
+      }
+
+      // Yesterday's match is on the list already, above the coming one.
+      expect(visible('Den1 '), isTrue);
+      final opened = pixels();
+      await dayBack();
+      expect(pixels(), opened, reason: 'a day the list shows: no scroll');
+
+      // Further back, day by day: each new match comes into view, the list
+      // moving at most a row at a time — never a jump to put it on top.
+      for (var i = 2; i <= 14; i++) {
+        final before = pixels();
+        await dayBack();
+        expect(visible('Den$i '), isTrue, reason: 'day -$i');
+        expect((before - pixels()).abs(), lessThanOrEqualTo(65),
+            reason: 'day -$i');
+      }
+
+      await finish(tester);
+    });
 
     testWidgets('a match being played takes the whole drawer, even closed by '
         'default, and reopens it after a minute', (tester) async {
@@ -4528,6 +4619,260 @@ void main() {
       await finish(tester);
     });
 
+    group('the score\'s age is a refresh button (⟳ turns while asking)', () {
+      // The ⟳ of the live view's header and whether it is turning.
+      Finder spinner() => find
+          .ancestor(
+            of: find.descendant(
+              of: find.byType(KioskPanelView),
+              matching: find.byIcon(Icons.refresh),
+            ),
+            matching: find.byType(RotationTransition),
+          )
+          .first;
+      bool turning(WidgetTester tester) =>
+          (tester.widget<RotationTransition>(spinner()).turns
+                  as AnimationController)
+              .isAnimating;
+      Finder ageButton() => find
+          .ancestor(of: spinner(), matching: find.byType(InkWell))
+          .first;
+
+      testWidgets('a tap asks for a fresh score; the ⟳ turns until it '
+          'arrives — no second ask meanwhile — or gives up after 30 s', (
+        tester,
+      ) async {
+        fullHd(tester);
+        final asked = <String>[];
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        MatchResult at(String fetched) =>
+            res('m', 'in_progress', 2, 1, fetched: fetched);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            resultsStream: results.stream,
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            onRefresh: asked.add,
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        results.add({'m': at('2026-10-08T09:50:00+00:00')});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        // The ask on opening runs after the first frame; this one shows it.
+        await tester.pump();
+        expect(liveView, findsOneWidget);
+        // Asked on opening — quietly: only a tap turns the ⟳.
+        expect(asked, ['m']);
+        expect(turning(tester), isFalse);
+        results.add({'m': at('2026-10-08T09:59:00+00:00')});
+        await tester.pump();
+        // The drawer done sliding in.
+        await tester.pump(const Duration(seconds: 1));
+
+        // A tap: asked again, turning; a tap meanwhile asks nothing more.
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(asked, ['m', 'm']);
+        expect(turning(tester), isTrue);
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 10));
+        expect(asked, ['m', 'm']);
+        expect(turning(tester), isTrue);
+        results.add({'m': at('2026-10-08T10:00:00+00:00')});
+        await tester.pump();
+        // It finishes the turn it is in.
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+
+        // Queued, but nothing lands: given up on after 30 s.
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 29));
+        expect(turning(tester), isTrue);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        expect(asked, ['m', 'm', 'm']);
+        await finish(tester);
+      });
+
+      testWidgets('an answer that nothing will come (fresh, not live, or a '
+          'failure) stops it — after a short turn, so a tap shows', (
+        tester,
+      ) async {
+        fullHd(tester);
+        for (final answer in ['fresh', 'not_live', null, 'throws']) {
+          await tester.pumpWidget(
+            app(
+              slots: [fed('m', day, 'Hrají')],
+              results: {'m': res('m', 'in_progress', 2, 1)},
+              lineups: {'m': lineup},
+              liveRefresh: 600,
+              refreshAnswer: (_) async =>
+                  answer == 'throws' ? throw Exception('offline') : answer,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(turning(tester), isFalse, reason: '$answer');
+          await tester.tap(ageButton());
+          await tester.pump(const Duration(milliseconds: 500));
+          expect(turning(tester), isTrue, reason: '$answer');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pump(const Duration(seconds: 2));
+          expect(turning(tester), isFalse, reason: '$answer');
+          await finish(tester);
+        }
+      });
+
+      testWidgets('a tap while the last turn runs out turns it again', (
+        tester,
+      ) async {
+        fullHd(tester);
+        final asked = <String>[];
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        MatchResult at(String fetched) =>
+            res('m', 'in_progress', 2, 1, fetched: fetched);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            resultsStream: results.stream,
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            onRefresh: asked.add,
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        results.add({'m': at('2026-10-08T09:50:00+00:00')});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 2));
+        // The fetch lands: the ⟳ finishes its turn — and a tap meanwhile
+        // turns it again, for as long as that ask is out.
+        results.add({'m': at('2026-10-08T09:59:00+00:00')});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(seconds: 2));
+        expect(asked, ['m', 'm', 'm']);
+        expect(turning(tester), isTrue);
+        await tester.pump(const Duration(seconds: 5));
+        expect(turning(tester), isTrue);
+        await finish(tester);
+      });
+
+      testWidgets('only the asked match\'s own fetch stops it, not another '
+          'match\'s', (tester) async {
+        fullHd(tester);
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        final other = res('x', 'finished', 6, 2);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            resultsStream: results.stream,
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        final m = res('m', 'in_progress', 2, 1,
+            fetched: '2026-10-08T09:50:00+00:00');
+        results.add({'m': m});
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isTrue);
+        results.add({'m': m, 'x': other});
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isTrue);
+        results.add({
+          'm': res('m', 'in_progress', 2, 1,
+              fetched: '2026-10-08T09:59:00+00:00'),
+          'x': other,
+        });
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        await finish(tester);
+      });
+
+      testWidgets('an answer that comes after its ask gave up does not end '
+          'a later tap\'s', (tester) async {
+        fullHd(tester);
+        final answers = <Completer<String?>>[];
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            liveRefresh: 600,
+            refreshAnswer: (_) {
+              final answer = Completer<String?>();
+              answers.add(answer);
+              return answer.future;
+            },
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(seconds: 1));
+        answers.single.complete('fresh'); // the ask on opening
+        // A tap whose answer hangs past the 30 s it is given…
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isFalse);
+        // …a new tap, queued; then the old answer comes in at last.
+        await tester.tap(ageButton());
+        await tester.pump(const Duration(seconds: 1));
+        answers.last.complete('queued');
+        answers[1].complete('fresh');
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(turning(tester), isTrue);
+        await finish(tester);
+      });
+
+      testWidgets('the clock\'s ask leaves it still', (tester) async {
+        fullHd(tester);
+        final asked = <String>[];
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            liveRefresh: 30,
+            idleSeconds: 600,
+            onRefresh: asked.add,
+            // Queued: a turning ⟳ would turn for as long as it waits.
+            refreshAnswer: (_) async => 'queued',
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+        expect(asked, ['m']);
+        expect(turning(tester), isFalse);
+        while (asked.length < 2) {
+          await tester.pump(const Duration(seconds: 1));
+        }
+        await tester.pump();
+        expect(turning(tester), isFalse);
+        await finish(tester);
+      });
+    });
+
     testWidgets('a swipe turns the live matches', (tester) async {
       fullHd(tester);
       final second = [
@@ -4689,18 +5034,19 @@ void main() {
       });
     }
 
-    testWidgets('a match band on the board stacks home, dash and away, so '
-        'no team name breaks in half', (tester) async {
+    testWidgets('a match band on the board stacks the cup with the time, '
+        'then home, x and away, so no team name breaks in half', (
+      tester,
+    ) async {
       fullHd(tester);
       await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
       await tester.pumpAndSettle();
       Finder inBand(Finder f) =>
           find.descendant(of: find.byType(CalendarEventBand), matching: f);
-      expect(inBand(findEmojiText('🏆')), findsOneWidget);
+      expect(inBand(findEmojiText('🏆 14:00–17:00')), findsOneWidget);
       expect(inBand(find.text('Domácí')), findsOneWidget);
-      expect(inBand(find.text('–')), findsOneWidget);
+      expect(inBand(find.text('x')), findsOneWidget);
       expect(inBand(find.text('Soupeř')), findsOneWidget);
-      expect(inBand(find.text('14:00–17:00')), findsOneWidget);
       await finish(tester);
     });
 
@@ -4756,7 +5102,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.text('6 : 2'),
+          matching: find.text('6'),
         ),
       );
       await tester.pumpAndSettle();

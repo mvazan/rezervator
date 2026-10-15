@@ -69,15 +69,30 @@ const appChangelog = <Release>[
     'Kiosk, výběr hráče: správce zvolí, zda začíná písmeny, oddíly (dlaždice '
         'v barvě oddílu, hráči bez oddílu pod „Ostatní“), nebo obojím. '
         'Upozornění při rezervaci je širší a má méně řádků.',
+    'Kiosk, hraný zápas v panelu: ťuk na „⟳ před … min“ obnoví výsledky; '
+        'ikona se po ťuknutí točí, dokud nová data nedorazí.',
+    'Kalendář a kiosk: zápas v rozvrhu má nahoře pohár a vedle něj čas, '
+        'pod volným řádkem domácí, „x“ a hosty pod sebou.',
+    'Zápasy dne (ťuk na záhlaví dne): pod zápasem čas a kuželna, kde se '
+        'hraje, pod tím soutěž a kolo. Výsledek vpravo je větší a výraznější '
+        'a kuželky stojí hned pod ním, dvojtečky pod sebou; pohár i výsledek '
+        'jsou na výšku uprostřed zápasu.',
+    'Kiosk: řádky drah na tabuli jsou jméno a pár pixelů kolem — nižší, '
+        'takže se vejde víc hodin, a při celém dni na obrazovce mají větší '
+        'písmo.',
+    'Kalendář po dnech: čas bloku je začátek, pomlčka a konec pod sebou — '
+        'v každém řádku stejně, i při větším písmu.',
+    'Kiosk: seznam zápasů při posunu tabule neskáče — ukáže jen zápasy dnů, '
+        'které na tabuli přibyly, a posune se jen o tolik, aby byly vidět.',
   ], store: [
-    'Kiosk: dva panely, vlevo i vpravo od tabule; správce do nich rozmístí '
-        'moduly ve Správě → Kiosk → Panely.',
-    'Kiosk: Hráči týdne — nejlepší výkony našich hráčů za minulý týden, '
-        'muži a ženy na 120 a 100 hodů, i podle soutěží a oddílů.',
-    'Kiosk: Jak začít — rezervace na kiosku krok za krokem a QR kód '
-        'aplikace pro Android.',
-    'Kiosk: větší tlačítko „Rezervace tréninku“; výběr hráče začíná '
-        'písmeny, oddíly nebo obojím.',
+    'Kiosk: dva panely vlevo i vpravo od tabule, v nich Hráči týdne (nejlepší '
+        'výkony minulého týdne) a Jak začít s QR kódem aplikace.',
+    'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
+        'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
+    'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
+    'Zápas v rozvrhu: nahoře pohár s časem, pod ním domácí a hosté.',
+    'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
+    'Kalendář po dnech: čas bloku pod sebou.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

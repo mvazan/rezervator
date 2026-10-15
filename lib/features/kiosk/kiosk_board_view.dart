@@ -55,15 +55,28 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
 /// The lane rows' name size at the app's row height ([laneRowRefHeight]).
 const double kioskRowFontRef = 11;
 
-/// A lane row's height (one hour) for the admin's [fontSize] — 11 px is
-/// the app's 40 px; the row grows in step with its text.
+/// A lane row's line of text: the theme's line height (bodyMedium, 1.43 ×
+/// the size), which the row's name inherits.
+const double _rowLineHeight = 1.43;
+
+/// What a lane row (an hour) holds besides its line of text — the block
+/// card's od–do header shared out among the lanes, the cell's margins and
+/// the air around the name. The same few pixels at any size: a row is its
+/// text plus this, so the larger the text, the less of the row is empty
+/// (the rows used to grow in step with the text, 40 px for 11 px — over
+/// half of every cell was empty, at any size).
+const double _rowSpacing = 16.0;
+
+/// A lane row's height (one hour) for the admin's [fontSize]: its line of
+/// text and [_rowSpacing] — 11 px makes 32 px.
 double kioskRowHeightFor(int fontSize) =>
-    fontSize * laneRowRefHeight / kioskRowFontRef;
+    fontSize * _rowLineHeight + _rowSpacing;
 
 /// The font for a lane row [rowHeight] tall (an hour), when the day is
-/// fitted to the screen: in step with the row, between 9 and 20 px.
+/// fitted to the screen: whatever the row has left after [_rowSpacing],
+/// between 9 and 24 px (the admin's own range).
 double kioskRowFont(double rowHeight) =>
-    (rowHeight * kioskRowFontRef / laneRowRefHeight).clamp(9.0, 20.0);
+    ((rowHeight - _rowSpacing) / _rowLineHeight).clamp(9.0, 24.0);
 
 class KioskBoardView extends ConsumerStatefulWidget {
   const KioskBoardView({

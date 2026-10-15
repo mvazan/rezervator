@@ -179,8 +179,152 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      expect(find.text('5 : 3'), findsOneWidget);
-      expect(find.text('3460 : 3349'), findsOneWidget);
+      expect(find.text('5'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+      expect(find.text('3460'), findsOneWidget);
+      expect(find.text('3349'), findsOneWidget);
+    });
+
+    testWidgets('a federation match: the time with its kuželna, then the '
+        'competition and round; the points over the pins, colon under '
+        'colon, the block and the trophy centred on the row', (tester) async {
+      final finished = PrioritySlot(
+        id: 'm1',
+        date: date,
+        startsAt: const HourMinute(16, 30),
+        endsAt: const HourMinute(18, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'KK Vyškov B',
+        awayTeam: 'TJ Sokol Brno IV A',
+        isAway: true,
+        importKey: 'cka:m1',
+        competition: 'Jihomoravská divize',
+        round: 5,
+        venue: 'KK Vyškov',
+        description: 'Jihomoravská divize · 5. kolo · KK Vyškov',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm1',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'home_total': 3460,
+        'away_total': 3349,
+        'fetched_at': '2026-09-17T21:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showDayMatchesDialog(context, date, [finished]),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+          results: {'m1': result},
+          slots: [finished],
+          theme: buildTheme(Brightness.light),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      final semantics = tester.ensureSemantics();
+      final title = find.text('KK Vyškov B – TJ Sokol Brno IV A');
+      final where = find.text('16:30–18:30 · Kuželna KK Vyškov');
+      final league = find.text('Jihomoravská divize · 5. kolo');
+      final points = find.text('5');
+      final pins = find.text('3460');
+      final colons = find.text(':');
+      for (final f in [title, where, league, points, pins]) {
+        expect(f, findsOneWidget);
+      }
+      expect(colons, findsNWidgets(2));
+      // Three lines, in that order; the note (which repeats them) is not
+      // shown.
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      double middle(Finder f) => tester.getCenter(f).dy;
+      expect(top(where), greaterThan(top(title)));
+      expect(top(league), greaterThan(top(where)));
+      expect(find.textContaining('venku'), findsNothing);
+      // The pins under the points, the colons one under the other, the
+      // home numbers ending on one line, the away ones starting on one.
+      expect(top(pins), greaterThan(tester.getBottomLeft(points).dy - 1));
+      expect(
+        tester.getCenter(colons.at(0)).dx,
+        closeTo(tester.getCenter(colons.at(1)).dx, 0.5),
+      );
+      // The points' colon as far from either number.
+      final colon = colons.at(0);
+      expect(
+        tester.getTopLeft(colon).dx - tester.getTopRight(points).dx,
+        closeTo(
+          tester.getTopLeft(find.text('3')).dx - tester.getTopRight(colon).dx,
+          0.5,
+        ),
+      );
+      expect(
+        tester.getTopRight(points).dx,
+        closeTo(tester.getTopRight(pins).dx, 0.5),
+      );
+      expect(
+        tester.getTopLeft(find.text('3')).dx,
+        closeTo(tester.getTopLeft(find.text('3349')).dx, 0.5),
+      );
+      // The block and the trophy centred on the lines.
+      final lines =
+          (top(title) + tester.getBottomLeft(league).dy) / 2;
+      final block =
+          (top(points) + tester.getBottomLeft(pins).dy) / 2;
+      expect(block, closeTo(lines, 1.5));
+      expect(
+        middle(find.byIcon(Icons.emoji_events_outlined)),
+        closeTo(lines, 1.5),
+      );
+      // Bolder and larger than the names, and than the titleMedium it was.
+      final pointsStyle = tester.widget<Text>(points).style!;
+      expect(pointsStyle.fontWeight, FontWeight.w800);
+      expect(
+        pointsStyle.fontSize,
+        greaterThan(
+          Theme.of(tester.element(points)).textTheme.titleMedium!.fontSize!,
+        ),
+      );
+      // Read out whole, not number by number.
+      expect(find.bySemanticsLabel(RegExp('5 : 3, 3460 : 3349')), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('a hand-entered match keeps doma/venku and shows its note on '
+        'the third line', (tester) async {
+      final manual = PrioritySlot(
+        id: 'x',
+        date: date,
+        startsAt: const HourMinute(16, 30),
+        endsAt: const HourMinute(18, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'A',
+        awayTeam: 'B',
+        description: 'přátelák',
+      );
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, [manual]),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('16:30–18:30 · doma'), findsOneWidget);
+      expect(find.text('přátelák'), findsOneWidget);
     });
 
     testWidgets(
@@ -353,14 +497,14 @@ void main() {
         await tester.tap(find.text('open'));
         await tester.pumpAndSettle();
 
-        // The score is a single plain Text(pointsLabel(...), style: ...) — no
-        // per-side branching to test; both digits necessarily share the one
-        // style. Confirm it's exactly the base style, nothing conditional.
-        final scoreText = tester.widget<Text>(find.text('5 : 3'));
-        expect(
-          scoreText.style,
-          Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleSmall,
-        );
+        // Both sides of the score share the one style, the emphasised
+        // titleLarge, whoever won — the winner's emphasis is its name's.
+        final emphasised = Theme.of(
+          tester.element(find.text('5')),
+        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800);
+        for (final digit in ['5', ':', '3']) {
+          expect(tester.widget<Text>(find.text(digit)).style, emphasised);
+        }
 
         final titleText = tester.widget<Text>(
           find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
@@ -470,7 +614,8 @@ void main() {
         // Score/pins still render — only the tap-through and video control
         // are gated by [interactive]; the leading glyph falls back to the
         // plain trophy/block icon instead.
-        expect(find.text('5 : 3'), findsOneWidget);
+        expect(find.text('5'), findsOneWidget);
+        expect(find.text('3'), findsOneWidget);
         expect(find.byIcon(Icons.play_circle_fill), findsNothing);
         expect(find.byIcon(Icons.videocam), findsNothing);
         expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);

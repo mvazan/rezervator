@@ -38,11 +38,13 @@ void main() {
   );
 
   group('matchBandLines', () {
-    test('a match: the cup, home, a dash, away — the names may wrap', () {
+    test('a match: the cup with the time, a blank line, home, an x, '
+        'away — the names and the time may wrap', () {
       expect(matchBandLines(match), [
-        (text: '🏆', wraps: false),
+        (text: '🏆 17:00–18:30', wraps: true),
+        bandGap,
         (text: 'KK Vracov', wraps: true),
-        (text: '–', wraps: false),
+        (text: 'x', wraps: false),
         (text: 'KK Slavoj', wraps: true),
       ]);
     });
