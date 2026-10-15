@@ -29,6 +29,7 @@ import 'kiosk_connection.dart';
 import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
 import 'kiosk_duty.dart';
+import 'kiosk_guide.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_warning.dart';
 import 'kiosk_stream_window.dart';
@@ -231,6 +232,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
   void _openDuty() =>
       unawaited(showKioskDutyDialog(context, wrap: _touchable));
 
+  /// „Jak začít“ whole, with the large QR code — a tap on its card in a
+  /// panel.
+  void _openGuide() => unawaited(showKioskGuide(context, wrap: _touchable));
+
   /// The ▶ handed to everything that has one — the drawer's matches, the
   /// live badge, the Zápis, a day's matches, a tap on a match without a
   /// score — or null while the admin has the streams off (0072): then none
@@ -398,6 +403,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
           hidden: picking,
           onOpenNotice: _openNotice,
           onOpenMatch: _openMatch,
+          onOpenGuide: _openGuide,
           onPlay: play,
           resetToken: _resets,
           showLive: !(holdsMatches && _liveHidden),

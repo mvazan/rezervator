@@ -2,9 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
+import 'package:rezervator/data/clock.dart';
+import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/kiosk_layout.dart';
+import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_guide.dart';
+import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_qr.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart'
@@ -201,6 +208,169 @@ void main() {
       await tester.tap(find.text('Zavřít'));
       await tester.pumpAndSettle();
       expect(dialog, findsNothing);
+    });
+  });
+
+  group('in the panels', () {
+    Message notice() => Message(
+      id: 'n1',
+      kind: MessageKind.notice,
+      audience: MessageAudience.all,
+      authorId: 'a',
+      authorRole: MessageAuthorRole.admin,
+      onDate: null,
+      blockId: null,
+      title: 'Brigáda',
+      body: 'Sejdeme se v devět.',
+      expiresAt: null,
+      notify: true,
+      showOnKiosk: true,
+      createdAt: DateTime(2026, 9, 1),
+      updatedAt: DateTime(2026, 9, 1),
+    );
+
+    testWidgets('KioskPanelView: the guide takes its share and opens on a '
+        'tap', (tester) async {
+      fullHd(tester);
+      var opened = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith(
+              (ref) => Stream.value(
+                const ScheduleSettings(
+                  laneCount: 2,
+                  trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
+                  bookingHorizonDays: 14,
+                  maxActiveReservations: 3,
+                ),
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildTheme(Brightness.dark),
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  height: panelHeight,
+                  child: KioskPanelView(
+                    side: PanelSide.left,
+                    width: 2 * column,
+                    open: true,
+                    content: KioskPanelContent(
+                      side: PanelSide.left,
+                      entries: const [
+                        KioskPanelEntry(KioskModule.guide, 45),
+                        KioskPanelEntry(KioskModule.notices, 55),
+                      ],
+                      notices: [notice()],
+                    ),
+                    onOpenNotice: (_) {},
+                    onOpenMatch: (_) {},
+                    onOpenGuide: () => opened++,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final card = find.byType(KioskGuideCard);
+      final want = cardSize(days: 2, share: 45);
+      expect(tester.getSize(card).width, closeTo(want.width, 1e-6));
+      expect(tester.getSize(card).height, closeTo(want.height, 1e-6));
+      expect(qr, findsOneWidget);
+      await tester.tap(card);
+      expect(opened, 1);
+      // The notices' turn timer goes with the tree.
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('the shell: the guide in the left panel beside a notice, a '
+        'tap opens it in the kiosk\'s theme, the idle reset closes it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      const panels = KioskPanels(
+        left: KioskPanel(days: 2, open: true),
+        right: KioskPanel(days: 2, open: false),
+        modules: [
+          KioskModulePlacement(id: 'duty', side: PanelSide.off, share: 30),
+          KioskModulePlacement(id: 'guide', side: PanelSide.left, share: 45),
+          KioskModulePlacement(id: 'notices', side: PanelSide.left, share: 55),
+          KioskModulePlacement(id: 'matches', side: PanelSide.off, share: 60),
+          KioskModulePlacement(id: 'week', side: PanelSide.off, share: 55),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith(
+              (ref) => Stream.value(
+                const ScheduleSettings(
+                  laneCount: 2,
+                  trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
+                  bookingHorizonDays: 14,
+                  maxActiveReservations: 3,
+                  kioskVisibleDays: 8,
+                  kioskPanels: panels,
+                ),
+              ),
+            ),
+            nowProvider.overrideWith(
+              (ref) => Stream.value(DateTime(2026, 10, 8, 12)),
+            ),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => const []),
+            messagesProvider.overrideWith((ref) => Stream.value([notice()])),
+            kioskSocketOpenProvider.overrideWithValue(() => true),
+            matchResultsProvider.overrideWith((ref) => Stream.value(const {})),
+            matchPlayerResultsProvider.overrideWith(
+              (ref, id) => Stream.value(const []),
+            ),
+            dutyPeriodsProvider.overrideWith((ref) => Stream.value(const [])),
+            dutyAssignmentsProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
+          ],
+          // The app's light theme around the kiosk's dark one: the dialog
+          // is dark only through the shell's wrap.
+          child: MaterialApp(
+            theme: buildTheme(Brightness.light),
+            home: const KioskShell(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final panel = tester.getSize(find.byType(KioskPanelView));
+      expect(panel.width, 2 * column);
+      final card = find.byType(KioskGuideCard);
+      expect(
+        tester.getSize(card).height,
+        closeTo((panel.height - 3 * pad) * 0.45, 1e-6),
+      );
+      expect(qr, findsOneWidget);
+
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      final dialog = find.byType(AlertDialog);
+      expect(dialog, findsOneWidget);
+      expect(Theme.of(tester.element(dialog)).brightness, Brightness.dark);
+
+      // A minute without a touch: the kiosk starts over, the guide shut.
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(dialog, findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
     });
   });
 }

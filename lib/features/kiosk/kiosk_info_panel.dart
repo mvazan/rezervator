@@ -36,6 +36,7 @@ import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import 'kiosk_duty.dart' show kioskDutyPlanProvider;
+import 'kiosk_guide.dart' show KioskGuideCard;
 
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
@@ -194,6 +195,7 @@ class KioskPanelView extends ConsumerWidget {
     this.hidden = false,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    this.onOpenGuide,
     this.onPlay,
     this.resetToken = 0,
     this.boardDays,
@@ -234,6 +236,10 @@ class KioskPanelView extends ConsumerWidget {
   final bool hidden;
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// A tap on „Jak začít“: the whole guide with the large QR code; null =
+  /// a tap does nothing.
+  final VoidCallback? onOpenGuide;
 
   /// ▶ at a match with a video: its stream (0072); null while the admin
   /// has the streams off — no ▶ and no live badge.
@@ -280,7 +286,7 @@ class KioskPanelView extends ConsumerWidget {
             ? null
             : () => onShowLive!(true),
       ),
-      KioskModule.guide => const SizedBox.shrink(),
+      KioskModule.guide => KioskGuideCard(onOpen: () => onOpenGuide?.call()),
       KioskModule.week => const SizedBox.shrink(),
     };
     final showsLive =
