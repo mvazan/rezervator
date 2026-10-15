@@ -91,7 +91,7 @@ void main() {
     Future<void> open(WidgetTester tester, {required bool web}) async {
       // Tall enough that the sheet (60 % of the view) holds every batch —
       // the list is lazy, so an off-screen heading is simply not built.
-      tester.view.physicalSize = const Size(800, 3400);
+      tester.view.physicalSize = const Size(800, 4400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);

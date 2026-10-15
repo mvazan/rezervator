@@ -55,6 +55,11 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
   /// cache (or the pre-resume state) first, so the notice a push opened
   /// the board for often arrives a moment later — and one posted while the
   /// board is open is listed too. Each id is still sent once per visit.
+  ///
+  /// The same set is what the board shows as „Nové“: the notices this
+  /// visit found unread. Not read_at — the optimistic write clears that
+  /// within a frame — and it dies with the screen, so the next visit finds
+  /// them read and plain, like the badge.
   final _requested = <String>{};
 
   @override
@@ -88,6 +93,9 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
       _markActiveRead(data);
       body = _NoticeList(
         data: data,
+        // Taken after _markActiveRead, so a notice this very snapshot
+        // brought is in it already.
+        newIds: Set.unmodifiable(_requested),
         isAdmin: isAdmin,
         updateNotice: widget.updateNotice,
         deleteNotice: widget.deleteNotice,
@@ -168,6 +176,7 @@ AsyncValue<_Data> _watchData(WidgetRef ref) {
 class _NoticeList extends ConsumerStatefulWidget {
   const _NoticeList({
     required this.data,
+    required this.newIds,
     required this.isAdmin,
     required this.updateNotice,
     required this.deleteNotice,
@@ -175,6 +184,9 @@ class _NoticeList extends ConsumerStatefulWidget {
   });
 
   final _Data data;
+
+  /// The notices this visit found unread — the board's `_requested`.
+  final Set<String> newIds;
   final bool isAdmin;
   final NoticeUpdate updateNotice;
   final Future<void> Function(String id) deleteNotice;
@@ -204,10 +216,11 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
         ),
       );
     }
-    Widget tile(Message n) => _NoticeCard(
+    Widget tile(Message n, {bool isNew = false}) => _NoticeCard(
           key: ValueKey(n.id),
           notice: n,
           now: now,
+          isNew: isNew,
           isAdmin: widget.isAdmin,
           updateNotice: widget.updateNotice,
           deleteNotice: widget.deleteNotice,
@@ -226,7 +239,10 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
           for (final n in scheduled) tile(n),
           const Divider(),
         ],
-        for (final n in split.active) tile(n),
+        // Only an active notice is new: one that expires while the board
+        // is open goes under „Starší“ plain, as the badge stops counting it.
+        for (final n in split.active)
+          tile(n, isNew: widget.newIds.contains(n.id)),
         if (split.expired.isNotEmpty)
           ListTile(
             title: Text('Starší (${split.expired.length})'),
@@ -247,6 +263,25 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
 /// Bodies longer than this many lines start cut with a „Více“ toggle.
 const _cutLines = 3;
 
+/// „Nové“ before a new notice's title — the duty roster's „Tvoje služba“
+/// chip, in the same colours.
+class _NewChip extends StatelessWidget {
+  const _NewChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Chip(
+      label: const Text('Nové'),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      labelStyle: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer),
+      backgroundColor: scheme.primaryContainer,
+      side: BorderSide.none,
+    );
+  }
+}
+
 /// One notice: title, body (cut to three lines with „Více“ when long),
 /// footer; for the admin also the seen count and the ⋮ actions.
 class _NoticeCard extends ConsumerStatefulWidget {
@@ -254,6 +289,7 @@ class _NoticeCard extends ConsumerStatefulWidget {
     super.key,
     required this.notice,
     required this.now,
+    required this.isNew,
     required this.isAdmin,
     required this.updateNotice,
     required this.deleteNotice,
@@ -262,6 +298,10 @@ class _NoticeCard extends ConsumerStatefulWidget {
 
   final Message notice;
   final DateTime now;
+
+  /// Unread when this visit listed it: the „Nové“ chip before the title
+  /// and a `primary` stripe along the left edge, for this visit only.
+  final bool isNew;
   final bool isAdmin;
   final NoticeUpdate updateNotice;
   final Future<void> Function(String id) deleteNotice;
@@ -290,82 +330,109 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
       ?seen,
       if (isAdmin && !notice.showOnKiosk) 'skrytý na kiosku',
     ].join(' · ');
+    final title = Text(notice.title ?? '');
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: ListTile(
-        title: Text(notice.title ?? ''),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // „Více“ only when the body really is longer than three lines
-            // at this width: on a wide screen a long text may fit, and a
-            // toggle that changes nothing is noise.
-            LayoutBuilder(
-              builder: (context, box) {
-                final style = DefaultTextStyle.of(context).style;
-                final painter = TextPainter(
-                  text: TextSpan(text: notice.body, style: style),
-                  textDirection: Directionality.of(context),
-                  textScaler: MediaQuery.textScalerOf(context),
-                  maxLines: _cutLines,
-                )..layout(maxWidth: box.maxWidth);
-                final long = painter.didExceedMaxLines;
-                painter.dispose();
-                final cut = long && !_expanded;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      notice.body,
-                      maxLines: cut ? _cutLines : null,
-                      overflow: cut ? TextOverflow.ellipsis : null,
-                    ),
-                    if (long)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () =>
-                              setState(() => _expanded = !_expanded),
-                          child: Text(_expanded ? 'Méně' : 'Více'),
-                        ),
-                      ),
-                  ],
-                );
-              },
+      // The stripe below follows the card's rounded corners.
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        key: widget.isNew ? ValueKey('notice-new-${notice.id}') : null,
+        // A new notice's 4 px `primary` stripe along the left edge; the
+        // others keep a transparent one, so every card's text starts at
+        // the same place (the duty roster's stripe does the same).
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              color: widget.isNew
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.transparent,
+              width: 4,
             ),
-            const SizedBox(height: 4),
-            Text(footer, style: Theme.of(context).textTheme.bodySmall),
-          ],
+          ),
         ),
-        isThreeLine: true,
-        trailing: isAdmin
-            ? PopupMenuButton<String>(
-                onSelected: (a) => _act(context, a),
-                itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'edit', child: Text('Upravit')),
-                  const PopupMenuItem(
-                    value: 'seen',
-                    child: Text('Kdo si to zobrazil'),
-                  ),
-                  // „Sejmout“ = expire now: an expired notice would only
-                  // get a later expiry. The board's own clock and rule
-                  // (splitNotices) decide what is active.
-                  if (notice.expiresAt == null ||
-                      notice.expiresAt!.isAfter(widget.now))
+        child: ListTile(
+          title: widget.isNew
+              ? Row(
+                  children: [
+                    const _NewChip(),
+                    const SizedBox(width: 8),
+                    Expanded(child: title),
+                  ],
+                )
+              : title,
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // „Více“ only when the body really is longer than three lines
+              // at this width: on a wide screen a long text may fit, and a
+              // toggle that changes nothing is noise.
+              LayoutBuilder(
+                builder: (context, box) {
+                  final style = DefaultTextStyle.of(context).style;
+                  final painter = TextPainter(
+                    text: TextSpan(text: notice.body, style: style),
+                    textDirection: Directionality.of(context),
+                    textScaler: MediaQuery.textScalerOf(context),
+                    maxLines: _cutLines,
+                  )..layout(maxWidth: box.maxWidth);
+                  final long = painter.didExceedMaxLines;
+                  painter.dispose();
+                  final cut = long && !_expanded;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        notice.body,
+                        maxLines: cut ? _cutLines : null,
+                        overflow: cut ? TextOverflow.ellipsis : null,
+                      ),
+                      if (long)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () =>
+                                setState(() => _expanded = !_expanded),
+                            child: Text(_expanded ? 'Méně' : 'Více'),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 4),
+              Text(footer, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+          isThreeLine: true,
+          trailing: isAdmin
+              ? PopupMenuButton<String>(
+                  onSelected: (a) => _act(context, a),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Upravit')),
                     const PopupMenuItem(
-                      value: 'unpost',
-                      child: Text('Sejmout'),
+                      value: 'seen',
+                      child: Text('Kdo si to zobrazil'),
                     ),
-                  PopupMenuItem(
-                    value: 'kiosk',
-                    child: Text(notice.showOnKiosk
-                        ? 'Skrýt na kiosku'
-                        : 'Zobrazit na kiosku'),
-                  ),
-                  const PopupMenuItem(value: 'delete', child: Text('Smazat')),
-                ],
-              )
-            : null,
+                    // „Sejmout“ = expire now: an expired notice would only
+                    // get a later expiry. The board's own clock and rule
+                    // (splitNotices) decide what is active.
+                    if (notice.expiresAt == null ||
+                        notice.expiresAt!.isAfter(widget.now))
+                      const PopupMenuItem(
+                        value: 'unpost',
+                        child: Text('Sejmout'),
+                      ),
+                    PopupMenuItem(
+                      value: 'kiosk',
+                      child: Text(notice.showOnKiosk
+                          ? 'Skrýt na kiosku'
+                          : 'Zobrazit na kiosku'),
+                    ),
+                    const PopupMenuItem(value: 'delete', child: Text('Smazat')),
+                  ],
+                )
+              : null,
+        ),
       ),
     );
   }

@@ -370,9 +370,12 @@ value; either is fine, pick whichever touches less of the existing call sites.
 ### Nástěnka (every player)
 
 - Active notices (not expired) in posting order, oldest first; expired ones collapsed under
-  „Starší (N)“ in the same order. Card: title, body (long bodies collapsed to three lines with
-  „Více“), footer „vyvěšeno so 28. 9. · platí do 12. 10.“ or „vyvěšeno … · do odvolání“.
+  „Starší (N)“ in the same order. *(Newest first since 2026-10-15 — on the kiosk too; see
+  `2026-10-15-notices-newest-design.md`.)* Card: title, body (long bodies collapsed to three
+  lines with „Více“), footer „vyvěšeno so 28. 9. · platí do 12. 10.“ or „vyvěšeno … · do
+  odvolání“.
 - Opening the screen marks the listed active notices read (`read_at`), optimistically.
+  *(Since 2026-10-15 the ones it found unread carry „Nové“ and a stripe for that visit.)*
 - Empty: „Na nástěnce zatím nic není.“
 - **Admin:** FAB „Nový oznam“ → form: Nadpis (required, ≤ 80), Text (≤ 2000), „Platí do“
   (date picker, default +14 days) with a switch „Do odvolání“ that disables the date, switch

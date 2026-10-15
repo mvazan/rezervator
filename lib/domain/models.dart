@@ -765,6 +765,36 @@ enum KioskPickerMode {
   bool get showsLetters => this != KioskPickerMode.clubs;
 }
 
+/// What a fresh notice gets on the kiosk (0081, `kiosk_notices_fresh_mode`),
+/// on the panel's card and in the status bar: nothing ([off]), the „NOVÉ“
+/// label ([highlight]), twice the turn before the next notice ([longer]),
+/// or the label and the longer turn ([both]). A notice is fresh for
+/// [ScheduleSettings.kioskNoticesFreshDays] days (`isFreshNotice`). The
+/// names are the column's values — do not rename one.
+enum KioskNoticesFresh {
+  off,
+  highlight,
+  longer,
+  both;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [highlight], the column's default.
+  static KioskNoticesFresh parse(String? value) => switch (value) {
+        'off' => KioskNoticesFresh.off,
+        'longer' => KioskNoticesFresh.longer,
+        'both' => KioskNoticesFresh.both,
+        _ => KioskNoticesFresh.highlight,
+      };
+
+  /// Whether a fresh notice wears the „NOVÉ“ label.
+  bool get highlights =>
+      this == KioskNoticesFresh.highlight || this == KioskNoticesFresh.both;
+
+  /// Whether a fresh notice stays twice the turn (`kioskNoticeTurn`).
+  bool get lingers =>
+      this == KioskNoticesFresh.longer || this == KioskNoticesFresh.both;
+}
+
 /// How a match is drawn — the kiosk's live match (0064,
 /// `kiosk_live_layout`) and the app's match detail (a device preference per
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
@@ -866,6 +896,8 @@ class ScheduleSettings {
     this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
     this.kioskPanels = KioskPanels.defaults,
     this.kioskNoticesHeader = true,
+    this.kioskNoticesFresh = KioskNoticesFresh.highlight,
+    this.kioskNoticesFreshDays = 3,
     this.kioskPickerMode = KioskPickerMode.letters,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
@@ -975,6 +1007,12 @@ class ScheduleSettings {
   /// (0077, `kiosk_notices_header`) — whether the notices are in a panel
   /// too is [kioskPanels]' business.
   final bool kioskNoticesHeader;
+
+  /// What a fresh notice gets on the kiosk — the „NOVÉ“ label, twice the
+  /// turn, both or nothing (0081, `kiosk_notices_fresh_mode`) — and for how
+  /// many days, 1–14, a notice is fresh (`kiosk_notices_fresh_days`).
+  final KioskNoticesFresh kioskNoticesFresh;
+  final int kioskNoticesFreshDays;
 
   /// How the kiosk's name picker starts (0076).
   final KioskPickerMode kioskPickerMode;
@@ -1119,6 +1157,10 @@ class ScheduleSettings {
         ),
         kioskPanels: KioskPanels.fromJson(json['kiosk_panels']),
         kioskNoticesHeader: json['kiosk_notices_header'] as bool? ?? true,
+        kioskNoticesFresh: KioskNoticesFresh.parse(
+          json['kiosk_notices_fresh_mode'] as String?,
+        ),
+        kioskNoticesFreshDays: json['kiosk_notices_fresh_days'] as int? ?? 3,
         kioskPickerMode: KioskPickerMode.parse(
           json['kiosk_picker_mode'] as String?,
         ),

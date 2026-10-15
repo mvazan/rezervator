@@ -104,17 +104,27 @@ const appChangelog = <Release>[
         'ji ukáže místo celého názvu — z „TJ Sokol Brno IV B“ je „Sokol IV '
         'B“ v rozvrhu, zápasech, výsledcích, na kiosku, v připomínkách i '
         'v Google kalendáři.',
+    'Nástěnka: nejnovější oznam je nahoře — v aplikaci i na kiosku, také '
+        'mezi sbalenými „Starší“. Naplánované oznamy zůstávají seřazené '
+        'podle toho, kdy se zobrazí.',
+    'Nástěnka v aplikaci: oznamy, které byly při otevření nepřečtené, mají '
+        'štítek „Nové“ a barevný proužek vlevo — do odchodu z nástěnky; '
+        'příště už jsou přečtené a bez označení.',
+    'Kiosk: čerstvý oznam (vyvěšený před méně než 3 dny, počet dní nastaví '
+        'správce) má štítek NOVÉ a barevný proužek, nebo zůstane na obrazovce '
+        'dvakrát déle — volí správce ve Správě → Kiosk → Nástěnka, „Čerstvé '
+        'oznamy“. Nově vyvěšený oznam kiosk ukáže hned.',
   ], store: [
     'Kiosk: dva panely (Hráči týdne, Jak začít a Napište nám s QR kódy).',
-    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ '
-        'u hraného zápasu.',
-    'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče, '
-        'v zápisu listování.',
-    'Zápasy dne: kuželna, soutěž a kolo, výraznější výsledek.',
+    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
+        'výsledky.',
+    'Kiosk: nižší řádky drah, listování v zápisu.',
+    'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo.',
     'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
-    'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
+    'Výsledky: filtr podle oddílu, pak družstva.',
     'Klubovna: Napište nám — zpráva autorovi.',
     'Oddíly: přezdívka místo celého názvu.',
+    'Nástěnka: nejnovější nahoře, nové se štítkem.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

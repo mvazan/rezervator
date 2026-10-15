@@ -4,18 +4,41 @@
 library;
 
 import 'collation.dart' show compareCzech;
-import 'messages.dart' show splitNotices;
+import 'messages.dart' show isScheduled, noticePostedAt, splitNotices;
 import 'models.dart';
 import 'results.dart' show hasScoreData, isLive;
 import 'youtube.dart' show youtubeVideoId;
 
 /// The notices on the wall right now: kind notice, not expired, not hidden
-/// from the kiosk by the admin, oldest posted first (the Nástěnka order).
+/// from the kiosk by the admin, newest first (the Nástěnka order).
 List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
     splitNotices(
       messages.where((m) => m.kind == MessageKind.notice && m.showOnKiosk),
       now,
     ).active;
+
+/// Whether [m] is a fresh notice on the kiosk (0081): up for less than
+/// [days] days at [now], counted from when it went up ([noticePostedAt]).
+/// A notice scheduled for later ([isScheduled], beyond the
+/// `noticeClockSlack`) is never fresh — it is not up yet. A notice posted
+/// after [now] is fresh: the kiosk's minute clock runs up to ~75 s behind,
+/// so a notice that has just gone up is usually „ahead“ of it.
+bool isFreshNotice(Message m, DateTime now, int days) =>
+    !isScheduled(m, now) &&
+    now.difference(noticePostedAt(m)) < Duration(days: days);
+
+/// How long [m] stays on the kiosk — the panel's card and the status bar —
+/// before the next notice: twice [turn] when fresh notices linger
+/// ([KioskNoticesFresh.lingers]) and [m] is fresh for [days]
+/// ([isFreshNotice]), otherwise [turn].
+Duration kioskNoticeTurn(
+  Message m, {
+  required DateTime now,
+  required Duration turn,
+  required KioskNoticesFresh fresh,
+  required int days,
+}) =>
+    fresh.lingers && isFreshNotice(m, now, days) ? turn * 2 : turn;
 
 bool _decided(MatchResult? r) =>
     r?.status == MatchStatus.finished || r?.status == MatchStatus.forfeit;

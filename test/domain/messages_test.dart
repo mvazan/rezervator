@@ -114,16 +114,33 @@ void main() {
   });
 
   group('splitNotices', () {
-    test('active vs expired, oldest first within each', () {
+    test('active vs expired, newest first within each', () {
       final now = DateTime(2026, 10, 2);
       final active1 = notice(id: 'a1', createdAt: DateTime(2026, 9, 1));
       final active2 = notice(id: 'a2', createdAt: DateTime(2026, 9, 15),
           expiresAt: DateTime(2026, 10, 4));
-      final expired = notice(id: 'e1', createdAt: DateTime(2026, 8, 1),
+      final expired1 = notice(id: 'e1', createdAt: DateTime(2026, 8, 1),
           expiresAt: DateTime(2026, 9, 1));
-      final split = splitNotices([expired, active2, active1], now);
-      expect(split.active.map((m) => m.id), ['a1', 'a2']);
-      expect(split.expired.map((m) => m.id), ['e1']);
+      final expired2 = notice(id: 'e2', createdAt: DateTime(2026, 8, 20),
+          expiresAt: DateTime(2026, 9, 10));
+      final split =
+          splitNotices([expired1, active1, expired2, active2], now);
+      expect(split.active.map((m) => m.id), ['a2', 'a1']);
+      expect(split.expired.map((m) => m.id), ['e2', 'e1']);
+    });
+
+    test('a notice posted ahead of time counts from when it went up', () {
+      final now = DateTime(2026, 10, 2, 12);
+      // Written on 20 September for 1 October: it went up after the one
+      // posted at once on 25 September, so it is the newer of the two.
+      final ahead = notice(id: 'ahead', createdAt: DateTime(2026, 9, 20),
+          visibleFrom: DateTime(2026, 10, 1, 8));
+      final atOnce = notice(id: 'at-once', createdAt: DateTime(2026, 9, 25));
+      expect(noticePostedAt(ahead), DateTime(2026, 10, 1, 8));
+      expect(noticePostedAt(atOnce), DateTime(2026, 9, 25));
+      expect(splitNotices([atOnce, ahead], now).active.map((m) => m.id),
+          ['ahead', 'at-once']);
+      expect(noticeFooter(ahead, now), 'vyvěšeno čt 1. 10. · do odvolání');
     });
 
     test('a notice posted ahead of time waits among the scheduled', () {
@@ -139,10 +156,59 @@ void main() {
       expect(noticeFooter(later, now), 'zobrazí se 5. 10. v 8:00 · do odvolání');
     });
 
-    test('same posting time: by id', () {
+    test('a notice within the clock slack of now is already up', () {
+      // „Zobrazit hned“ stamps the server's now(); the boards' minute clock
+      // runs up to ~75 s behind it, so 60 s ahead of the clock still counts
+      // as reached, 5 minutes ahead does not.
+      final now = DateTime(2026, 10, 2, 12);
+      final justShown = notice(
+          id: 'just-shown', visibleFrom: now.add(const Duration(seconds: 60)));
+      final waiting = notice(
+          id: 'waiting', visibleFrom: now.add(const Duration(minutes: 5)));
+      expect(isScheduled(justShown, now), isFalse);
+      expect(isScheduled(waiting, now), isTrue);
+      final split = splitNotices([justShown, waiting], now);
+      expect(split.active.map((m) => m.id), ['just-shown']);
+      expect(split.scheduled.map((m) => m.id), ['waiting']);
+      // The slack itself is still up, one second more is not.
+      expect(
+          isScheduled(notice(visibleFrom: now.add(noticeClockSlack)), now),
+          isFalse);
+      expect(
+          isScheduled(
+              notice(
+                  visibleFrom:
+                      now.add(noticeClockSlack + const Duration(seconds: 1))),
+              now),
+          isTrue);
+    });
+
+    test('same posting time: by id, the newest-first way; scheduled by id',
+        () {
       final split = splitNotices(
           [for (final id in ['c', 'a', 'b']) notice(id: id)], DateTime(2026, 10, 2));
-      expect(split.active.map((m) => m.id), ['a', 'b', 'c']);
+      expect(split.active.map((m) => m.id), ['c', 'b', 'a']);
+      final ahead = splitNotices([
+        for (final id in ['c', 'a', 'b'])
+          notice(id: id, visibleFrom: DateTime(2026, 10, 5, 8)),
+      ], DateTime(2026, 10, 2));
+      expect(ahead.scheduled.map((m) => m.id), ['a', 'b', 'c']);
+    });
+
+    test('newest first however many (sort is not stable)', () {
+      // Above 32 elements Dart's List.sort is a quicksort, so equal keys
+      // come out in any order unless the comparator breaks the tie.
+      final now = DateTime(2026, 10, 2);
+      final newestFirst = [
+        for (var i = 39; i >= 0; i--)
+          notice(
+            id: 'n${i.toString().padLeft(2, '0')}',
+            createdAt: DateTime(2026, 9, 1).add(Duration(hours: i ~/ 4)),
+          ),
+      ];
+      final shuffled = [...newestFirst]..shuffle(Random(7));
+      expect(splitNotices(shuffled, now).active.map((m) => m.id),
+          [for (final m in newestFirst) m.id]);
     });
   });
 

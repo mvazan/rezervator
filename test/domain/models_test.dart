@@ -368,6 +368,63 @@ void main() {
       }
       expect(KioskPanels.fromJson(decoded), KioskPanels.defaults);
     });
+
+    test('fromJson reads what a fresh notice gets and for how many days '
+        '(0081); the label for three days when absent or unknown', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      for (final (name, fresh, highlights, lingers) in [
+        ('off', KioskNoticesFresh.off, false, false),
+        ('highlight', KioskNoticesFresh.highlight, true, false),
+        ('longer', KioskNoticesFresh.longer, false, true),
+        ('both', KioskNoticesFresh.both, true, true),
+      ]) {
+        final read = ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_notices_fresh_mode': name,
+          'kiosk_notices_fresh_days': 7,
+        });
+        expect(read.kioskNoticesFresh, fresh);
+        // The name is the column's value.
+        expect(fresh.name, name);
+        expect(fresh.highlights, highlights, reason: name);
+        expect(fresh.lingers, lingers, reason: name);
+        expect(read.kioskNoticesFreshDays, 7);
+      }
+      final old = ScheduleSettings.fromJson(base);
+      expect(old.kioskNoticesFresh, KioskNoticesFresh.highlight);
+      expect(old.kioskNoticesFreshDays, 3);
+      expect(
+        ScheduleSettings.fromJson({
+          ...base,
+          'kiosk_notices_fresh_mode': 'blink',
+        }).kioskNoticesFresh,
+        KioskNoticesFresh.highlight,
+      );
+      expect(KioskNoticesFresh.parse(null), KioskNoticesFresh.highlight);
+      expect(ScheduleSettings.defaults.kioskNoticesFresh,
+          KioskNoticesFresh.highlight);
+      expect(ScheduleSettings.defaults.kioskNoticesFreshDays, 3);
+    });
+
+    test('the fresh notices\' defaults are the columns\' defaults', () {
+      // A new alley gets 0081's defaults; the app's fallbacks must match.
+      final sql = File(
+        'supabase/migrations/0081_kiosk_notices_fresh.sql',
+      ).readAsStringSync();
+      final mode = RegExp(
+        r"kiosk_notices_fresh_mode\s+text\s+not\s+null\s+default\s+'(\w+)'",
+      ).firstMatch(sql)!.group(1);
+      final days = RegExp(
+        r'kiosk_notices_fresh_days\s+smallint\s+not\s+null\s+default\s+(\d+)',
+      ).firstMatch(sql)!.group(1)!;
+      expect(mode, ScheduleSettings.defaults.kioskNoticesFresh.name);
+      expect(int.parse(days), ScheduleSettings.defaults.kioskNoticesFreshDays);
+    });
   });
 
   group('canteen duty (0050)', () {

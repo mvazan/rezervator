@@ -799,6 +799,19 @@ class _StatusBar extends ConsumerWidget {
                                   ?.kioskNoticesRotationSeconds ??
                               12,
                         ),
+                        now: now,
+                        fresh:
+                            ref
+                                .watch(settingsProvider)
+                                .value
+                                ?.kioskNoticesFresh ??
+                            KioskNoticesFresh.highlight,
+                        freshDays:
+                            ref
+                                .watch(settingsProvider)
+                                .value
+                                ?.kioskNoticesFreshDays ??
+                            3,
                         onOpen: onOpenNotice,
                       ),
                     ),
