@@ -131,7 +131,8 @@ void main() {
     expect(find.text(dayFull(past)), findsOneWidget);
     expect(find.text(dayFull(next)), findsOneWidget);
     expect(find.text(dayFull(later)), findsOneWidget);
-    expect(find.text('18:00–20:00 · dráhy 1, 2 · bez rozbrusu'), findsOneWidget);
+    // The note under the time and lanes, on a line of its own.
+    expect(find.text('18:00–20:00 · dráhy 1, 2\nbez rozbrusu'), findsOneWidget);
     expect(find.text('18:00–20:00 · dráhy 2'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text(dayFull(past))).dy,

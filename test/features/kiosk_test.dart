@@ -1359,19 +1359,23 @@ void main() {
       await tester.pumpAndSettle();
 
       // The band shows the renter with its real times, exactly once (the
-      // rental is one-time, so only today's column has it).
-      expect(findEmojiText('🔒 Firma X\n8:45–9:30'), findsOneWidget);
+      // rental is one-time, so only today's column has it) — on two lines
+      // of their own, or as one two-line text in a short band.
+      final band = find.ancestor(
+        of: findEmojiTextContaining('Firma X'),
+        matching: find.byType(CalendarEventBand),
+      );
+      expect(band, findsOneWidget);
+      expect(
+        find.descendant(of: band, matching: findEmojiTextContaining('8:45–9:30')),
+        findsOneWidget,
+      );
 
       // And it sits at its true time: band top-to-block top distance equals
       // 45 minutes at the shared px/min scale (block card = 30 min).
       final shortCard = find.byKey(const ValueKey('cal-block-bShort')).first;
-      final band = findEmojiText('🔒 Firma X\n8:45–9:30');
       final pxPerMinute = tester.getSize(shortCard).height / 30;
-      final bandTop = tester
-          .getTopLeft(
-            find.ancestor(of: band, matching: find.byType(Container)).first,
-          )
-          .dy;
+      final bandTop = tester.getTopLeft(band).dy;
       expect(
         bandTop - tester.getTopLeft(shortCard).dy,
         closeTo(45 * pxPerMinute, 4), // band carries a small margin

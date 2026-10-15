@@ -71,6 +71,9 @@ const appChangelog = <Release>[
         'v každém řádku stejně, i při větším písmu.',
     'Kiosk: seznam zápasů při posunu tabule neskáče — ukáže jen zápasy dnů, '
         'které na tabuli přibyly, a posune se jen o tolik, aby byly vidět.',
+    'Pronájmy: poznámka má víc řádků a kalendář ji ukáže pod nájemcem '
+        'a časem, řádek po řádku (třeba které dráhy hrají který zápas). '
+        'V seznamu termínů je pod časem a drahami.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
@@ -79,6 +82,7 @@ const appChangelog = <Release>[
     'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo; '
         'seznam zápasů při posunu tabule neskáče.',
     'Kalendář po dnech: čas bloku jednotně pod sebou.',
+    'Pronájmy: víceřádková poznámka, v kalendáři pod časem.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
