@@ -369,7 +369,9 @@ class KioskSettingsScreen extends ConsumerWidget {
   static const _moduleRowWidth = 520.0;
 
   /// The columns of a one-line row after the module's name: its panel's
-  /// list, its share, its two arrows (an [IconButton] is 48 wide).
+  /// list, its share, its two arrows. The arrows get a fixed 2 x 48 column:
+  /// an [IconButton] is only 48 wide where the platform pads tap targets
+  /// (phones) and 40 on desktop, where the row would end short.
   static const _panelWidth = 150.0;
   static const _shareWidth = 120.0;
   static const _arrowsWidth = 2 * 48.0;
@@ -468,19 +470,27 @@ class KioskSettingsScreen extends ConsumerWidget {
         ),
       ),
       const SizedBox(width: 4),
-      IconButton(
-        tooltip: 'Posunout výš',
-        icon: const Icon(Icons.arrow_upward),
-        onPressed: settings == null || at <= 0
-            ? null
-            : () => write(panels.moved(module, -1)),
-      ),
-      IconButton(
-        tooltip: 'Posunout níž',
-        icon: const Icon(Icons.arrow_downward),
-        onPressed: settings == null || at >= onSide.length - 1
-            ? null
-            : () => write(panels.moved(module, 1)),
+      SizedBox(
+        width: _arrowsWidth,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Posunout výš',
+              icon: const Icon(Icons.arrow_upward),
+              onPressed: settings == null || at <= 0
+                  ? null
+                  : () => write(panels.moved(module, -1)),
+            ),
+            IconButton(
+              tooltip: 'Posunout níž',
+              icon: const Icon(Icons.arrow_downward),
+              onPressed: settings == null || at >= onSide.length - 1
+                  ? null
+                  : () => write(panels.moved(module, 1)),
+            ),
+          ],
+        ),
       ),
     ];
     return Padding(

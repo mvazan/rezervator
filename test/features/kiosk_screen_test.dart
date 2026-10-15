@@ -833,6 +833,47 @@ void main() {
       expect(find.text('Panel zapnutý'), findsNothing);
     });
 
+    // An IconButton is 48 wide where the platform pads tap targets (the test
+    // default, Android) but 40 on desktop, where the table is mostly seen:
+    // the columns must line up on both.
+    testWidgets('the table\'s columns line up with its head on every '
+        'platform, the placed rows with the unplaced ones', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      double left(Finder f) => tester.getTopLeft(f).dx;
+      final head = find.byKey(const ValueKey('kiosk-modules-header'));
+      final panelX = left(inRow(head, find.text('Panel')));
+      final shareX = left(inRow(head, find.text('Podíl')));
+      final orderX = tester.getCenter(inRow(head, find.text('Pořadí'))).dx;
+      Rect arrowRect(KioskModule m, IconData icon) => tester.getRect(
+        inRow(moduleRow(m), find.widgetWithIcon(IconButton, icon)),
+      );
+
+      for (final m in KioskModule.values) {
+        final panelList = inRow(
+          moduleRow(m),
+          find.byType(DropdownButtonFormField<PanelSide>),
+        );
+        expect(left(panelList), panelX, reason: '${m.name} panel list');
+      }
+      for (final m in [KioskModule.notices, KioskModule.matches]) {
+        expect(left(share(m)), shareX, reason: '${m.name} share');
+        // The pair of arrows sits in the middle of the „Pořadí“ column,
+        // whatever the size of the buttons.
+        final up = arrowRect(m, Icons.arrow_upward);
+        final down = arrowRect(m, Icons.arrow_downward);
+        expect((up.left + down.right) / 2, closeTo(orderX, 0.5),
+            reason: '${m.name} arrows');
+      }
+    },
+        variant: TargetPlatformVariant({
+          TargetPlatform.android,
+          TargetPlatform.macOS,
+          TargetPlatform.windows,
+        }));
+
     testWidgets('a module goes into a panel from its list: the PATCH is the '
         'whole layout', (tester) async {
       tall(tester);
