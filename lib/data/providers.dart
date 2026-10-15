@@ -427,6 +427,17 @@ final clubsProvider = StreamProvider<List<Club>>((ref) {
         ..sort((a, b) => compareCzech(a.name, b.name)));
 });
 
+/// What the app shows for club and team names (0080): the clubs'
+/// nicknames in place of their names and of the start of their teams'
+/// names. None where no club has one — and on the public overview, which
+/// reads no clubs.
+final nameDisplayProvider = Provider<NameDisplay>((ref) {
+  final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
+  return clubs.any((c) => c.nickname != null)
+      ? NameDisplay(clubs)
+      : NameDisplay.none;
+});
+
 /// The alley's teams on the federation's results site (0045), Czech-sorted.
 final teamsProvider = StreamProvider<List<Team>>((ref) {
   final uid = ref.watch(_authUidProvider);
@@ -912,16 +923,29 @@ class Api {
         'p_club_id': clubId,
       });
 
-  static Future<void> upsertClub({
+  /// Returns the club's id — a new one's too, for [setClubNickname].
+  static Future<String> upsertClub({
     String? id,
     required String name,
     required int colorIndex,
-  }) =>
-      _db.rpc('upsert_club', params: {
-        'p_id': id,
-        'p_name': name,
-        'p_color': colorIndex,
-      });
+  }) async {
+    final row = await _db.rpc('upsert_club', params: {
+      'p_id': id,
+      'p_name': name,
+      'p_color': colorIndex,
+    });
+    return (row as Map)['id'] as String;
+  }
+
+  /// A club's nickname (0080); null or blank = none. Straight into the row:
+  /// clubs_write lets the admin.
+  static Future<void> setClubNickname(String id, String? nickname) {
+    final value = nickname?.trim();
+    return _db
+        .from('clubs')
+        .update({'nickname': value == null || value.isEmpty ? null : value})
+        .eq('id', id);
+  }
 
   static Future<void> deleteClub(String id) =>
       _db.rpc('delete_club', params: {'p_id': id});

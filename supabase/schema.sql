@@ -5022,7 +5022,9 @@ CREATE TABLE IF NOT EXISTS "public"."clubs" (
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
     "site_slug" "text",
     "site_name" "text",
-    CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
+    "nickname" "text",
+    CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431)))),
+    CONSTRAINT "clubs_nickname_check" CHECK ((("nickname" IS NULL) OR (("char_length"("btrim"("nickname")) >= 1) AND ("char_length"("btrim"("nickname")) <= 30))))
 );
 
 

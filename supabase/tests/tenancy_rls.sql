@@ -12862,4 +12862,33 @@ begin
 end $$;
 reset role;
 
+-- 0080: a club's nickname — 1–30 characters, not blank, or none. Run
+-- again first: the migration is re-runnable.
+\ir ../migrations/0080_club_nickname.sql
+do $$
+declare
+  v_club uuid;
+begin
+  select id into v_club from clubs
+   where tenant_id = '00000000-0000-0000-0000-00000000000a' limit 1;
+  if v_club is null then
+    insert into clubs (tenant_id, name)
+    values ('00000000-0000-0000-0000-00000000000a', 'Oddíl (0080)')
+    returning id into v_club;
+  end if;
+  update clubs set nickname = 'Sokol IV' where id = v_club;
+  update clubs set nickname = null where id = v_club;
+  begin
+    update clubs set nickname = '   ' where id = v_club;
+    raise exception 'FAIL: a blank club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  begin
+    update clubs set nickname = repeat('x', 31) where id = v_club;
+    raise exception 'FAIL: a 31-character club nickname was accepted (0080)';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: a club nickname is 1–30 characters or none (0080)';
+end $$;
+
 rollback;

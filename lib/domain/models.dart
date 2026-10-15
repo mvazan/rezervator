@@ -253,6 +253,7 @@ class Club {
     this.colorIndex = -1,
     this.siteSlug,
     this.siteName,
+    this.nickname,
   });
 
   final String id;
@@ -260,6 +261,14 @@ class Club {
 
   /// Palette index 0–11, or -1 for "no color assigned".
   final int colorIndex;
+
+  /// The short name the app shows instead of [name] (0080) — and instead
+  /// of the start of the club's teams' names ([NameDisplay]); null = the
+  /// full name.
+  final String? nickname;
+
+  /// What the app shows for the club: its [nickname], or its [name].
+  String get shown => nickname ?? name;
 
   /// The venue club on vysledky.kuzelky.cz this club is linked to
   /// (`detail-klubu/<slug>`) and its name there (0047). null until a
@@ -276,18 +285,64 @@ class Club {
         colorIndex: json['color'] as int? ?? -1,
         siteSlug: json['site_slug'] as String?,
         siteName: json['site_name'] as String?,
+        nickname: (json['nickname'] as String?)?.trim().isEmpty ?? true
+            ? null
+            : (json['nickname'] as String).trim(),
       );
 }
 
-/// Display name of [clubId] from the live club roster; '' when the profile
+/// Display name of [clubId] from the live club roster — its nickname when
+/// it has one (0080); '' when the profile
 /// has no club or the club was deleted. (The old `profiles.club` text was a
 /// registration-time copy that went stale on reassignment; dropped in 0019.)
 String clubNameOf(String? clubId, Iterable<Club> clubs) {
   if (clubId == null) return '';
   for (final club in clubs) {
-    if (club.id == clubId) return club.name;
+    if (club.id == clubId) return club.shown;
   }
   return '';
+}
+
+/// What the app shows for a club's and a team's name (0080): a club's
+/// nickname instead of its name, and instead of the start of its teams'
+/// names — the club's name on the federation's site, or its own name —
+/// „TJ Sokol Brno IV B“ → „Sokol IV B“. Display only: the app keys
+/// matches, follows, colours and calendars by the stored names, never by
+/// these. A name no club with a nickname starts is shown as it is (a
+/// team of another alley, a club without a nickname).
+class NameDisplay {
+  NameDisplay(Iterable<Club> clubs)
+    : _prefixes = [
+        for (final c in clubs)
+          if (c.nickname case final nick?)
+            for (final prefix in {?c.siteName, c.name})
+              if (prefix.trim().isNotEmpty) (prefix.trim(), nick),
+      ]..sort((a, b) => b.$1.length.compareTo(a.$1.length));
+
+  /// No nicknames: every name as it is.
+  static final none = NameDisplay(const []);
+
+  /// (the start a nickname replaces, the nickname), the longest first — a
+  /// club's site name before a shorter own name it begins with.
+  final List<(String, String)> _prefixes;
+
+  /// [team] with its club's nickname for the club's name at its start.
+  String team(String team) {
+    for (final (prefix, nick) in _prefixes) {
+      if (team == prefix) return nick;
+      if (team.startsWith('$prefix ')) {
+        return '$nick${team.substring(prefix.length)}';
+      }
+    }
+    return team;
+  }
+
+  /// [slot]'s title ([PrioritySlot.title]) with the teams' names as shown.
+  String title(PrioritySlot slot) => !slot.type.isMatch
+      ? slot.title
+      : slot.homeTeam.isEmpty
+      ? team(slot.awayTeam)
+      : '${team(slot.homeTeam)} – ${team(slot.awayTeam)}';
 }
 
 /// One of the alley's teams on the federation's results site (0045). [name]
