@@ -50,12 +50,17 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '15. 10. 2026', [
+    'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
+        'v jedné řadě — hodiny s datem, počasí (nadpis napíše správce, třeba '
+        '„Dnes v Brně“), svátek, nově služba na kantýně („Dnes má službu“ '
+        'místo řádku pod hodinami) a nástěnka. Ve Správě → Kiosk → Záhlaví '
+        'každému zvolíš, jestli je vlevo, nebo vpravo, a pořadí; dnešní '
+        'zápasy jsou uprostřed, domácí nad venkovními.',
     'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '
         'Panely správce každému modulu (služba na kantýně, nástěnka, zápasy, '
         'Jak začít, Hráči týdne) určí panel, podíl na výšce a pořadí; každý '
-        'panel má svou šířku a může začínat rozbalený. Nástěnku v záhlaví '
-        'zapíná přepínač „V záhlaví“, volby seznamu zápasů mají svou sekci '
-        'Zápasy.',
+        'panel má svou šířku a může začínat rozbalený. Volby seznamu zápasů '
+        'mají svou sekci Zápasy.',
     'Kiosk: modul „Hráči týdne“ — nejlepší výkony našich hráčů za minulý '
         'týden v kategoriích muži a ženy na 120 a 100 hodů. Ťuknutí otevře '
         'celý týden podle kategorií, soutěží nebo oddílů, doma i venku, a '
@@ -95,6 +100,7 @@ const appChangelog = <Release>[
         'družstvo ukáže jeho zápasy. Správce volí ve Správa → Kiosk → '
         'Listování v zápisu.',
   ], store: [
+    'Kiosk: přehlednější záhlaví.',
     'Kiosk: dva panely u tabule (Hráči týdne, Jak začít s QR kódem).',
     'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
         'výsledky hraného zápasu.',
