@@ -49,6 +49,14 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '15. 10. 2026', [
+    'Kiosk: hlavní tlačítko „Rezervace tréninku“ je větší a výraznější. Po '
+        'výběru hráče záhlaví ukáže jeho přezdívku (bez rámečku) a postranní '
+        'panel ustoupí tabuli.',
+    'Kiosk, výběr hráče: správce zvolí, zda začíná písmeny, oddíly (dlaždice '
+        'v barvě oddílu, hráči bez oddílu pod „Ostatní“), nebo obojím. '
+        'Upozornění při rezervaci je širší a má méně řádků.',
+  ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
         'dole) a „Ch“ má jako v abecedě vlastní dlaždici za H. Dotyky ve '
