@@ -6,7 +6,8 @@ library;
 
 import 'package:flutter/material.dart';
 
-/// The value box's height at text scale 1: room for the clock's 28 px.
+/// The value box's height at text scale 1: room for the clock's line
+/// ([kioskHeaderClockStyle], 28 × 1.15 = 32.2 px).
 const kioskHeaderValueHeight = 34.0;
 
 /// The space between two modules.
@@ -23,6 +24,16 @@ TextStyle kioskHeaderTitleStyle(ColorScheme scheme) => TextStyle(
   height: 1.3,
   fontWeight: FontWeight.w600,
   color: scheme.onSurfaceVariant,
+);
+
+/// The clock's time, the bar's largest value. Its line height is its
+/// own: the inherited body line (× 1.43) is 40 px, taller than the value
+/// box — cut to the box, the line started at the box's top instead of
+/// being centred in it, and the time sat lower than the other values.
+const kioskHeaderClockStyle = TextStyle(
+  fontSize: 28,
+  height: 1.15,
+  fontWeight: FontWeight.w800,
 );
 
 /// A name as a module's value (name day, duty).

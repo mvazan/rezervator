@@ -3359,6 +3359,57 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('every value fits its box, at text scale 1 and 2: none is '
+          'cut to the box\'s height — the clock, cut so, sat lower than the '
+          'other values', (tester) async {
+        fullHd(tester);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.right)
+            .withSide(KioskHeaderModule.notices, PanelSide.right);
+        final values = {
+          'clock': find.text('12:00'),
+          'name day': find.text('Věra'),
+          'weather': find.text('14°'),
+          'notices': find.descendant(
+            of: find.byType(KioskHeadline),
+            matching: find.text('Brigáda'),
+          ),
+          'duty': find.text('AA Hráč a PP Hráč'),
+        };
+        for (final scale in [1.0, 2.0]) {
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          await tester.pumpWidget(
+            app(
+              header: header,
+              forecast: forecast,
+              notices: [notice('1', 'Brigáda')],
+              dutyPeriods: [current],
+              dutyAssignments: serving,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          for (final MapEntry(key: name, value: value) in values.entries) {
+            expect(value, findsOneWidget, reason: name);
+            final text = tester.renderObject<RenderParagraph>(
+              find.descendant(of: value, matching: find.byType(RichText)),
+            );
+            // The line its text needs, against the height it was given.
+            expect(
+              text.size.height,
+              greaterThanOrEqualTo(
+                text.getMaxIntrinsicHeight(text.size.width) - 0.01,
+              ),
+              reason: '$name at text scale $scale',
+            );
+          }
+          await finish(tester);
+        }
+      });
+
       testWidgets('the clock is a module too: the date over the time, '
           'always first', (tester) async {
         fullHd(tester);

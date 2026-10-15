@@ -876,13 +876,7 @@ class _StatusBar extends ConsumerWidget {
             // Always first: the date over the time.
             KioskHeaderModuleFrame(
               title: _capitalized(dayFull(todayDay)),
-              child: Text(
-                clock,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+              child: Text(clock, style: kioskHeaderClockStyle),
             ),
             Expanded(
               child: LayoutBuilder(
