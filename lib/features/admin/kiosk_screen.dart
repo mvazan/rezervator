@@ -631,7 +631,9 @@ class KioskSettingsScreen extends ConsumerWidget {
       maxLength: _weatherTitleMaxLength,
     );
     if (text == null || !context.mounted) return;
-    final title = text.trim();
+    // One line on the kiosk: a line break typed in the dialog (it takes a
+    // few lines for the other kiosk texts) becomes a space.
+    final title = text.trim().replaceAll(RegExp(r'\s+'), ' ');
     await _panel(context, settings, {
       'kiosk_weather_title':
           title.isEmpty || title == kioskWeatherDefaultTitle ? null : title,

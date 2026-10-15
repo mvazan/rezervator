@@ -697,6 +697,15 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
       expect(lastPatch(), {'kiosk_weather_title': 'Dnes v Brně'});
+
+      // The kiosk shows the title on one line: a line break is a space.
+      await tester.tap(edit);
+      await tester.pumpAndSettle();
+      await tester.enterText(field, 'Dnes\nv   Brně');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_weather_title': 'Dnes v Brně'});
     });
 
     testWidgets('„Nadpis počasí“ back to the default is stored as none', (
