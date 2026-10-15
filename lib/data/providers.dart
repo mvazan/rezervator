@@ -1116,9 +1116,8 @@ class Api {
     );
   }
 
-  /// Writes the kiosk drawer's options (0064) — the keys of
-  /// `schedule_settings` (`kiosk_notices_mode`, `kiosk_show_matches`,
-  /// `kiosk_matches_history_days`, `kiosk_drawer_open`). Optimistic, same
+  /// Writes kiosk settings — any columns of `schedule_settings`, the whole
+  /// panels' layout `kiosk_panels` (0077) among them. Optimistic, same
   /// reasoning as [setKioskFitDay].
   static Future<void> setKioskPanel(Map<String, Object?> changes,
       {required String tenantId}) {
