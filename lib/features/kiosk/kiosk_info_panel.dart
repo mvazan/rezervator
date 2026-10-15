@@ -464,19 +464,23 @@ class KioskDrawerButton extends StatelessWidget {
 /// soft glow and a little more opacity — or keeps still ([breathe] off).
 /// The side panels' buttons and the Zápis's side arrows (0079) wear it, so
 /// whatever on the wall opens or turns breathes together. [enabled] false
-/// = a dim, still icon: nothing that way.
+/// = a dim, still icon: nothing that way. [strong]: on a disc of its own
+/// (over the Zápis), where the panel's faint grey would hardly show — the
+/// disc's foreground, nearly whole, the breath on top.
 class KioskBreathingIcon extends StatefulWidget {
   const KioskBreathingIcon(
     this.icon, {
     super.key,
     this.breathe = true,
     this.enabled = true,
+    this.strong = false,
     this.size = 44,
   });
 
   final IconData icon;
   final bool breathe;
   final bool enabled;
+  final bool strong;
   final double size;
 
   @override
@@ -547,11 +551,14 @@ class _KioskBreathingIconState extends State<KioskBreathingIcon>
         builder: (context, child) {
           // 0 → 1 → 0 over one breath; 0 while the icon is still.
           final glow = math.sin(_controller.value * math.pi);
+          final (color, rest, breath, off) = widget.strong
+              ? (scheme.onSurface, 0.75, 0.25, 0.25)
+              : (scheme.onSurfaceVariant, 0.4, 0.35, 0.15);
           return Icon(
             widget.icon,
             size: widget.size,
-            color: scheme.onSurfaceVariant.withValues(
-              alpha: widget.enabled ? 0.4 + 0.35 * glow : 0.15,
+            color: color.withValues(
+              alpha: widget.enabled ? rest + breath * glow : off,
             ),
             shadows: [
               Shadow(

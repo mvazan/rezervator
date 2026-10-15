@@ -362,6 +362,7 @@ class _SideArrow extends StatelessWidget {
             size: _Disc.iconSize,
             breathe: breathe,
             enabled: onTap != null,
+            strong: true,
           ),
         ),
       );
