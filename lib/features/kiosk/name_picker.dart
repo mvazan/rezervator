@@ -230,10 +230,23 @@ class _NamePickerState extends ConsumerState<NamePicker> {
             ref.watch(clubsProvider).value ?? const <Club>[],
           )
         : const <PickerClub>[];
-    // The club tapped — gone when the roster re-read no longer has it.
+    // The club tapped — gone when a re-read roster (or club list) no
+    // longer has it: then back to the first page, for good — the club
+    // coming back later does not pull the visitor into it untapped.
     final club = _inClub
         ? clubs.where((c) => c.id == _club).firstOrNull
         : null;
+    if (_inClub && club == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _inClub) {
+          setState(() {
+            _inClub = false;
+            _club = null;
+            _prefix = '';
+          });
+        }
+      });
+    }
     final firstPage = club == null && _prefix.isEmpty;
     final clubTiles = firstPage && clubs.isNotEmpty;
     final node = nameIndex(
@@ -321,8 +334,10 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                         ),
                       // A small alley (up to `_capacity` players) opens on
                       // its names — the first page all the same, so the
-                      // note stands under them; no hint, there are no
-                      // letters to explain.
+                      // note stands under them; no letters to explain, but
+                      // with the club tiles above (both) a line says the
+                      // names are the other way in. A small club's page
+                      // lists its names the same way, without the note.
                       NamesNode(:final players) => Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [

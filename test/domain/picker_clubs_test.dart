@@ -24,6 +24,25 @@ void main() {
     expect([for (final p in tiles[1].players) p.id], ['1', '3']);
   });
 
+  test('Czech order, not code units: Š after S, Ch after H', () {
+    final tiles = pickerClubs(
+      [
+        player('1', 'z'),
+        player('2', 'š'),
+        player('3', 'ch'),
+        player('4', 'h'),
+      ],
+      const [
+        Club(id: 'z', name: 'Zbraslav'),
+        Club(id: 'š', name: 'Šumperk'),
+        Club(id: 'ch', name: 'Chotěboř'),
+        Club(id: 'h', name: 'Hořice'),
+      ],
+    );
+    expect([for (final t in tiles) t.name],
+        ['Hořice', 'Chotěboř', 'Šumperk', 'Zbraslav']);
+  });
+
   test('the players without a club, or with one the roster no longer has, '
       'go under „Ostatní“ — last, without a colour', () {
     final tiles = pickerClubs(

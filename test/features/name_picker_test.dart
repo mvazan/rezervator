@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -309,13 +311,17 @@ void main() {
         'lists its names; Zpět goes a letter back, then out of the club',
         (tester) async {
       surface(tester, const Size(1920, 1080));
-      await tester.pumpWidget(clubPicker(KioskPickerMode.clubs));
+      const note = 'Odhlásit se tu nedá.';
+      await tester.pumpWidget(clubPicker(KioskPickerMode.clubs, note: note));
       await tester.pumpAndSettle();
+      expect(find.text(note), findsOneWidget);
 
       await tester.tap(find.text('TJ Veverky'));
       await tester.pumpAndSettle();
       expect(find.text('TJ Veverky'), findsOneWidget, reason: 'where you are');
       expect(find.text(firstLetterHint), findsOneWidget);
+      // The note is the first page's only.
+      expect(find.text(note), findsNothing);
       // Only the Veverky's letters: nobody else is filed under them.
       await tester.tap(find.text('P'));
       await tester.pumpAndSettle();
@@ -331,6 +337,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(clubHint), findsOneWidget);
       expect(find.text('Zpět'), findsNothing);
+      expect(find.text(note), findsOneWidget);
 
       await tester.tap(find.text('Sokol Čáslav'));
       await tester.pumpAndSettle();
@@ -338,6 +345,7 @@ void main() {
         expect(find.text(n), findsOneWidget);
       }
       expect(find.text('AA Veverka'), findsNothing);
+      expect(find.text(note), findsNothing);
 
       await tester.tap(find.text('Zpět'));
       await tester.pumpAndSettle();
@@ -386,6 +394,53 @@ void main() {
       expect(find.text(pickerOthersName), findsOneWidget);
       expect(find.text('Petr Sokol'), findsOneWidget);
       expect(find.text('Xaver Bezklubý'), findsOneWidget);
+    });
+
+    testWidgets('the club tapped is gone from a re-read list: back to the '
+        'first page, and not into the club again when it returns',
+        (tester) async {
+      surface(tester, const Size(1920, 1080));
+      final clubs = StreamController<List<Club>>();
+      addTearDown(clubs.close);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            playersProvider.overrideWith((ref) async => roster),
+            clubsProvider.overrideWith((ref) => clubs.stream),
+            settingsProvider.overrideWith(
+              (ref) => Stream.value(
+                const ScheduleSettings(
+                  laneCount: 4,
+                  trainingWeekdays: {1, 2, 4},
+                  bookingHorizonDays: 14,
+                  maxActiveReservations: 3,
+                  kioskPickerMode: KioskPickerMode.clubs,
+                ),
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: NamePicker()),
+        ),
+      );
+      clubs.add(const [veverky, sokol]);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('TJ Veverky'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('P'));
+      await tester.pumpAndSettle();
+      expect(find.text('TJ Veverky · P…'), findsOneWidget);
+
+      // Veverky renamed away (a new id): their players fall under „Ostatní“.
+      clubs.add(const [sokol]);
+      await tester.pumpAndSettle();
+      expect(find.text(clubHint), findsOneWidget);
+      expect(find.text('Zpět'), findsNothing);
+
+      clubs.add(const [veverky, sokol]);
+      await tester.pumpAndSettle();
+      expect(find.text(clubHint), findsOneWidget);
+      expect(find.text('TJ Veverky'), findsOneWidget);
+      expect(find.text('Zpět'), findsNothing);
     });
 
     testWidgets('letters (the default) shows no clubs, whatever the roster',
