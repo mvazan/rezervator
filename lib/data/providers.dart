@@ -1817,10 +1817,11 @@ class Api {
   static Future<void> messageSetKiosk(String id, bool show) =>
       _db.rpc('message_set_kiosk', params: {'p_id': id, 'p_show': show});
 
-  /// When a notice shows (admin): [from] null or gone by = now; [notify]
-  /// also sets whether it pings (null keeps it). A pinging notice that
-  /// shows later gets its push and e-mail then (a notice_visible job,
-  /// 0064).
+  /// When a notice shows (admin): [from] null or gone by = now (a notice
+  /// still waiting records now as when it went up, one already up keeps its
+  /// time, 0080); [notify] also sets whether it pings (null keeps it). A
+  /// pinging notice that shows later gets its push and e-mail then (a
+  /// notice_visible job, 0064).
   static Future<void> messageSetVisibleFrom(
     String id,
     DateTime? from, {

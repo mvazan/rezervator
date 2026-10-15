@@ -47,10 +47,11 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
 bool isScheduled(Message m, DateTime now) =>
     m.visibleFrom != null && m.visibleFrom!.isAfter(now);
 
-/// When [m] went up on the Nástěnka: the time it was posted for
-/// ([Message.visibleFrom], kept only when it was ahead) or else when it
-/// was posted. The Nástěnka's order, its „vyvěšeno“ day and the kiosk's
-/// fresh notices all count from it.
+/// When [m] went up on the Nástěnka: [Message.visibleFrom] for a notice
+/// posted ahead of time — the time it was posted for, or when it was shown
+/// early with „Zobrazit hned“ (0080) — or else when it was posted. The
+/// Nástěnka's order, its „vyvěšeno“ day and the kiosk's fresh notices all
+/// count from it.
 DateTime noticePostedAt(Message m) => m.visibleFrom ?? m.createdAt;
 
 /// Notices split into active (showing, not expired), expired and

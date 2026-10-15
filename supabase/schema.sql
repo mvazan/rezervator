@@ -3035,7 +3035,12 @@ begin
     raise exception 'not_allowed';
   end if;
   update messages
-     set visible_from = v_from, notify = coalesce(p_notify, notify)
+     set visible_from = case
+           when v_from is not null then v_from
+           when visible_from > now() then now()
+           else visible_from
+         end,
+         notify = coalesce(p_notify, notify)
    where id = p_id and tenant_id = current_tenant_id() and kind = 'notice'
   returning notify into v_notify;
   if not found then

@@ -21,7 +21,9 @@ Requested by the user on 2026-10-15. The app speaks Czech; the user writes Slova
 - `kiosk_notices_fresh_mode text not null default 'highlight'`, named check `schedule_settings_kiosk_notices_fresh_mode_check` in (`off`, `highlight`, `longer`, `both`).
 - `kiosk_notices_fresh_days smallint not null default 3`, named check `schedule_settings_kiosk_notices_fresh_days_check` 1–14.
 
-Re-runnable (`add column if not exists`, checks guarded). `public_week` is an allow-list — nothing to do. Tenancy suite: new-alley defaults, an unknown mode and 0/15 days refused, the columns off the public overview. `supabase/schema.sql` from a fresh throwaway stack, `docs/SCHEMA.md`.
+`message_set_visible_from` (0064) redefined (`create or replace`, same signature, security, grants and `notice_visible` job): „Zobrazit hned“ on a notice still waiting records `visible_from = now()` — the time it went up — instead of clearing it (cleared, the notice counted from `created_at`); a notice already up keeps its `visible_from` (a past one, or none); a time ahead schedules as before.
+
+Re-runnable (`add column if not exists`, checks guarded). `public_week` is an allow-list — nothing to do. Tenancy suite: new-alley defaults, an unknown mode and 0/15 days refused, the columns off the public overview; show-now of a scheduled notice sets `visible_from = now()`, of a notice already up keeps it, scheduling and its job as before. `supabase/schema.sql` from a fresh throwaway stack, `docs/SCHEMA.md`.
 
 ### Model
 

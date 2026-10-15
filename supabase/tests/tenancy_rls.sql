@@ -12096,7 +12096,8 @@ declare
 begin
   perform set_config('request.jwt.claims',
     '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
-  -- A time gone by is now: no schedule, no job.
+  -- A time gone by is now: no schedule, no job (when it went up — 0080 —
+  -- is pinned in 0080's block).
   perform message_set_visible_from(v_notice, now() - interval '1 hour');
 end $$;
 reset role;
@@ -12104,7 +12105,7 @@ do $$
 declare
   v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
 begin
-  if (select visible_from from messages where id = v_notice) is not null
+  if (select visible_from from messages where id = v_notice) > now()
      or exists (select 1 from notification_jobs
                  where kind = 'notice_visible'
                    and payload->>'message_id' = v_notice::text) then
@@ -12950,6 +12951,110 @@ begin
                                kiosk_notices_fresh_days = 3
    where tenant_id = '00000000-0000-0000-0000-00000000000a';
   raise notice 'OK: an admin saves the fresh notices as authenticated (0080)';
+end $$;
+
+-- 0080: visible_from keeps when a notice went up. A time ahead schedules it
+-- and its ping waits as one job, as in 0064; shown at once while it still
+-- waits, it records now() and the job is gone; a notice already up keeps
+-- its time — a past one, or none — when shown at once or given a time gone
+-- by. (The whole suite is one transaction: now() is the same throughout.)
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+  v_at constant timestamptz := now() + interval '2 days';
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, v_at, true);
+  if (select visible_from from messages where id = v_notice) is distinct from v_at then
+    raise exception 'FAIL: the admin could not schedule the notice (0080)';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select count(*) from notification_jobs
+       where kind = 'notice_visible' and payload->>'message_id' = v_notice::text
+         and run_at = now() + interval '2 days') <> 1 then
+    raise exception 'FAIL: a scheduled notice has no notice_visible job at its time (0080)';
+  end if;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  -- „Zobrazit hned“ while it still waits.
+  perform message_set_visible_from(v_notice, null);
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select visible_from from messages where id = v_notice) is distinct from now() then
+    raise exception 'FAIL: a scheduled notice shown at once does not count from now (0080)';
+  end if;
+  if exists (select 1 from notification_jobs
+              where kind = 'notice_visible'
+                and payload->>'message_id' = v_notice::text) then
+    raise exception 'FAIL: a scheduled notice shown at once kept its job (0080)';
+  end if;
+  -- It went up two days ago.
+  update messages set visible_from = now() - interval '2 days' where id = v_notice;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, null);
+  if (select visible_from from messages where id = v_notice)
+       is distinct from now() - interval '2 days' then
+    raise exception 'FAIL: a notice already up moved when shown at once (0080)';
+  end if;
+  perform message_set_visible_from(v_notice, now() - interval '1 hour');
+  if (select visible_from from messages where id = v_notice)
+       is distinct from now() - interval '2 days' then
+    raise exception 'FAIL: a notice already up moved to a time gone by (0080)';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if exists (select 1 from notification_jobs
+              where kind = 'notice_visible'
+                and payload->>'message_id' = v_notice::text) then
+    raise exception 'FAIL: a notice already up got a notice_visible job (0080)';
+  end if;
+  -- Posted at once: no visible_from, it counts from created_at.
+  update messages set visible_from = null where id = v_notice;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, null);
+  if (select visible_from from messages where id = v_notice) is not null then
+    raise exception 'FAIL: a notice posted at once got a visible_from when shown at once (0080)';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  raise notice 'OK: a notice shown early counts from then, one already up keeps its time, scheduling and its job as before (0080)';
 end $$;
 
 rollback;
