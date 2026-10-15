@@ -1245,10 +1245,10 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   Timer? _refresh;
   Duration? _refreshEvery;
 
-  /// The matches a fresh score is being asked for — by the clock or by a
-  /// tap on the age line — each with the fetch time on screen when asked:
-  /// their ⟳ turns until that time moves on, the answer says nothing will
-  /// come, or [kioskRefreshWait] runs out.
+  /// The matches a visitor tapped the age line of, each with the fetch time
+  /// on screen when asked: their ⟳ turns until that time moves on, the
+  /// answer says nothing will come, or [kioskRefreshWait] runs out. The
+  /// clock's own asks go unseen.
   final _asking = <String, DateTime?>{};
   final _askTimeouts = <String, Timer>{};
 
@@ -1257,8 +1257,9 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     _refreshEvery = every;
     _refresh?.cancel();
     void askAll() {
+      final ask = ref.read(kioskRefreshMatchProvider);
       for (final m in widget.matches) {
-        unawaited(_ask(m.id));
+        unawaited(ask(m.id));
       }
     }
 
@@ -1269,7 +1270,8 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     });
   }
 
-  /// One ask for [id]'s score; a second while one is out waits for it.
+  /// A visitor's ask for [id]'s score; a second tap while one is out
+  /// waits for it.
   Future<void> _ask(String id) async {
     if (_asking.containsKey(id)) return;
     final asked = ref.read(kioskRefreshMatchProvider);
@@ -1550,8 +1552,8 @@ class _LiveViewState extends ConsumerState<_LiveView> {
 
 /// How old the score on screen is — „⟳ před 3 min“ — and the button that
 /// asks for a fresh one: a tap does what the kiosk's clock does every
-/// refresh interval. The ⟳ turns while a fresh score is on its way, asked
-/// for by either.
+/// refresh interval. The ⟳ turns while the tapped-for score is on its way;
+/// the clock's quiet asks leave it still.
 class _LiveAge extends ConsumerStatefulWidget {
   const _LiveAge({
     required this.slot,

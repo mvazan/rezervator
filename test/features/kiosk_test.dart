@@ -4554,14 +4554,13 @@ void main() {
         // The ask on opening runs after the first frame; this one shows it.
         await tester.pump();
         expect(liveView, findsOneWidget);
-        // Asked on opening: turning until the fetch lands.
+        // Asked on opening — quietly: only a tap turns the ⟳.
         expect(asked, ['m']);
-        expect(turning(tester), isTrue);
+        expect(turning(tester), isFalse);
         results.add({'m': at('2026-10-08T09:59:00+00:00')});
         await tester.pump();
-        // It finishes the turn it is in.
-        await tester.pump(const Duration(seconds: 2));
-        expect(turning(tester), isFalse);
+        // The drawer done sliding in.
+        await tester.pump(const Duration(seconds: 1));
 
         // A tap: asked again, turning; a tap meanwhile asks nothing more.
         await tester.tap(ageButton());
@@ -4616,7 +4615,7 @@ void main() {
         }
       });
 
-      testWidgets('the clock\'s ask turns it too', (tester) async {
+      testWidgets('the clock\'s ask leaves it still', (tester) async {
         fullHd(tester);
         final asked = <String>[];
         await tester.pumpWidget(
@@ -4627,20 +4626,19 @@ void main() {
             liveRefresh: 30,
             idleSeconds: 600,
             onRefresh: asked.add,
-            // The ask on opening: answered at once; the clock's: queued.
-            refreshAnswer: (_) async => asked.length < 2 ? 'fresh' : 'queued',
+            // Queued: a turning ⟳ would turn for as long as it waits.
+            refreshAnswer: (_) async => 'queued',
           ),
         );
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
         expect(asked, ['m']);
         expect(turning(tester), isFalse);
         while (asked.length < 2) {
           await tester.pump(const Duration(seconds: 1));
         }
         await tester.pump();
-        expect(turning(tester), isTrue);
-        await tester.pump(const Duration(seconds: 31));
-        await tester.pump(const Duration(seconds: 2));
         expect(turning(tester), isFalse);
         await finish(tester);
       });
