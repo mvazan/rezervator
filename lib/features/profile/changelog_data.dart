@@ -64,11 +64,15 @@ const appChangelog = <Release>[
         'hraje, pod tím soutěž a kolo. Výsledek vpravo je větší a výraznější '
         'a kuželky stojí hned pod ním, dvojtečky pod sebou; pohár i výsledek '
         'jsou na výšku uprostřed zápasu.',
+    'Kiosk: řádky drah na tabuli jsou jméno a pár pixelů kolem — nižší, '
+        'takže se vejde víc hodin, a při celém dni na obrazovce mají větší '
+        'písmo.',
   ], store: [
     'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
         'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
     'Zápas v rozvrhu: nahoře pohár s časem, pod ním domácí a hosté.',
     'Zápasy dne: čas a kuželna, soutěž a kolo, výraznější výsledek.',
+    'Kiosk: řádky drah nižší, při celém dni na obrazovce větší písmo.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
