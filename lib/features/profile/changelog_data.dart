@@ -50,9 +50,22 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '15. 10. 2026', [
+    'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '
+        'Panely správce každému modulu (služba na kantýně, nástěnka, zápasy, '
+        'Jak začít, Hráči týdne) určí panel, podíl na výšce a pořadí; každý '
+        'panel má svou šířku a může začínat rozbalený. Nástěnku v záhlaví '
+        'zapíná přepínač „V záhlaví“, volby seznamu zápasů mají svou sekci '
+        'Zápasy.',
+    'Kiosk: modul „Hráči týdne“ — nejlepší výkony našich hráčů za minulý '
+        'týden v kategoriích muži a ženy na 120 a 100 hodů. Ťuknutí otevře '
+        'celý týden podle kategorií, soutěží nebo oddílů, doma i venku, a '
+        'z řádku zápis zápasu. Pohlaví hráčů je z registru ČKA.',
+    'Kiosk: modul „Jak začít“ — jak si na kiosku zarezervovat trénink a kde '
+        'je Rezervátor dál: aplikace pro Android (QR kód do Google Play) a web '
+        'rezervator.online. Ťuknutí ukáže celý text s velkým QR kódem.',
     'Kiosk: hlavní tlačítko „Rezervace tréninku“ je větší a výraznější. Po '
         'výběru hráče záhlaví ukáže jeho přezdívku (bez rámečku) a postranní '
-        'panel ustoupí tabuli.',
+        'panely ustoupí tabuli.',
     'Kiosk, výběr hráče: správce zvolí, zda začíná písmeny, oddíly (dlaždice '
         'v barvě oddílu, hráči bez oddílu pod „Ostatní“), nebo obojím. '
         'Upozornění při rezervaci je širší a má méně řádků.',
@@ -78,13 +91,15 @@ const appChangelog = <Release>[
         'a časem, řádek po řádku (třeba které dráhy hrají který zápas). '
         'V seznamu termínů je pod časem a drahami.',
   ], store: [
-    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, nižší '
-        'řádky drah, seznam zápasů neskáče.',
-    'Zápas v rozvrhu: pohár s časem, pod ním domácí a hosté.',
-    'Zápasy dne: kuželna, soutěž a kolo, výraznější výsledek.',
-    'Kalendář po dnech: čas bloku jednotně pod sebou.',
-    'Výsledky: filtr podle oddílu, pak družstva; KP.',
-    'Pronájmy: víceřádková poznámka v kalendáři.',
+    'Kiosk: dva panely vlevo i vpravo od tabule, v nich si správce zapne '
+        'Hráči týdne a Jak začít s QR kódem aplikace.',
+    'Kiosk: větší tlačítko „Rezervace tréninku“, výběr hráče podle písmen '
+        'nebo oddílů, ⟳ obnoví výsledky hraného zápasu.',
+    'Kiosk: nižší řádky drah, seznam zápasů při posunu tabule neskáče.',
+    'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo, '
+        'výraznější výsledek.',
+    'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
+    'Výsledky: filtr nejdřív podle oddílu, pak družstva.',
   ]),
   Release(null, '14. 10. 2026', [
     'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '

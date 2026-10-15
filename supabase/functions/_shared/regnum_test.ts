@@ -5,8 +5,13 @@ import {
   clubMatches,
   fetchSitePlayer,
   foldName,
+  type Gender,
+  GENDER_RETRY_DAYS,
+  genderAction,
+  genderForFound,
   isSiteSlug,
   MAX_ROWS,
+  needsGender,
   parseRows,
   parseSitePlayer,
   pickForProfile,
@@ -14,6 +19,7 @@ import {
   type RegisterRow,
   resolveProfile,
   resolveSitePlayer,
+  searchRegister,
   sharedNames,
 } from "./regnum.ts";
 
@@ -25,8 +31,9 @@ const row = (
   club: string,
   regnum: string,
   category: number | null = MUZI,
+  gender: Gender | null = null,
   id = `id${regnum}`,
-): RegisterRow => ({ id, name, club, regnum, category, categoryName: "" });
+): RegisterRow => ({ id, name, club, regnum, category, categoryName: "", gender });
 
 Deno.test("categoryOf reads the register's labels; ageFits allows a year at the edges", () => {
   assertEquals(categoryOf("žáci ml., žákyně ml."), 0);
@@ -68,11 +75,11 @@ Deno.test("site player: a senior father and his son of one name in one club, tol
   ];
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 66 }, "TJ Sokol Rudná A"),
-    { status: "found", regnum: "100" },
+    { status: "found", regnum: "100", gender: null },
   );
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 31 }, "TJ Sokol Rudná A"),
-    { status: "found", regnum: "200" },
+    { status: "found", regnum: "200", gender: null },
   );
 });
 
@@ -83,7 +90,7 @@ Deno.test("site player: two men of one name, club and category are not guessed",
   ];
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 55 }, ""),
-    { status: "ambiguous" },
+    { status: "ambiguous", gender: null },
   );
 });
 
@@ -91,7 +98,7 @@ Deno.test("site player: a year past the category's edge is the same person, two 
   const rows = [row("Jan Novák", SOKOL, "100", SENIOR)];
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 59 }, ""),
-    { status: "found", regnum: "100" },
+    { status: "found", regnum: "100", gender: null },
   );
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 58 }, ""),
@@ -119,7 +126,7 @@ Deno.test("site player: a loan player (another club) of his category is still hi
   const rows = [row("Jan Novák", "KK Jihlava", "100", MUZI)];
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 45 }, ""),
-    { status: "found", regnum: "100" },
+    { status: "found", regnum: "100", gender: null },
   );
 });
 
@@ -130,11 +137,11 @@ Deno.test("site player: two registrations of one category, the page's club decid
   ];
   assertEquals(
     pickForSitePlayer(rows, "Pavel Strnad", { club: "TJ Sokol Rudná", age: 45 }, ""),
-    { status: "found", regnum: "787" },
+    { status: "found", regnum: "787", gender: null },
   );
   assertEquals(
     pickForSitePlayer(rows, "Pavel Strnad", { club: "KK Jihlava", age: 45 }, "KK Jihlava A"),
-    { status: "ambiguous" },
+    { status: "ambiguous", gender: null },
   );
 });
 
@@ -142,11 +149,11 @@ Deno.test("site player: with no age on the page, the club must fit", () => {
   const one = [row("Jan Novák", "KK Jihlava", "100", MUZI)];
   assertEquals(
     pickForSitePlayer(one, "Jan Novák", { club: SOKOL, age: null }, ""),
-    { status: "ambiguous" },
+    { status: "ambiguous", gender: null },
   );
   assertEquals(
     pickForSitePlayer(one, "Jan Novák", { club: "KK Jihlava", age: null }, ""),
-    { status: "found", regnum: "100" },
+    { status: "found", regnum: "100", gender: null },
   );
 });
 
@@ -157,7 +164,7 @@ Deno.test("site player: the team stands in for a page without a club", () => {
   ];
   assertEquals(
     pickForSitePlayer(rows, "Jan Novák", { club: null, age: 45 }, "TJ Sokol Rudná A"),
-    { status: "found", regnum: "100" },
+    { status: "found", regnum: "100", gender: null },
   );
 });
 
@@ -168,8 +175,161 @@ Deno.test("site player: only exact names count, without diacritics too", () => {
   );
   assertEquals(
     pickForSitePlayer([row("Šárka Čermáková", SOKOL, "9", MUZI)], "Sarka Cermakova", { club: SOKOL, age: 30 }, ""),
-    { status: "found", regnum: "9" },
+    { status: "found", regnum: "9", gender: null },
   );
+});
+
+// ------------------------------------------- a match player's gender (0078)
+
+Deno.test("site player: found carries his rows' gender, null when they disagree", () => {
+  assertEquals(
+    pickForSitePlayer(
+      [row("Jana Nováková", SOKOL, "100", MUZI, "f")],
+      "Jana Nováková",
+      { club: SOKOL, age: 40 },
+      "",
+    ),
+    { status: "found", regnum: "100", gender: "f" },
+  );
+  // Two rows of one number, the club deciding: only that number's rows count.
+  assertEquals(
+    pickForSitePlayer(
+      [row("Jan Novák", SOKOL, "100", MUZI, "m"), row("Jan Novák", "KK Jihlava", "200", MUZI, "f")],
+      "Jan Novák",
+      { club: SOKOL, age: 40 },
+      "",
+    ),
+    { status: "found", regnum: "100", gender: "m" },
+  );
+  assertEquals(
+    pickForSitePlayer(
+      [row("Jan Novák", SOKOL, "100", MUZI, "m", "a"), row("Jan Novák", SOKOL, "100", MUZI, null, "b")],
+      "Jan Novák",
+      { club: SOKOL, age: 40 },
+      "",
+    ),
+    { status: "found", regnum: "100", gender: null },
+  );
+});
+
+Deno.test("site player: ambiguous for want of a club still tells a gender all candidates share", () => {
+  // One number, no age on the page, a club that does not fit.
+  assertEquals(
+    pickForSitePlayer([row("Jana Nováková", "KK Jihlava", "100", MUZI, "f")], "Jana Nováková", { club: SOKOL, age: null }, ""),
+    { status: "ambiguous", gender: "f" },
+  );
+  // Several numbers and no age: every row of the name is a candidate.
+  assertEquals(
+    pickForSitePlayer(
+      [row("Jan Novák", SOKOL, "100", MUZI, "m"), row("Jan Novák", SOKOL, "200", SENIOR, "m")],
+      "Jan Novák",
+      { club: null, age: null },
+      "",
+    ),
+    { status: "ambiguous", gender: "m" },
+  );
+  assertEquals(
+    pickForSitePlayer(
+      [row("Jan Novák", SOKOL, "100", MUZI, "m"), row("Jan Novák", SOKOL, "200", SENIOR, "f")],
+      "Jan Novák",
+      { club: null, age: null },
+      "",
+    ),
+    { status: "ambiguous", gender: null },
+  );
+});
+
+Deno.test("site player: ambiguous within his age category counts only that category's genders", () => {
+  const rows = [
+    row("Jan Novák", SOKOL, "100", MUZI, "m"),
+    row("Jan Novák", SOKOL, "200", MUZI, "m"),
+    // Filtered out by the age: her gender does not spoil theirs.
+    row("Jan Novák", SOKOL, "300", DOROST, "f"),
+  ];
+  assertEquals(
+    pickForSitePlayer(rows, "Jan Novák", { club: SOKOL, age: 40 }, ""),
+    { status: "ambiguous", gender: "m" },
+  );
+  assertEquals(
+    pickForSitePlayer(
+      [row("Jan Novák", SOKOL, "100", MUZI, "m"), row("Jan Novák", SOKOL, "200", MUZI, null)],
+      "Jan Novák",
+      { club: SOKOL, age: 40 },
+      "",
+    ),
+    { status: "ambiguous", gender: null },
+  );
+});
+
+Deno.test("site player: none has no gender", () => {
+  assertEquals(
+    pickForSitePlayer([row("Jan Novák", SOKOL, "100", DOROST, "m")], "Jan Novák", { club: SOKOL, age: 40 }, ""),
+    { status: "none" },
+  );
+});
+
+Deno.test("needsGender: unknown, and never asked or asked a week ago or more", () => {
+  const now = new Date("2026-10-15T12:00:00Z");
+  assertEquals(GENDER_RETRY_DAYS, 7);
+  assertEquals(needsGender({ gender: null, gender_checked_at: null }, now), true);
+  assertEquals(needsGender({ gender: "m", gender_checked_at: null }, now), false);
+  assertEquals(needsGender({ gender: "f", gender_checked_at: "2020-01-01T00:00:00Z" }, now), false);
+  assertEquals(
+    needsGender({ gender: null, gender_checked_at: "2026-10-08T12:00:01Z" }, now),
+    false,
+    "a second short of a week",
+  );
+  assertEquals(needsGender({ gender: null, gender_checked_at: "2026-10-08T12:00:00Z" }, now), true);
+  assertEquals(needsGender({ gender: null, gender_checked_at: "nonsense" }, now), true);
+});
+
+Deno.test("genderForFound: the gender of the rows with the stored number, nobody else's", () => {
+  const rows = [
+    row("Jan Novák", SOKOL, "100", SENIOR, "m"),
+    row("Jan Novák", "KK Jihlava", "200", MUZI, "f"),
+  ];
+  assertEquals(genderForFound(rows, "100"), "m");
+  assertEquals(genderForFound(rows, "200"), "f");
+  assertEquals(genderForFound(rows, "300"), null, "the number is not on the page any more");
+  assertEquals(genderForFound([row("Jan Novák", SOKOL, "100", SENIOR, null)], "100"), null);
+  assertEquals(genderForFound([], "100"), null);
+});
+
+Deno.test("genderAction: a found player's gender alone, an unsettled one resolved again, the rest left", () => {
+  const now = new Date("2026-10-15T12:00:00Z");
+  const week = 7 * 24 * 3600e3;
+  const cached = (
+    status: string,
+    looked_up_at: string,
+    gender: string | null = null,
+    gender_checked_at: string | null = null,
+  ) => ({ status, looked_up_at, gender, gender_checked_at });
+  assertEquals(genderAction(undefined, now, week), "resolve", "nobody asked yet");
+  assertEquals(genderAction(cached("found", "2026-01-01T00:00:00Z"), now, week), "gender");
+  assertEquals(
+    genderAction(cached("found", "2026-10-15T11:00:00Z"), now, week),
+    "gender",
+    "however fresh the number",
+  );
+  assertEquals(genderAction(cached("found", "2026-01-01T00:00:00Z", "m"), now, week), "skip");
+  assertEquals(
+    genderAction(cached("found", "2026-01-01T00:00:00Z", null, "2026-10-14T00:00:00Z"), now, week),
+    "skip",
+    "asked yesterday",
+  );
+  assertEquals(
+    genderAction(cached("found", "2026-01-01T00:00:00Z", null, "2026-10-01T00:00:00Z"), now, week),
+    "gender",
+    "asked two weeks ago",
+  );
+  assertEquals(genderAction(cached("none", "2026-10-01T00:00:00Z"), now, week), "resolve");
+  assertEquals(genderAction(cached("ambiguous", "2026-10-01T00:00:00Z"), now, week), "resolve");
+  assertEquals(
+    genderAction(cached("ambiguous", "2026-10-14T00:00:00Z"), now, week),
+    "skip",
+    "settled for a week yet",
+  );
+  assertEquals(genderAction(cached("none", "2026-10-01T00:00:00Z", "f"), now, week), "skip");
 });
 
 // ------------------------------------------------------------- a profile
@@ -217,7 +377,7 @@ Deno.test("profile: nobody of that name is none", () => {
 
 // -------------------------------------------------------------- the sites
 
-Deno.test("parseRows keeps only id, name, club, category and number; skips archived and odd numbers", () => {
+Deno.test("parseRows keeps only id, name, club, category, gender and number; skips archived and odd numbers", () => {
   const rows = parseRows({
     data: [
       {
@@ -234,7 +394,7 @@ Deno.test("parseRows keeps only id, name, club, category and number; skips archi
         registrationTo: "2027-06-30",
         functions: "",
       },
-      { id: 8, state: "carence", name: "New", surname: "Transfer", club: "TJ", registrationNumber: "4", ageCategory: "muži, ženy" },
+      { id: 8, state: "carence", gender: 2, name: "New", surname: "Transfer", club: "TJ", registrationNumber: "4", ageCategory: "muži, ženy" },
       { id: 3, state: "archived", name: "Old", surname: "Member", club: "TJ", registrationNumber: "3" },
       { id: 4, name: "No", surname: "Number", club: "TJ", registrationNumber: "" },
       { id: 6, name: "Bad", surname: "Number", club: "TJ", registrationNumber: "12a" },
@@ -242,9 +402,35 @@ Deno.test("parseRows keeps only id, name, club, category and number; skips archi
     ],
   });
   assertEquals(rows, [
-    { id: "7113", name: "Pavel Strnad", club: "TJ Sokol Rudná", regnum: "787", category: SENIOR, categoryName: "senioři, seniorky" },
-    { id: "8", name: "New Transfer", club: "TJ", regnum: "4", category: MUZI, categoryName: "muži, ženy" },
-    { id: "5", name: "No Category", club: "TJ", regnum: "9", category: null, categoryName: "" },
+    { id: "7113", name: "Pavel Strnad", club: "TJ Sokol Rudná", regnum: "787", category: SENIOR, categoryName: "senioři, seniorky", gender: "m" },
+    { id: "8", name: "New Transfer", club: "TJ", regnum: "4", category: MUZI, categoryName: "muži, ženy", gender: "f" },
+    { id: "5", name: "No Category", club: "TJ", regnum: "9", category: null, categoryName: "", gender: null },
+  ]);
+});
+
+Deno.test("parseRows: the register's gender 1 is a man, 2 a woman, anything else unknown", () => {
+  // The codes as the register's JSON gave them in October 2026 for Tomáš
+  // (1) and Jana (2) Pavlů of SKK Veverky Brno; the ids and numbers here
+  // are made up.
+  const rows = parseRows({
+    data: [
+      { id: 1, state: "active", gender: 1, name: "Tomáš", surname: "Pavlů", club: "SKK Veverky Brno", registrationNumber: "11" },
+      { id: 2, state: "active", gender: 2, name: "Jana", surname: "Pavlů", club: "SKK Veverky Brno", registrationNumber: "12" },
+      { id: 3, state: "active", gender: 0, name: "A", surname: "Nula", club: "TJ", registrationNumber: "13" },
+      { id: 4, state: "active", gender: 3, name: "B", surname: "Tři", club: "TJ", registrationNumber: "14" },
+      { id: 5, state: "active", gender: "1", name: "C", surname: "Text", club: "TJ", registrationNumber: "15" },
+      { id: 6, state: "active", gender: null, name: "D", surname: "Nic", club: "TJ", registrationNumber: "16" },
+      { id: 7, state: "active", name: "E", surname: "Bez", club: "TJ", registrationNumber: "17" },
+    ],
+  });
+  assertEquals(rows.map((r) => [r.name, r.gender]), [
+    ["Tomáš Pavlů", "m"],
+    ["Jana Pavlů", "f"],
+    ["A Nula", null],
+    ["B Tři", null],
+    ["C Text", null],
+    ["D Nic", null],
+    ["E Bez", null],
   ]);
 });
 
@@ -309,8 +495,8 @@ const PAGE =
   "<body><h1>Profil hráče : Pavel Strnad</h1> Oddíl: TJ Sokol Rudná Věk: 59 let Kategorie: Dospělí</body>";
 const LIST = {
   data: [
-    { id: 7113, state: "active", name: "Pavel", surname: "Strnad", club: "TJ Sokol Rudná", registrationNumber: "787", ageCategory: "muži, ženy" },
-    { id: 31056, state: "active", name: "Pavel", surname: "Strnad", club: "TJ Jiskra Hylváty", registrationNumber: "18424", ageCategory: "muži, ženy" },
+    { id: 7113, state: "active", gender: 1, name: "Pavel", surname: "Strnad", club: "TJ Sokol Rudná", registrationNumber: "787", ageCategory: "muži, ženy" },
+    { id: 31056, state: "active", gender: 1, name: "Pavel", surname: "Strnad", club: "TJ Jiskra Hylváty", registrationNumber: "18424", ageCategory: "muži, ženy" },
   ],
 };
 
@@ -318,9 +504,17 @@ Deno.test("resolveSitePlayer: his page, then the register", async () => {
   const { fn, calls } = sites(LIST, PAGE);
   assertEquals(
     await resolveSitePlayer("Pavel Strnad", "pavel-strnad", "TJ Sokol Rudná A", fn),
-    { status: "found", regnum: "787" },
+    { status: "found", regnum: "787", gender: "m" },
   );
   assertEquals(calls[0], "https://vysledky.kuzelky.cz/detail-hrace/pavel-strnad");
+});
+
+Deno.test("a found player's gender: one register request by his name, his number's row", async () => {
+  const { fn, calls } = sites(LIST, PAGE);
+  assertEquals(genderForFound(await searchRegister("Pavel Strnad", fn), "18424"), "m");
+  assertEquals(calls, [
+    "https://evidence.kuzelky.cz/frontend-api/members?fulltext=Pavel%20Strnad",
+  ]);
 });
 
 Deno.test("resolveSitePlayer: a bad slug asks nobody", async () => {
