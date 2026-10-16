@@ -49,7 +49,7 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '15. 10. 2026', [
+  Release('2.0.9', '16. 10. 2026', [
     'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
         'v jedné řadě — „Dnes je čtvrtek 15. 10.“ nad hodinami, počasí '
         '(místo v nadpisu napíše správce, třeba „Brno:“), „Svátek slaví:“, '
@@ -122,6 +122,17 @@ const appChangelog = <Release>[
         'správce) má štítek NOVÉ a barevný proužek, nebo zůstane na obrazovce '
         'dvakrát déle — volí správce ve Správě → Kiosk → Nástěnka, „Čerstvé '
         'oznamy“. Nově vyvěšený oznam kiosk ukáže hned.',
+    'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
+        'dole) a „Ch“ má jako v abecedě vlastní dlaždici za H. Dotyky ve '
+        'výběru se počítají jako aktivita, takže kdo se dlouho hledá, toho '
+        'kiosk nevrátí na tabuli.',
+    'Kiosk: upozornění v záhlaví i při rezervaci mají větší písmo (jako '
+        'nápověda „Vyber první písmeno…“) a správce si jeho velikost nastaví. '
+        'Přehled zápasů dne je širší, šířku také nastaví správce.',
+    'Kiosk: upozornění v záhlaví i upozornění při rezervaci mohou mít až '
+        '300 znaků (dosud 200).',
+    'Kiosk: pás služby v kalendáři říká, co jména znamenají — „… má '
+        'službu (12.–18. 10.)“.',
   ], store: [
     'Kiosk: přehlednější záhlaví, dva panely (Hráči týdne, Jak začít '
         'a Napište nám s QR).',
@@ -133,23 +144,6 @@ const appChangelog = <Release>[
     'Klubovna: Napište nám — zpráva autorovi.',
     'Oddíly: přezdívka místo celého názvu.',
     'Nástěnka: nejnovější nahoře, nové se štítkem.',
-  ]),
-  Release(null, '14. 10. 2026', [
-    'Kiosk, výběr hráče: písmena stojí v rovnoměrných řádcích (lichý zbytek '
-        'dole) a „Ch“ má jako v abecedě vlastní dlaždici za H. Dotyky ve '
-        'výběru se počítají jako aktivita, takže kdo se dlouho hledá, toho '
-        'kiosk nevrátí na tabuli.',
-    'Kiosk: upozornění v záhlaví i při rezervaci mají větší písmo (jako '
-        'nápověda „Vyber první písmeno…“) a správce si jeho velikost nastaví. '
-        'Přehled zápasů dne je širší, šířku také nastaví správce.',
-  ]),
-  Release(null, '12. 10. 2026', [
-    'Kiosk: upozornění v záhlaví i upozornění při rezervaci mohou mít až '
-        '300 znaků (dosud 200).',
-  ]),
-  Release(null, '11. 10. 2026', [
-    'Kiosk: pás služby v kalendáři říká, co jména znamenají — „… má '
-        'službu (12.–18. 10.)“.',
   ]),
   Release('2.0.8', '11. 10. 2026', [
     'Web: když máte Rezervátor otevřený ve více záložkách, přihlášení '
