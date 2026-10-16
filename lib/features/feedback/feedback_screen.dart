@@ -61,13 +61,14 @@ final feedbackSenderProvider = Provider<FeedbackSender>(
 );
 
 /// [message] as Sentry user feedback, tagged with its source and kuželna.
-/// False without Sentry (a build with no DSN) or when the SDK throws. True
-/// means handed to the SDK: on Android it keeps an envelope it could not
-/// send for later, the web's goes once.
+/// False without Sentry (a build with no DSN), when the SDK throws, or when
+/// it answers with the empty id: a request that failed (an ad blocker on
+/// the web, no network) ends there, not in an exception. True means Sentry
+/// has it — on Android the SDK's own cache, which sends it later.
 Future<bool> sendFeedbackToSentry(FeedbackMessage message) async {
   if (!Sentry.isEnabled) return false;
   try {
-    await Sentry.captureFeedback(
+    final id = await Sentry.captureFeedback(
       SentryFeedback(
         message: message.message,
         name: message.name,
@@ -81,7 +82,7 @@ Future<bool> sendFeedbackToSentry(FeedbackMessage message) async {
         }
       },
     );
-    return true;
+    return id != const SentryId.empty();
   } catch (e) {
     debugPrint('Feedback: send failed: $e');
     return false;

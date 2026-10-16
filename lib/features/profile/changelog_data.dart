@@ -49,6 +49,11 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '16. 10. 2026', [
+    'Napište nám: když se zprávu nepodaří doručit (třeba když blokovač '
+        'reklam v prohlížeči zastaví odeslání), aplikace to řekne, místo '
+        'aby hlásila, že odešla.',
+  ]),
   Release('2.0.9', '16. 10. 2026', [
     'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
         'v jedné řadě — „Dnes je čtvrtek 15. 10.“ nad hodinami, počasí '
