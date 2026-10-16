@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/features/feedback/feedback_screen.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 /// Napište nám: the form, what it hands to the sender, and what a visitor
 /// sees after a send that went through or did not.
@@ -185,6 +186,29 @@ void main() {
     });
   });
 
+  group('with Sentry', () {
+    Future<void> start(SentryId? answer) => Sentry.init((o) {
+          o.dsn = 'https://key@o0.ingest.de.sentry.io/1';
+          o.transport = _FakeTransport(answer);
+        });
+    tearDown(Sentry.close);
+    const message =
+        FeedbackMessage(message: 'Ahoj', source: FeedbackSource.link);
+
+    test('a message Sentry takes is sent', () async {
+      await start(SentryId.newId());
+      expect(await sendFeedbackToSentry(message), isTrue);
+    });
+
+    // The web: a blocked or failed request (an ad blocker, no network)
+    // ends in the SDK as an empty id, not as an exception — the visitor
+    // must not read „odešla“ then.
+    test('a message the transport could not deliver is not sent', () async {
+      await start(null);
+      expect(await sendFeedbackToSentry(message), isFalse);
+    });
+  });
+
   test('without Sentry the sender says it could not send', () async {
     expect(
       await sendFeedbackToSentry(
@@ -193,4 +217,15 @@ void main() {
       isFalse,
     );
   });
+}
+
+/// Answers every envelope with [answer] — Sentry's id, or null for a
+/// request that failed.
+class _FakeTransport implements Transport {
+  _FakeTransport(this.answer);
+
+  final SentryId? answer;
+
+  @override
+  Future<SentryId?> send(SentryEnvelope envelope) async => answer;
 }
