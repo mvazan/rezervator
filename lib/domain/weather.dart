@@ -72,6 +72,10 @@ class KioskWeather {
     this.max,
     this.min,
     this.precipitationChance,
+    this.feelsLike,
+    this.wind,
+    this.gusts,
+    this.precipitationSum,
   });
 
   /// Now, in °C.
@@ -88,12 +92,24 @@ class KioskWeather {
   /// Today's highest chance of rain or snow, in percent.
   final int? precipitationChance;
 
+  /// The feels-like temperature now, in °C (0082: shown when the admin
+  /// picks it, like the three below).
+  final double? feelsLike;
+
+  /// The wind now and its gusts, in km/h.
+  final double? wind;
+  final double? gusts;
+
+  /// Today's rain or snow, in mm.
+  final double? precipitationSum;
+
   /// When the kiosk got it — an answer older than [weatherStaleAfter] is
   /// not shown.
   final DateTime fetchedAt;
 
   /// Open-Meteo's forecast answer ([openMeteoForecastUri]); null when the
-  /// current values are missing.
+  /// temperature or the code now is missing. Any other value missing reads
+  /// as null, and the kiosk shows nothing for it.
   static KioskWeather? fromOpenMeteo(
     Map<String, dynamic> json,
     DateTime fetchedAt,
@@ -103,6 +119,10 @@ class KioskWeather {
     final temperature = current['temperature_2m'];
     final code = current['weather_code'];
     if (temperature is! num || code is! num) return null;
+    double? now(String key) => switch (current[key]) {
+      final num v => v.toDouble(),
+      _ => null,
+    };
     T? firstOf<T extends num>(String key) {
       final daily = json['daily'];
       if (daily is! Map) return null;
@@ -121,6 +141,10 @@ class KioskWeather {
       precipitationChance: firstOf<num>(
         'precipitation_probability_max',
       )?.round(),
+      feelsLike: now('apparent_temperature'),
+      wind: now('wind_speed_10m'),
+      gusts: now('wind_gusts_10m'),
+      precipitationSum: firstOf<num>('precipitation_sum')?.toDouble(),
       fetchedAt: fetchedAt,
     );
   }
@@ -135,21 +159,46 @@ const weatherStaleAfter = Duration(hours: 3);
 /// From this chance of rain or snow on, the status line shows the umbrella.
 const weatherUmbrellaFrom = 30;
 
+/// From this sum of rain or snow on, in mm, it shows the umbrella too —
+/// whatever the chance (0082).
+const weatherWetFrom = 0.1;
+
+/// Gusts at least this many km/h above the wind are worth a mention
+/// (0082).
+const weatherGustsAbove = 10;
+
+/// [gusts] in whole km/h when they blow at least [weatherGustsAbove] above
+/// [wind] — compared as shown, rounded —, else null.
+int? notableGusts(double wind, double? gusts) {
+  if (gusts == null) return null;
+  final whole = gusts.round();
+  return whole - wind.round() >= weatherGustsAbove ? whole : null;
+}
+
+/// Today's rain or snow as the kiosk prints it: whole mm, „< 1 mm“ under
+/// one.
+String millimetres(double mm) => mm < 1 ? '< 1 mm' : '${mm.round()} mm';
+
 /// [weather] if it is still fresh at [now], else null.
 KioskWeather? freshWeather(KioskWeather? weather, DateTime now) =>
     weather != null && now.difference(weather.fetchedAt) < weatherStaleAfter
     ? weather
     : null;
 
-/// Today's forecast at [lat]/[lon]: now (temperature, code, daylight) and
-/// the day (high, low, highest chance of rain), in Prague's day.
+/// Today's forecast at [lat]/[lon]: now (temperature, code, daylight,
+/// feels-like, wind and gusts) and the day (high, low, highest chance of
+/// rain, its sum), in Prague's day. Wind comes in km/h, Open-Meteo's
+/// default.
 Uri openMeteoForecastUri(double lat, double lon) =>
     Uri.https('api.open-meteo.com', '/v1/forecast', {
       'latitude': lat.toStringAsFixed(4),
       'longitude': lon.toStringAsFixed(4),
-      'current': 'temperature_2m,weather_code,is_day',
+      'current':
+          'temperature_2m,weather_code,is_day,apparent_temperature,'
+          'wind_speed_10m,wind_gusts_10m',
       'daily':
-          'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+          'temperature_2m_max,temperature_2m_min,'
+          'precipitation_probability_max,precipitation_sum',
       'timezone': 'Europe/Prague',
       'forecast_days': '1',
       // ČHMÚ's ALADIN model: 1 km over Czechia, the Central Europe domain

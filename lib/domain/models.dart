@@ -2,6 +2,7 @@
 /// Pure Dart — no Flutter imports — so all logic on top is unit-testable.
 library;
 
+import 'kiosk_header.dart';
 import 'kiosk_layout.dart';
 
 /// A wall-clock time of day, independent of Flutter's TimeOfDay.
@@ -879,11 +880,9 @@ class ScheduleSettings {
     this.kioskStream = false,
     this.kioskStreamCorner = KioskCorner.bl,
     this.kioskStreamWidth = 35,
-    this.kioskWeather = false,
     this.kioskWeatherPlace,
     this.kioskWeatherLat,
     this.kioskWeatherLon,
-    this.kioskNameday = false,
     this.kioskWarning,
     this.kioskBandFontSize = 10,
     this.kioskWarningFontSize = 22,
@@ -891,11 +890,12 @@ class ScheduleSettings {
     this.kioskTodaysMatches = true,
     this.kioskZapisNav = KioskZapisNav.bar,
     this.kioskStreamMax = 1,
-    this.kioskDutyHeader = false,
     this.kioskDutyBoard = false,
     this.kioskDutyBandPosition = KioskDutyBandPosition.middle,
     this.kioskPanels = KioskPanels.defaults,
-    this.kioskNoticesHeader = true,
+    this.kioskHeader = KioskHeader.defaults,
+    this.kioskWeatherTitle,
+    this.kioskWeatherItems = kioskWeatherItemsDefault,
     this.kioskNoticesFresh = KioskNoticesFresh.highlight,
     this.kioskNoticesFreshDays = 3,
     this.kioskPickerMode = KioskPickerMode.letters,
@@ -951,16 +951,12 @@ class ScheduleSettings {
   final bool kioskStream;
   final KioskCorner kioskStreamCorner;
   final int kioskStreamWidth;
-  /// Today's weather beside the kiosk's clock (0067), for the place the
-  /// admin picked — the label it shows and its coordinates (both or
-  /// neither). The kiosk asks Open-Meteo itself.
-  final bool kioskWeather;
+  /// The place for the header's weather module (0067; whether it shows is
+  /// [kioskHeader]'s business since 0082) — the label it shows and its
+  /// coordinates (both or neither). The kiosk asks Open-Meteo itself.
   final String? kioskWeatherPlace;
   final double? kioskWeatherLat;
   final double? kioskWeatherLon;
-
-  /// Whose name day it is, beside the kiosk's clock (0067).
-  final bool kioskNameday;
 
   /// A warning the admin typed for the kiosk's status bar (0068) — shown
   /// with a warning icon beside the clock; null = none.
@@ -977,8 +973,8 @@ class ScheduleSettings {
   /// the app keeps 340.
   final int kioskDayMatchesWidth;
 
-  /// The kiosk's status bar lists today's matches beside the clock (0071);
-  /// off = it says what it says on a day without a match.
+  /// The kiosk's status bar lists today's matches in its centre, home over
+  /// away (0071); off = it says what it says on a day without a match.
   final bool kioskTodaysMatches;
 
   /// How the kiosk's Zápis pages through the matches (0079).
@@ -987,12 +983,10 @@ class ScheduleSettings {
   /// How many stream windows at once, 1–4 (0072): 1 turns through the
   /// open streams in one window, more give each its own.
   final int kioskStreamMax;
-  /// The canteen duty on the kiosk (0073), each place switched on by
-  /// itself: today's duty under the clock in the status bar, a tap shows
-  /// the plan ([kioskDutyHeader]); a band across a duty's days in the
-  /// board's day headers ([kioskDutyBoard]). The card with the duty and the
+  /// The canteen duty on the board (0073): a band across a duty's days in
+  /// the board's day headers. Today's duty in the status bar is the
+  /// header's module ([kioskHeader], 0082); the card with the duty and the
   /// plan is the panels' module `duty` ([kioskPanels]).
-  final bool kioskDutyHeader;
   final bool kioskDutyBoard;
 
   /// Where the band of [kioskDutyBoard] runs in the day headers (0073).
@@ -1003,10 +997,21 @@ class ScheduleSettings {
   /// which panel — with its share of the height, in its order.
   final KioskPanels kioskPanels;
 
-  /// Nástěnka's line in the status bar, one notice's title at a time
-  /// (0077, `kiosk_notices_header`) — whether the notices are in a panel
-  /// too is [kioskPanels]' business.
-  final bool kioskNoticesHeader;
+  /// The header's modules (0082, `kiosk_header`): which of the weather,
+  /// the name day, the duty and the notices stand left of the centre,
+  /// which right and which are off, in their order. It replaced the four
+  /// switches `kiosk_weather`, `kiosk_nameday`, `kiosk_duty_header` and
+  /// `kiosk_notices_header`; whether the notices are in a panel too is
+  /// [kioskPanels]' business.
+  final KioskHeader kioskHeader;
+
+  /// The weather module's title (0082), the place the admin types
+  /// („Brno“, shown „Brno:“); null shows [kioskWeatherDefaultTitle].
+  final String? kioskWeatherTitle;
+
+  /// What the weather module shows beside the temperature now (0082,
+  /// `kiosk_weather_items`); empty = the temperature alone.
+  final Set<KioskWeatherItem> kioskWeatherItems;
 
   /// What a fresh notice gets on the kiosk — the „NOVÉ“ label, twice the
   /// turn, both or nothing (0081, `kiosk_notices_fresh_mode`) — and for how
@@ -1131,11 +1136,9 @@ class ScheduleSettings {
           json['kiosk_stream_corner'] as String?,
         ),
         kioskStreamWidth: json['kiosk_stream_width'] as int? ?? 35,
-        kioskWeather: json['kiosk_weather'] as bool? ?? false,
         kioskWeatherPlace: json['kiosk_weather_place'] as String?,
         kioskWeatherLat: (json['kiosk_weather_lat'] as num?)?.toDouble(),
         kioskWeatherLon: (json['kiosk_weather_lon'] as num?)?.toDouble(),
-        kioskNameday: json['kiosk_nameday'] as bool? ?? false,
         kioskWarning: switch (json['kiosk_warning']) {
           final String w when w.trim().isNotEmpty => w.trim(),
           _ => null,
@@ -1150,13 +1153,19 @@ class ScheduleSettings {
           json['kiosk_zapis_nav'] as String?,
         ),
         kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
-        kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
         kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,
         kioskDutyBandPosition: KioskDutyBandPosition.parse(
           json['kiosk_duty_band_position'] as String?,
         ),
         kioskPanels: KioskPanels.fromJson(json['kiosk_panels']),
-        kioskNoticesHeader: json['kiosk_notices_header'] as bool? ?? true,
+        kioskHeader: KioskHeader.fromJson(json['kiosk_header']),
+        kioskWeatherTitle: switch (json['kiosk_weather_title']) {
+          final String t when t.trim().isNotEmpty => t.trim(),
+          _ => null,
+        },
+        kioskWeatherItems: kioskWeatherItemsFromJson(
+          json['kiosk_weather_items'],
+        ),
         kioskNoticesFresh: KioskNoticesFresh.parse(
           json['kiosk_notices_fresh_mode'] as String?,
         ),

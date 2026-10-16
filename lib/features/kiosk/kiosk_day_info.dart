@@ -1,6 +1,8 @@
-/// Beside the kiosk's clock (0067): today's weather and whose name day it
-/// is — each when the admin switched it on (Správa → Kiosk → Stavový
-/// řádek). Nothing at all when neither is on, or there is nothing to say.
+/// The kiosk header's weather and name-day modules (0067, laid out by
+/// 0082): today's weather at the admin's place under the admin's title,
+/// and whose name day it is — each where the admin put it (Správa → Kiosk
+/// → Záhlaví). The status bar leaves a module out while it has nothing to
+/// say.
 library;
 
 import 'dart:async';
@@ -8,12 +10,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/clock.dart';
 import '../../data/open_meteo.dart';
 import '../../data/providers.dart';
-import '../../domain/models.dart';
-import '../../domain/namedays.dart';
+import '../../domain/kiosk_header.dart';
 import '../../domain/weather.dart';
+import 'kiosk_header_module.dart';
 
 /// Today's weather at the admin's place, asked every half hour; null with
 /// the weather off, without a place, or before the first answer.
@@ -21,7 +22,7 @@ final kioskWeatherProvider = StreamProvider.autoDispose<KioskWeather?>((ref) {
   final place = ref.watch(
     settingsProvider.select((s) {
       final v = s.value;
-      return v == null || !v.kioskWeather
+      return v == null || !v.kioskHeader.isOn(KioskHeaderModule.weather)
           ? null
           : (v.kioskWeatherLat, v.kioskWeatherLon);
     }),
@@ -47,20 +48,36 @@ IconData weatherIcon(WeatherKind kind, {required bool isDay}) =>
       WeatherKind.thunderstorm => Icons.thunderstorm,
     };
 
-class KioskDayInfo extends ConsumerStatefulWidget {
-  const KioskDayInfo({super.key});
+/// The weather module: the admin's title („Brno:“) over the icon, the
+/// temperature now and the [items] the admin picked (0082), at most
+/// [kioskHeaderWeatherShare] of the screen (the row scales down). A tap
+/// shows the forecast's source in place of the title for [sourceFor] — no
+/// watermark in the header otherwise, the credit is a tap away.
+class KioskWeatherModule extends StatefulWidget {
+  const KioskWeatherModule({
+    super.key,
+    required this.weather,
+    required this.title,
+    this.items = kioskWeatherItemsDefault,
+  });
 
-  /// How long a tap on the weather shows its source in place of the name
-  /// day.
+  /// How long a tap on the weather shows its source in place of the title.
   static const sourceFor = Duration(seconds: 8);
 
+  /// A fresh forecast ([freshWeather]); the bar leaves the module out
+  /// without one.
+  final KioskWeather weather;
+  final String title;
+
+  /// What it shows beside the temperature now, in the enum's order.
+  final Set<KioskWeatherItem> items;
+
   @override
-  ConsumerState<KioskDayInfo> createState() => _KioskDayInfoState();
+  State<KioskWeatherModule> createState() => _KioskWeatherModuleState();
 }
 
-class _KioskDayInfoState extends ConsumerState<KioskDayInfo> {
-  /// A visitor tapped the weather: its source shows for a while (no
-  /// watermark in the header otherwise — the credit is a tap away).
+class _KioskWeatherModuleState extends State<KioskWeatherModule> {
+  /// A visitor tapped the weather: its source shows for a while.
   Timer? _source;
 
   @override
@@ -72,7 +89,7 @@ class _KioskDayInfoState extends ConsumerState<KioskDayInfo> {
   void _showSource() {
     _source?.cancel();
     setState(() {
-      _source = Timer(KioskDayInfo.sourceFor, () {
+      _source = Timer(KioskWeatherModule.sourceFor, () {
         if (mounted) setState(() => _source = null);
       });
     });
@@ -80,80 +97,97 @@ class _KioskDayInfoState extends ConsumerState<KioskDayInfo> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(settingsProvider).value;
-    final now = ref.watch(nowProvider).value ?? DateTime.now();
-    final weather = (settings?.kioskWeather ?? false)
-        ? freshWeather(ref.watch(kioskWeatherProvider).value, now)
-        : null;
-    final nameDay = (settings?.kioskNameday ?? false)
-        ? nameDayLine(czechNameDay(Day.fromDateTime(now)))
-        : null;
-    if (weather == null && nameDay == null) return const SizedBox.shrink();
-
     final scheme = Theme.of(context).colorScheme;
-    final quiet = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
-    // At most a quarter of the screen: the status bar's middle (today's
-    // matches, the notices) and „Rezervace tréninku“ (at most two fifths,
-    // scaled down to fit) keep their room on a narrow kiosk with large
-    // text — the weather shrinks, the name day ellipsizes.
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * kioskDayInfoShare,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.only(left: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (weather != null)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _showSource,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: _Weather(weather: weather, quiet: quiet),
-                ),
-              ),
-            if ((_source != null && weather != null ? weatherSource : nameDay)
-                case final line?)
-              Text(
-                line,
-                style: quiet,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.ellipsis,
-              ),
-          ],
+    return KioskHeaderModuleFrame(
+      title: _source != null ? weatherSource : widget.title,
+      maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderWeatherShare,
+      onTap: _showSource,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: _Weather(
+          weather: widget.weather,
+          items: widget.items,
+          quiet: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
         ),
       ),
     );
   }
 }
 
-/// The share of the screen's width the column may take.
-const kioskDayInfoShare = 0.25;
+/// The name-day module: „Svátek slaví:“ over „Hedvika“ (`nameDayHeader`),
+/// one line of at most a fifth of the screen — a long list of names is
+/// cut.
+class KioskNameDayModule extends StatelessWidget {
+  const KioskNameDayModule({super.key, required this.day});
+
+  final ({String title, String text}) day;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return KioskHeaderModuleFrame(
+      title: day.title,
+      maxWidth: MediaQuery.sizeOf(context).width * kioskHeaderModuleShare,
+      child: Text(
+        day.text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        style: kioskHeaderNameStyle(scheme),
+      ),
+    );
+  }
+}
 
 class _Weather extends StatelessWidget {
-  const _Weather({required this.weather, required this.quiet});
+  const _Weather({
+    required this.weather,
+    required this.items,
+    required this.quiet,
+  });
 
   final KioskWeather weather;
+  final Set<KioskWeatherItem> items;
   final TextStyle quiet;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final max = weather.max;
-    final min = weather.min;
+    bool picked(KioskWeatherItem item) => items.contains(item);
+    // Each value only when the admin picked it and the forecast has it.
+    final range = picked(KioskWeatherItem.range);
+    final max = range ? weather.max : null;
+    final min = range ? weather.min : null;
+    final feels = picked(KioskWeatherItem.feels) ? weather.feelsLike : null;
+    final wind = picked(KioskWeatherItem.wind) ? weather.wind : null;
+    final gusts = wind == null ? null : notableGusts(wind, weather.gusts);
+    // The umbrella only when rain or snow is likely: a fair chance, or
+    // some of it in the sum — each shown when it alone would do.
+    final rain = picked(KioskWeatherItem.rain);
     final chance = weather.precipitationChance;
-    final rainy = chance != null && chance >= weatherUmbrellaFrom;
+    final sum = weather.precipitationSum;
+    final likely = rain && chance != null && chance >= weatherUmbrellaFrom;
+    final wet = rain && sum != null && sum >= weatherWetFrom;
+    // „60 %, 3 mm“; a sum under 1 mm reads „méně než 1 mm“.
+    List<String> rainParts({required bool spoken}) => [
+      if (likely) '$chance %',
+      if (wet) spoken && sum < 1 ? 'méně než 1 mm' : millimetres(sum),
+    ];
+    final windText = wind == null
+        ? null
+        : [
+            '${wind.round()} km/h',
+            if (gusts != null) 'nárazy $gusts',
+          ].join(', ');
     final label = [
       weatherLabel(weather.kind),
       degrees(weather.temperature),
       if (max != null && min != null)
         'dnes nejvýš ${degrees(max)}, nejníž ${degrees(min)}',
-      if (rainy) 'srážky $chance %',
+      if (feels != null) 'pocitově ${degrees(feels)}',
+      if (windText != null) 'vítr $windText',
+      if (likely || wet) 'srážky ${rainParts(spoken: true).join(', ')}',
     ].join(', ');
     return Semantics(
       label: 'Počasí: $label. $weatherSource',
@@ -175,11 +209,21 @@ class _Weather extends StatelessWidget {
             const SizedBox(width: 10),
             Text('${degrees(max)} / ${degrees(min)}', style: quiet),
           ],
-          if (rainy) ...[
+          if (feels != null) ...[
+            const SizedBox(width: 10),
+            Text('pocitově ${degrees(feels)}', style: quiet),
+          ],
+          if (windText != null) ...[
+            const SizedBox(width: 10),
+            Icon(Icons.air, size: 16, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 2),
+            Text(windText, style: quiet),
+          ],
+          if (likely || wet) ...[
             const SizedBox(width: 10),
             Icon(Icons.umbrella, size: 16, color: scheme.onSurfaceVariant),
             const SizedBox(width: 2),
-            Text('$chance %', style: quiet),
+            Text(rainParts(spoken: false).join(', '), style: quiet),
           ],
         ],
       ),

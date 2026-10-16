@@ -60,6 +60,45 @@ void main() {
       expect(w.fetchedAt, at);
     });
 
+    test('reads the feels-like temperature, the wind and its gusts now and '
+        'today\'s rain or snow', () {
+      final w = KioskWeather.fromOpenMeteo({
+        'current': {
+          'temperature_2m': 9.4,
+          'weather_code': 3,
+          'is_day': 1,
+          'apparent_temperature': 5.6,
+          'wind_speed_10m': 12.3,
+          'wind_gusts_10m': 27,
+        },
+        'daily': {
+          'precipitation_probability_max': [60],
+          'precipitation_sum': [2.7],
+        },
+      }, at)!;
+      expect(w.feelsLike, 5.6);
+      expect(w.wind, 12.3);
+      expect(w.gusts, 27);
+      expect(w.precipitationSum, 2.7);
+    });
+
+    test('the new values missing or not numbers read as none', () {
+      final w = KioskWeather.fromOpenMeteo({
+        'current': {
+          'temperature_2m': 9.4,
+          'weather_code': 3,
+          'is_day': 1,
+          'apparent_temperature': null,
+          'wind_speed_10m': 'x',
+        },
+        'daily': {'precipitation_sum': <Object?>[null]},
+      }, at)!;
+      expect(w.feelsLike, isNull);
+      expect(w.wind, isNull);
+      expect(w.gusts, isNull);
+      expect(w.precipitationSum, isNull);
+    });
+
     test('night, and a day without its figures', () {
       final w = KioskWeather.fromOpenMeteo({
         'current': {'temperature_2m': -2, 'weather_code': 0, 'is_day': 0},
@@ -105,6 +144,19 @@ void main() {
     expect(uri.queryParameters['longitude'], '16.6355');
     expect(uri.queryParameters['current'], contains('weather_code'));
     expect(uri.queryParameters['daily'], contains('temperature_2m_max'));
+    // What the admin may pick beside the temperature (0082).
+    expect(
+      uri.queryParameters['current']!.split(','),
+      containsAll([
+        'apparent_temperature',
+        'wind_speed_10m',
+        'wind_gusts_10m',
+      ]),
+    );
+    expect(
+      uri.queryParameters['daily']!.split(','),
+      contains('precipitation_sum'),
+    );
     expect(uri.queryParameters['timezone'], 'Europe/Prague');
     expect(uri.queryParameters['forecast_days'], '1');
     // ČHMÚ's ALADIN, the Czech model.

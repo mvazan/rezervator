@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/kiosk_url.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/kiosk_header.dart';
 import '../../domain/kiosk_layout.dart';
 import '../../domain/models.dart';
 import '../../domain/weather.dart' show WeatherPlace;
@@ -116,6 +117,13 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskModule.feedback => 'Napište nám',
   };
 
+  static String _headerLabel(KioskHeaderModule module) => switch (module) {
+    KioskHeaderModule.weather => 'Počasí',
+    KioskHeaderModule.nameday => 'Svátek',
+    KioskHeaderModule.duty => 'Služba na kantýně',
+    KioskHeaderModule.notices => 'Nástěnka',
+  };
+
   static String _zapisNavLabel(KioskZapisNav m) => switch (m) {
     KioskZapisNav.off => 'Vypnuto',
     KioskZapisNav.bar => 'Lišta nad zápisem',
@@ -155,8 +163,8 @@ class KioskSettingsScreen extends ConsumerWidget {
       '(„$button“).';
 
   /// A section: its title, a line on what it is about, and its options.
-  /// Keyed by its title: „Nástěnka“ and „Zápasy“ are rows of the Panely
-  /// table too, and „V záhlaví“ is a switch in two sections.
+  /// Keyed by its title: „Nástěnka“ is a row of the Záhlaví and the Panely
+  /// tables too, „Zápasy“ of Panely.
   Widget _section(
     BuildContext context,
     String title,
@@ -579,18 +587,396 @@ class KioskSettingsScreen extends ConsumerWidget {
     );
   }
 
-  /// „Počasí“: on with the place it needs — the alley's venue when none was
-  /// picked yet and the venue is known; off keeps the place for next time.
-  Future<void> _weather(
+  /// The header's layout (0082) — the default one until the settings row
+  /// exists.
+  static KioskHeader _headerOf(ScheduleSettings? settings) =>
+      settings?.kioskHeader ?? KioskHeader.defaults;
+
+  /// Writes the header's layout (0082) — the whole of it, as the panels':
+  /// the column's check validates it as one value — with [extra] columns
+  /// in the same PATCH.
+  Future<void> _header(
     BuildContext context,
     ScheduleSettings settings,
-    bool on,
+    KioskHeader next, {
+    Map<String, Object?> extra = const {},
+  }) => _panel(context, settings, {'kiosk_header': next.toJson(), ...extra});
+
+  /// [module] to [side]. The weather coming into the header with no place
+  /// picked yet takes the alley's venue, when known, in the same PATCH —
+  /// the kiosk shows no weather without one; off keeps the place for next
+  /// time.
+  Future<void> _headerSide(
+    BuildContext context,
+    ScheduleSettings settings,
+    KioskHeader header,
+    KioskHeaderModule module,
+    PanelSide side,
     WeatherPlace? alley,
-  ) => _panel(context, settings, {
-    'kiosk_weather': on,
-    if (on && settings.kioskWeatherLat == null && alley != null)
-      ..._placeColumns(alley),
-  });
+  ) => _header(
+    context,
+    settings,
+    header.withSide(module, side),
+    extra: {
+      if (module == KioskHeaderModule.weather &&
+          !header.isOn(module) &&
+          side != PanelSide.off &&
+          settings.kioskWeatherLat == null &&
+          alley != null)
+        ..._placeColumns(alley),
+    },
+  );
+
+  /// At most this many characters: 0082's check on `kiosk_weather_title`.
+  static const _weatherTitleMaxLength = 40;
+
+  /// The weather module's title (0082), typed in a dialog starting from
+  /// the one shown; saved trimmed, the default as none — the kiosk shows
+  /// [kioskWeatherDefaultTitle] then.
+  Future<void> _editWeatherTitle(
+    BuildContext context,
+    ScheduleSettings settings,
+  ) async {
+    final text = await showKioskTextDialog(
+      context,
+      title: 'Nadpis počasí',
+      label: 'Nadpis',
+      initial: settings.kioskWeatherTitle ?? kioskWeatherDefaultTitle,
+      defaultText: kioskWeatherDefaultTitle,
+      maxLength: _weatherTitleMaxLength,
+    );
+    if (text == null || !context.mounted) return;
+    // One line on the kiosk: a line break typed in the dialog (it takes a
+    // few lines for the other kiosk texts) becomes a space.
+    final title = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    await _panel(context, settings, {
+      'kiosk_weather_title':
+          title.isEmpty || title == kioskWeatherDefaultTitle ? null : title,
+    });
+  }
+
+  /// A value the weather may show beside the temperature now (0082), as
+  /// its chip under „Údaje počasí“ names it.
+  static String _weatherItemLabel(KioskWeatherItem item) => switch (item) {
+    KioskWeatherItem.range => 'Nejvyšší a nejnižší',
+    KioskWeatherItem.feels => 'Pocitová teplota',
+    KioskWeatherItem.wind => 'Vítr',
+    KioskWeatherItem.rain => 'Srážky',
+  };
+
+  /// [item] on or off among the weather's values — the whole set PATCHed,
+  /// in the enum's order.
+  Future<void> _weatherItem(
+    BuildContext context,
+    ScheduleSettings settings,
+    KioskWeatherItem item,
+    bool on,
+  ) {
+    final items = settings.kioskWeatherItems;
+    return _panel(context, settings, {
+      'kiosk_weather_items': kioskWeatherItemsToJson(
+        on ? {...items, item} : items.difference({item}),
+      ),
+    });
+  }
+
+  /// The „Poloha“ column of the Záhlaví table: room for „Uprostřed“ in a
+  /// list and for „Vlevo, vždy první“.
+  static const _headerSideWidth = 170.0;
+
+  /// „Záhlaví“ (0082): the table that puts the header's modules left or
+  /// right of the centre and orders them — the clock and today's matches
+  /// with their fixed places as its first and last rows — then the
+  /// weather's place, title and values while the weather is in the header.
+  Widget _headerSection(
+    BuildContext context,
+    ScheduleSettings? settings,
+    WeatherPlace? alley,
+  ) {
+    final header = _headerOf(settings);
+    return _section(
+      context,
+      'Záhlaví',
+      'Pruh nahoře na kiosku. Každý modul má nadpis a pod ním údaj. Moduly '
+          'vlevo jsou hned za hodinami, vpravo před tlačítkem „Rezervace '
+          'tréninku“; dnešní zápasy jsou uprostřed — domácí nahoře, '
+          'venkovní pod nimi.',
+      [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= _moduleRowWidth;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // The table's head over the one-line rows; on a phone each
+                // list carries its own label instead.
+                if (wide) _headerHead(context),
+                _headerRow(
+                  context,
+                  'clock',
+                  'Hodiny a datum',
+                  const Text('Vlevo, vždy první'),
+                  wide: wide,
+                ),
+                for (final placement in header.modules)
+                  // A module of a newer app is not listed; the layout keeps
+                  // it and every write hands it back unchanged.
+                  if (placement.module case final module?)
+                    _headerModuleRow(
+                      context,
+                      settings,
+                      header,
+                      module,
+                      alley,
+                      wide: wide,
+                    ),
+                _headerRow(
+                  context,
+                  'matches',
+                  'Dnešní zápasy',
+                  DropdownButtonFormField<bool>(
+                    initialValue: settings?.kioskTodaysMatches ?? true,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Poloha',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: false, child: Text('Vypnuto')),
+                      DropdownMenuItem(value: true, child: Text('Uprostřed')),
+                    ],
+                    onChanged: settings == null
+                        ? null
+                        : (on) {
+                            if (on != null) {
+                              _panel(context, settings, {
+                                'kiosk_todays_matches': on,
+                              });
+                            }
+                          },
+                  ),
+                  wide: wide,
+                ),
+              ],
+            );
+          },
+        ),
+        if (header.isOn(KioskHeaderModule.weather)) ...[
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.place_outlined),
+            title: const Text('Místo pro počasí'),
+            subtitle: Text(
+              settings?.kioskWeatherPlace ??
+                  'Není vybrané — kiosk počasí neukáže.',
+            ),
+            trailing: TextButton(
+              onPressed: settings == null
+                  ? null
+                  : () => _pickPlace(context, settings, alley),
+              child: Text(
+                settings?.kioskWeatherPlace == null ? 'Vybrat…' : 'Změnit…',
+              ),
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.title),
+            title: const Text('Nadpis počasí'),
+            subtitle: Text(
+              settings?.kioskWeatherTitle ??
+                  '$kioskWeatherDefaultTitle (výchozí)',
+            ),
+            trailing: TextButton(
+              onPressed: settings == null
+                  ? null
+                  : () => _editWeatherTitle(context, settings),
+              child: const Text('Upravit…'),
+            ),
+          ),
+          // What the weather shows beside the temperature now, which it
+          // always shows (0082).
+          ListTile(
+            key: const ValueKey('kiosk-weather-items'),
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.thermostat),
+            title: const Text('Údaje počasí'),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final item in KioskWeatherItem.values)
+                    FilterChip(
+                      label: Text(_weatherItemLabel(item)),
+                      selected: (settings?.kioskWeatherItems ??
+                              kioskWeatherItemsDefault)
+                          .contains(item),
+                      onSelected: settings == null
+                          ? null
+                          : (on) => _weatherItem(context, settings, item, on),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            'Počasí: ČHMÚ (model ALADIN) přes Open-Meteo.com (CC BY 4.0), '
+            'obnovuje se každou půlhodinu; zdroj kiosk ukáže po ťuknutí na '
+            'počasí. Svátek podle českého kalendáře; ve státní svátek bez '
+            'jména jeho název. Služba podle plánu ve Správě → Služby; ťuk '
+            'ukáže plán. Nadpis počasí je místo („Brno“), kiosk za něj dá '
+            'dvojtečku. Teplotu teď kiosk ukáže vždy, ostatní údaje vybereš '
+            'u počasí.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The Záhlaví table's head over the one-line rows: „Modul“, „Poloha“,
+  /// „Pořadí“, each over its column.
+  Widget _headerHead(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelMedium?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    return Padding(
+      key: const ValueKey('kiosk-header-modules-header'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(child: Text('Modul', style: style)),
+          SizedBox(
+            width: _headerSideWidth,
+            child: Text('Poloha', style: style),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: _arrowsWidth,
+            child: Text('Pořadí', style: style, textAlign: TextAlign.center),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A row of the Záhlaví table, keyed by [id]: [name], then [place] in
+  /// the „Poloha“ column and [arrows] (none: an empty column) in the
+  /// „Pořadí“ one; on a phone the place and the arrows go under the name.
+  Widget _headerRow(
+    BuildContext context,
+    String id,
+    String name,
+    Widget place, {
+    Widget? arrows,
+    required bool wide,
+  }) {
+    final label = Text(name, style: Theme.of(context).textTheme.bodyLarge);
+    return Padding(
+      key: ValueKey('kiosk-header-module:$id'),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: wide
+          ? Row(
+              children: [
+                Expanded(child: label),
+                SizedBox(width: _headerSideWidth, child: place),
+                const SizedBox(width: 12),
+                // A row without arrows keeps the columns in line.
+                SizedBox(width: _arrowsWidth, child: arrows),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                label,
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: place),
+                    if (arrows != null) ...[
+                      const SizedBox(width: 12),
+                      SizedBox(width: _arrowsWidth, child: arrows),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+
+  /// The row of [module]: its side and — once placed — the arrows that
+  /// move it among the placed modules of that side.
+  Widget _headerModuleRow(
+    BuildContext context,
+    ScheduleSettings? settings,
+    KioskHeader header,
+    KioskHeaderModule module,
+    WeatherPlace? alley, {
+    required bool wide,
+  }) {
+    final side = header.sideOf(module);
+    final onSide = side == PanelSide.off
+        ? const <KioskHeaderPlacement>[]
+        : header.modulesOn(side);
+    final at = onSide.indexWhere((p) => p.module == module);
+    void move(int by) {
+      if (settings != null) {
+        _header(context, settings, header.moved(module, by));
+      }
+    }
+
+    return _headerRow(
+      context,
+      module.name,
+      _headerLabel(module),
+      DropdownButtonFormField<PanelSide>(
+        initialValue: side,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'Poloha',
+          border: OutlineInputBorder(),
+        ),
+        items: [
+          for (final s in PanelSide.values)
+            DropdownMenuItem(value: s, child: Text(_sideLabel(s))),
+        ],
+        onChanged: settings == null
+            ? null
+            : (s) {
+                if (s != null && s != side) {
+                  _headerSide(context, settings, header, module, s, alley);
+                }
+              },
+      ),
+      arrows: side == PanelSide.off
+          ? null
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: 'Posunout výš',
+                  icon: const Icon(Icons.arrow_upward),
+                  onPressed: settings == null || at <= 0
+                      ? null
+                      : () => move(-1),
+                ),
+                IconButton(
+                  tooltip: 'Posunout níž',
+                  icon: const Icon(Icons.arrow_downward),
+                  onPressed: settings == null || at >= onSide.length - 1
+                      ? null
+                      : () => move(1),
+                ),
+              ],
+            ),
+      wide: wide,
+    );
+  }
 
   Future<void> _pickPlace(
     BuildContext context,
@@ -962,84 +1348,16 @@ class KioskSettingsScreen extends ConsumerWidget {
                   ),
               ],
             ),
-            _section(
-              context,
-              'Stavový řádek',
-              'Co kiosk ukáže vedle hodin: dnešní zápasy, počasí a kdo má '
-                  'svátek.',
-              [
-                _switch(
-                  context,
-                  settings,
-                  'Dnešní zápasy v záhlaví',
-                  settings?.kioskTodaysMatches ?? true,
-                  'kiosk_todays_matches',
-                  subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Počasí'),
-                  subtitle: const Text(
-                    'Teplota a dnešní předpověď pro vybrané místo, '
-                    'obnovuje se každou půlhodinu. Data: ČHMÚ (model '
-                    'ALADIN) přes Open-Meteo.com (CC BY 4.0); zdroj kiosk '
-                    'ukáže po ťuknutí na počasí.',
-                  ),
-                  value: settings?.kioskWeather ?? false,
-                  onChanged: settings == null
-                      ? null
-                      : (on) => _weather(context, settings, on, alley),
-                ),
-                if (settings?.kioskWeather ?? false)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.place_outlined),
-                    title: const Text('Místo pro počasí'),
-                    subtitle: Text(
-                      settings?.kioskWeatherPlace ??
-                          'Není vybrané — kiosk počasí neukáže.',
-                    ),
-                    trailing: TextButton(
-                      onPressed: settings == null
-                          ? null
-                          : () => _pickPlace(context, settings, alley),
-                      child: Text(
-                        settings?.kioskWeatherPlace == null
-                            ? 'Vybrat…'
-                            : 'Změnit…',
-                      ),
-                    ),
-                  ),
-                _switch(
-                  context,
-                  settings,
-                  'Svátek',
-                  settings?.kioskNameday ?? false,
-                  'kiosk_nameday',
-                  subtitle:
-                      'Kdo má dnes svátek, podle českého kalendáře; ve '
-                      'státní svátek bez jména jeho název.',
-                ),
-              ],
-            ),
+            _headerSection(context, settings, alley),
             _panelsSection(context, settings),
             _section(
               context,
               'Nástěnka',
               'Oznamy z nástěnky klubu. Který oznam se na kiosku ukáže, '
-                  'volíš přímo na nástěnce (⋮ u oznamu).',
+                  'volíš přímo na nástěnce (⋮ u oznamu). Do záhlaví ji dáš '
+                  'v Záhlaví, do panelu vlevo nebo vpravo v Panelech (výš).',
               [
-                _switch(
-                  context,
-                  settings,
-                  'V záhlaví',
-                  settings?.kioskNoticesHeader ?? true,
-                  'kiosk_notices_header',
-                  subtitle:
-                      'Nadpis jednoho oznamu ve stavovém řádku nahoře. Do '
-                      'panelu vlevo nebo vpravo dáš nástěnku v Panelech (výš).',
-                ),
-                if ((settings?.kioskNoticesHeader ?? true) ||
+                if (_headerOf(settings).isOn(KioskHeaderModule.notices) ||
                     _placed(settings, KioskModule.notices)) ...[
                   _number(
                     context,
@@ -1110,19 +1428,9 @@ class KioskSettingsScreen extends ConsumerWidget {
               context,
               'Služby na kantýně',
               'Kdo právě slouží na kantýně a kdo přijde na řadu — podle plánu '
-                  've Správě → Služby. Každé místo se zapíná zvlášť; kartu '
-                  'do panelu dáš v Panelech (výš).',
+                  've Správě → Služby. Do záhlaví dáš službu v Záhlaví, kartu '
+                  'do panelu v Panelech (výš).',
               [
-                _switch(
-                  context,
-                  settings,
-                  'V záhlaví',
-                  settings?.kioskDutyHeader ?? false,
-                  'kiosk_duty_header',
-                  subtitle:
-                      'Pod hodinami „Služba: …“ s dnešní službou; ťuk ukáže '
-                      'plán.',
-                ),
                 _switch(
                   context,
                   settings,

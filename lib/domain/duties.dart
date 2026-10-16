@@ -591,6 +591,11 @@ class KioskDutyEntry {
   /// „Jan Novák a Petr Svoboda“.
   String get who => joinNames(names);
 
+  /// The header module's title (0082): „Službu má:“, „Službu mají:“ for
+  /// two or more.
+  String get headerTitle =>
+      names.length == 1 ? 'Službu má:' : 'Službu mají:';
+
   /// The board's band: names alone would not say what they are —
   /// „Jan Novák a Petr Svoboda mají službu (5.–11. 10.)“, „má“ for one.
   String get bandLabel =>

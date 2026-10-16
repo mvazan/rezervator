@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/contrast.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/palette.dart';
+import 'package:rezervator/features/kiosk/kiosk_header_module.dart';
 
 /// What the kiosk picker's colours are held to, measured rather than
 /// eyeballed. The picker paints a player's CLUB colour behind their name, so
@@ -119,6 +120,19 @@ void main() {
           contrastRatio(scheme.onErrorContainer, scheme.errorContainer),
           _textAA,
           '$variant: warning text on its container',
+        );
+      });
+
+      test('the header modules\' titles (0082) read as normal text on the '
+          'status bar', () {
+        // 13px semi-bold is normal text to WCAG, so 4.5:1 on the bar's
+        // surfaceContainerHighest; the colour is the title style's own, so
+        // a change there is measured here.
+        final title = kioskHeaderTitleStyle(scheme).color!;
+        _expect(
+          contrastRatio(title, scheme.surfaceContainerHighest),
+          _textAA,
+          '$variant: module title on the status bar',
         );
       });
     });

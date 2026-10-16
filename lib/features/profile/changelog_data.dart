@@ -50,12 +50,20 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '15. 10. 2026', [
+    'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
+        'v jedné řadě — „Dnes je čtvrtek 15. 10.“ nad hodinami, počasí '
+        '(místo v nadpisu napíše správce, třeba „Brno:“), „Svátek slaví:“, '
+        'nově „Službu má:“ (místo řádku pod hodinami) a nástěnka. Ve Správě '
+        '→ Kiosk → Záhlaví '
+        'každému zvolíš, jestli je vlevo, nebo vpravo, a pořadí; dnešní '
+        'zápasy jsou uprostřed, domácí nad venkovními. Počasí ukáže vedle '
+        'teploty, co správce vybere: pocitovou teplotu, vítr, srážky, '
+        'nejvyšší a nejnižší.',
     'Kiosk: panely jsou dva, vlevo i vpravo od tabule. Ve Správě → Kiosk → '
         'Panely správce každému modulu (služba na kantýně, nástěnka, zápasy, '
         'Jak začít, Hráči týdne) určí panel, podíl na výšce a pořadí; každý '
-        'panel má svou šířku a může začínat rozbalený. Nástěnku v záhlaví '
-        'zapíná přepínač „V záhlaví“, volby seznamu zápasů mají svou sekci '
-        'Zápasy.',
+        'panel má svou šířku a může začínat rozbalený. Volby seznamu zápasů '
+        'mají svou sekci Zápasy.',
     'Kiosk: modul „Hráči týdne“ — nejlepší výkony našich hráčů za minulý '
         'týden v kategoriích muži a ženy na 120 a 100 hodů. Ťuknutí otevře '
         'celý týden podle kategorií, soutěží nebo oddílů, doma i venku, a '
@@ -115,10 +123,10 @@ const appChangelog = <Release>[
         'dvakrát déle — volí správce ve Správě → Kiosk → Nástěnka, „Čerstvé '
         'oznamy“. Nově vyvěšený oznam kiosk ukáže hned.',
   ], store: [
-    'Kiosk: dva panely (Hráči týdne, Jak začít a Napište nám s QR kódy).',
-    'Kiosk: větší „Rezervace tréninku“, výběr hráče podle oddílů, ⟳ obnoví '
-        'výsledky.',
-    'Kiosk: nižší řádky drah, listování v zápisu.',
+    'Kiosk: přehlednější záhlaví, dva panely (Hráči týdne, Jak začít '
+        'a Napište nám s QR).',
+    'Kiosk: větší „Rezervace tréninku“, výběr podle oddílů, ⟳ obnoví '
+        'výsledky, listování v zápisu, nižší řádky drah.',
     'Rozvrh a zápasy dne: pohár s časem, kuželna, soutěž a kolo.',
     'Kalendář: čas bloku pod sebou, poznámka pronájmu v pruhu.',
     'Výsledky: filtr podle oddílu, pak družstva.',

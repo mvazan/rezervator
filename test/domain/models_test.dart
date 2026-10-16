@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/domain/kiosk_header.dart';
 import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
 
@@ -175,7 +176,7 @@ void main() {
       expect(ScheduleSettings.fromJson(base).kioskStreamMax, 1);
     });
 
-    test('fromJson reads the kiosk\'s duty places (0073); off when absent',
+    test('fromJson reads the kiosk\'s duty band (0073); off when absent',
         () {
       const base = {
         'lane_count': 4,
@@ -185,15 +186,11 @@ void main() {
       };
       final on = ScheduleSettings.fromJson({
         ...base,
-        'kiosk_duty_header': true,
         'kiosk_duty_board': true,
       });
-      expect(on.kioskDutyHeader, isTrue);
       expect(on.kioskDutyBoard, isTrue);
       final old = ScheduleSettings.fromJson(base);
-      expect(old.kioskDutyHeader, isFalse);
       expect(old.kioskDutyBoard, isFalse);
-      expect(ScheduleSettings.defaults.kioskDutyHeader, isFalse);
       expect(ScheduleSettings.defaults.kioskDutyBoard, isFalse);
     });
 
@@ -214,7 +211,7 @@ void main() {
         'kiosk_duty_share': 55,
       });
       expect(s.kioskPanels, KioskPanels.defaults);
-      expect(s.kioskNoticesHeader, isTrue);
+      expect(s.kioskHeader, KioskHeader.defaults);
     });
 
     test('fromJson reads where the duty band runs (0073); between the date '
@@ -312,8 +309,8 @@ void main() {
       expect(ScheduleSettings.defaults.kioskStreamEnabled, isTrue);
     });
 
-    test('fromJson reads the kiosk panels and the notices\' header line '
-        '(0077); the default layout and on when absent', () {
+    test('fromJson reads the kiosk panels (0077); the default layout when '
+        'absent', () {
       const base = {
         'lane_count': 4,
         'training_weekdays': [1, 2, 4],
@@ -331,7 +328,6 @@ void main() {
             {'id': 'notices', 'side': 'right', 'share': 40},
           ],
         },
-        'kiosk_notices_header': false,
       });
       expect(read.kioskPanels.left, const KioskPanel(days: 3, open: true));
       expect(
@@ -339,12 +335,9 @@ void main() {
         ['guide', 'week'],
       );
       expect(read.kioskPanels.sideOf(KioskModule.matches), PanelSide.off);
-      expect(read.kioskNoticesHeader, isFalse);
       final old = ScheduleSettings.fromJson(base);
       expect(old.kioskPanels, KioskPanels.defaults);
-      expect(old.kioskNoticesHeader, isTrue);
       expect(ScheduleSettings.defaults.kioskPanels, KioskPanels.defaults);
-      expect(ScheduleSettings.defaults.kioskNoticesHeader, isTrue);
     });
 
     test('the default panel layout is the column\'s default, value for value',
@@ -367,6 +360,100 @@ void main() {
         expect((later as Map)['side'], 'off', reason: '$later');
       }
       expect(KioskPanels.fromJson(decoded), KioskPanels.defaults);
+    });
+
+    test('fromJson reads the header\'s modules (0082); the default layout '
+        'when absent', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      final read = ScheduleSettings.fromJson({
+        ...base,
+        'kiosk_header': {
+          'modules': [
+            {'id': 'weather', 'side': 'left'},
+            {'id': 'nameday', 'side': 'off'},
+            {'id': 'duty', 'side': 'right'},
+            {'id': 'notices', 'side': 'right'},
+          ],
+        },
+      });
+      expect(read.kioskHeader.sideOf(KioskHeaderModule.weather),
+          PanelSide.left);
+      expect(
+        [for (final m in read.kioskHeader.modulesOn(PanelSide.right)) m.id],
+        ['duty', 'notices'],
+      );
+      expect(ScheduleSettings.fromJson(base).kioskHeader, KioskHeader.defaults);
+      expect(ScheduleSettings.defaults.kioskHeader, KioskHeader.defaults);
+    });
+
+    test('fromJson reads the weather\'s title (0082) trimmed; blank or '
+        'absent is none', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      ScheduleSettings settings(Object? title) =>
+          ScheduleSettings.fromJson({...base, 'kiosk_weather_title': title});
+      expect(settings('  Dnes v Brně  ').kioskWeatherTitle, 'Dnes v Brně');
+      expect(settings('   ').kioskWeatherTitle, isNull);
+      expect(settings(null).kioskWeatherTitle, isNull);
+      expect(ScheduleSettings.fromJson(base).kioskWeatherTitle, isNull);
+      expect(ScheduleSettings.defaults.kioskWeatherTitle, isNull);
+    });
+
+    test('fromJson reads the weather\'s values (0082): the known names, '
+        'an empty list the temperature alone, the high and low and the rain '
+        'when absent', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      Set<KioskWeatherItem> items(Object? json) => ScheduleSettings.fromJson({
+        ...base,
+        'kiosk_weather_items': json,
+      }).kioskWeatherItems;
+      expect(items(['wind', 'feels']), {
+        KioskWeatherItem.feels,
+        KioskWeatherItem.wind,
+      });
+      expect(
+        items(['range', 'feels', 'wind', 'rain']),
+        KioskWeatherItem.values.toSet(),
+      );
+      // A value a newer app knows, or no string at all, is skipped.
+      expect(items(['rain', 'uv', 3, null]), {KioskWeatherItem.rain});
+      expect(items(<Object?>[]), isEmpty);
+      const before = {KioskWeatherItem.range, KioskWeatherItem.rain};
+      expect(items(null), before);
+      expect(items('range'), before);
+      expect(ScheduleSettings.fromJson(base).kioskWeatherItems, before);
+      expect(ScheduleSettings.defaults.kioskWeatherItems, before);
+    });
+
+    test('a cached row from before 0082, with the dropped header switches '
+        'still in it, reads as the default header', () {
+      // No conversion in the app: the old switches are 0082's business.
+      final s = ScheduleSettings.fromJson({
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+        'kiosk_weather': true,
+        'kiosk_nameday': true,
+        'kiosk_duty_header': true,
+        'kiosk_notices_header': false,
+      });
+      expect(s.kioskHeader, KioskHeader.defaults);
+      expect(s.kioskWeatherTitle, isNull);
     });
 
     test('fromJson reads what a fresh notice gets and for how many days '

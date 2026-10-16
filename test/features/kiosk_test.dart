@@ -15,8 +15,10 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/duties.dart'
     show KioskDutyEntry, dutyRangeLabel;
+import 'package:rezervator/domain/kiosk_header.dart';
 import 'package:rezervator/domain/kiosk_layout.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/weather.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
@@ -28,6 +30,7 @@ import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_day_info.dart';
 import 'package:rezervator/features/kiosk/kiosk_display.dart';
 import 'package:rezervator/features/kiosk/kiosk_duty.dart';
+import 'package:rezervator/features/kiosk/kiosk_header_module.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
@@ -59,6 +62,19 @@ class _DisplayRecorder extends KioskDisplay {
 }
 
 void main() {
+  // The panel buttons breathe on the wall clock's beat
+  // (KioskDrawerButton.untilBreath): on the real clock a test's breath
+  // would start at another moment every run, and a pumpAndSettle that
+  // catches one runs seconds longer — a turn or a timer measured across it
+  // passed or failed by the time of day. A clock that stands still gives
+  // every test the same beat; the breathing tests hand in a moving one.
+  setUp(
+    () => KioskDrawerButton.clock = () =>
+        DateTime.fromMillisecondsSinceEpoch(4200 * 400000000 + 100,
+            isUtc: true),
+  );
+  tearDown(() => KioskDrawerButton.clock = DateTime.now);
+
   const settings = ScheduleSettings(
     laneCount: 2,
     trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
@@ -1823,6 +1839,8 @@ void main() {
       Map<String, MatchResult> results = const {},
       bool drawerOpen = false,
       bool showNotices = true,
+      // The header's modules as the old switches had them (0082 converts
+      // them so); [header] lays them out freely.
       bool headerNotices = true,
       bool showMatches = true,
       bool showUpcoming = true,
@@ -1856,6 +1874,12 @@ void main() {
       bool animations = true,
       bool stream = false,
       bool nameday = false,
+      bool weather = false,
+      // The weather module's forecast, the admin's title for it and what
+      // it shows beside the temperature (0082; null = the default).
+      KioskWeather? forecast,
+      String? weatherTitle,
+      Set<KioskWeatherItem>? weatherItems,
       String? warning,
       bool todaysMatches = true,
       KioskZapisNav zapisNav = KioskZapisNav.bar,
@@ -1878,6 +1902,9 @@ void main() {
       // Both panels as the admin lays them out (0077); null = the layout
       // the drawer settings above convert to, as 0077 converts them.
       KioskPanels? panels,
+      // The header's modules (0082); null = what the switches above
+      // convert to.
+      KioskHeader? header,
       // Clubs' nicknames (0080); null = every name in full.
       NameDisplay? names,
     }) => ProviderScope(
@@ -1902,7 +1929,16 @@ void main() {
                   dutyDrawer: dutyDrawer,
                   dutyShare: dutyShare,
                 ),
-            kioskNoticesHeader: headerNotices,
+            kioskHeader:
+                header ??
+                kioskHeaderFromLegacy(
+                  weather: weather,
+                  nameday: nameday,
+                  dutyHeader: dutyHeader,
+                  noticesHeader: headerNotices,
+                ),
+            kioskWeatherTitle: weatherTitle,
+            kioskWeatherItems: weatherItems ?? kioskWeatherItemsDefault,
             kioskShowUpcoming: showUpcoming,
             kioskLiveMode: liveMode,
             kioskWeeksBack: weeksBack,
@@ -1923,13 +1959,11 @@ void main() {
             kioskFitDay: fitDay,
             kioskAnimations: animations,
             kioskStream: stream,
-            kioskNameday: nameday,
             kioskWarning: warning,
             kioskTodaysMatches: todaysMatches,
             kioskZapisNav: zapisNav,
             kioskStreamMax: streamMax,
             kioskStreamEnabled: streamOn,
-            kioskDutyHeader: dutyHeader,
             kioskDutyBoard: dutyBoard,
             kioskDutyBandPosition: dutyBandPosition,
           );
@@ -1978,6 +2012,7 @@ void main() {
         dutyAssignmentsProvider.overrideWith(
           (ref) => Stream.value(dutyAssignments),
         ),
+        kioskWeatherProvider.overrideWith((ref) => Stream.value(forecast)),
         if (names != null) nameDisplayProvider.overrideWith((ref) => names),
       ],
       child: const MaterialApp(home: KioskShell()),
@@ -3075,27 +3110,40 @@ void main() {
       });
     });
 
-    testWidgets('the name day sits in the status bar between the clock and '
-        '„Rezervovat“ — only when the admin wants it', (tester) async {
+    testWidgets('the name day is a module of the status bar between the '
+        'clock and „Rezervovat“, its title over the name — only when the '
+        'admin wants it', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(app(nameday: true));
       await tester.pumpAndSettle();
       // Thursday 8 October: Věra.
-      final nameday = find.text('Svátek: Věra');
+      final title = find.text('Svátek slaví:');
+      final nameday = find.text('Věra');
+      expect(title, findsOneWidget);
       expect(nameday, findsOneWidget);
       expect(
-        tester.getTopLeft(nameday).dx,
-        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+        tester.getRect(title).bottom,
+        lessThanOrEqualTo(tester.getRect(nameday).top),
       );
+      expect(tester.getRect(title).left, tester.getRect(nameday).left);
+      final clock = tester.getRect(
+        find.ancestor(
+          of: find.text('12:00'),
+          matching: find.byType(KioskHeaderModuleFrame),
+        ),
+      );
+      final module = tester.getRect(find.byType(KioskNameDayModule));
+      expect(module.left, greaterThanOrEqualTo(clock.right));
       expect(
-        tester.getTopRight(nameday).dx,
+        module.right,
         lessThan(tester.getTopLeft(find.text(kioskReserveLabel)).dx),
       );
       await finish(tester);
 
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(find.text('Svátek: Věra'), findsNothing);
+      expect(find.byType(KioskNameDayModule), findsNothing);
+      expect(find.text('Svátek slaví:'), findsNothing);
       await finish(tester);
     });
 
@@ -3158,27 +3206,653 @@ void main() {
     });
 
     testWidgets('while a warning hangs, the weather and the name day step '
-        'aside too', (tester) async {
+        'aside too — every module but the clock', (tester) async {
       fullHd(tester);
-      await tester.pumpWidget(app(nameday: true));
+      final forecast = KioskWeather(
+        temperature: 14,
+        kind: WeatherKind.clear,
+        isDay: true,
+        fetchedAt: nowAt,
+      );
+      await tester.pumpWidget(
+        app(nameday: true, weather: true, forecast: forecast),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('Svátek: Věra'), findsOneWidget);
+      expect(find.byType(KioskNameDayModule), findsOneWidget);
+      expect(find.byType(KioskWeatherModule), findsOneWidget);
       await finish(tester);
 
       await tester.pumpWidget(
-        app(nameday: true, warning: 'Dráha 3 je mimo provoz.'),
+        app(
+          nameday: true,
+          weather: true,
+          forecast: forecast,
+          warning: 'Dráha 3 je mimo provoz.',
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
-      expect(find.byType(KioskDayInfo), findsNothing);
+      expect(find.byType(KioskNameDayModule), findsNothing);
+      expect(find.byType(KioskWeatherModule), findsNothing);
+      // The clock stays: one module, the date over the time.
+      expect(find.byType(KioskHeaderModuleFrame), findsOneWidget);
+      expect(find.text('12:00'), findsOneWidget);
       await finish(tester);
+    });
+
+    group('the header\'s modules (0082)', () {
+      final forecast = KioskWeather(
+        temperature: 14,
+        kind: WeatherKind.clear,
+        isDay: true,
+        max: 16,
+        min: 7,
+        fetchedAt: nowAt,
+      );
+      final current = DutyPeriod(
+        id: 'now',
+        startsOn: Day(2026, 10, 5),
+        endsOn: Day(2026, 10, 11),
+      );
+      final serving = [
+        DutyAssignment(periodId: 'now', userId: anna.id),
+        DutyAssignment(periodId: 'now', userId: petr.id),
+      ];
+      // A home and an away match today.
+      final away = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
+        id: 'a',
+        date: day,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(21, 0),
+        homeTeam: 'Hosté',
+        awayTeam: 'Soupeř',
+        isAway: true,
+        importKey: 'cka:a',
+      );
+      final homeLabel = find.descendant(
+        of: find.byType(Wrap),
+        matching: findEmojiTextContaining('Domácí – Soupeř'),
+      );
+      final awayLabel = find.descendant(
+        of: find.byType(Wrap),
+        matching: findEmojiTextContaining('Hosté – Soupeř'),
+      );
+      Rect rectOf(WidgetTester tester, Type module) =>
+          tester.getRect(find.byType(module));
+      Rect clockOf(WidgetTester tester) => tester.getRect(
+        find.ancestor(
+          of: find.text('12:00'),
+          matching: find.byType(KioskHeaderModuleFrame),
+        ),
+      );
+
+      testWidgets('every module on: the titles on one line, the values on '
+          'the next; the left ones after the clock and the right ones '
+          'before „Rezervovat“, each side in the admin\'s order', (
+        tester,
+      ) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.right)
+            .withSide(KioskHeaderModule.notices, PanelSide.right)
+            .moved(KioskHeaderModule.nameday, -1)
+            .moved(KioskHeaderModule.notices, -1);
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: forecast,
+            weatherTitle: 'Brno',
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('m', day, 'Domácí'), away],
+            dutyPeriods: [current],
+            dutyAssignments: serving,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        final titles = [
+          'Dnes je čtvrtek 8. 10.',
+          'Svátek slaví:',
+          'Brno:',
+          'Nástěnka:',
+          'Službu mají:',
+        ];
+        final values = [
+          find.text('12:00'),
+          find.text('Věra'),
+          find.text('14°'),
+          find.descendant(
+            of: find.byType(KioskHeadline),
+            matching: find.text('Brigáda'),
+          ),
+          find.text('AA Hráč a PP Hráč'),
+        ];
+        final titleTop = tester.getRect(find.text(titles.first)).top;
+        final valueMiddle = tester.getRect(values.first).center.dy;
+        for (final t in titles) {
+          expect(
+            tester.getRect(find.text(t)).top,
+            closeTo(titleTop, 0.5),
+            reason: t,
+          );
+        }
+        for (final v in values) {
+          expect(v, findsOneWidget);
+          expect(
+            tester.getRect(v).center.dy,
+            closeTo(valueMiddle, 0.5),
+            reason: '$v',
+          );
+          expect(tester.getRect(v).top, greaterThan(titleTop));
+        }
+        // Left to right: clock, name day, weather (moved before it), the
+        // matches, the notices (moved before the duty), the duty, the
+        // button.
+        final order = [
+          clockOf(tester),
+          rectOf(tester, KioskNameDayModule),
+          rectOf(tester, KioskWeatherModule),
+          tester.getRect(find.byType(Wrap).first),
+          tester.getRect(
+            find.ancestor(
+              of: find.byType(KioskHeadline),
+              matching: find.byType(KioskHeaderModuleFrame),
+            ),
+          ),
+          rectOf(tester, KioskDutyModule),
+          tester.getRect(find.text(kioskReserveLabel)),
+        ];
+        for (var i = 1; i < order.length; i++) {
+          expect(
+            order[i].left,
+            greaterThanOrEqualTo(order[i - 1].right),
+            reason: 'item $i',
+          );
+        }
+        // Modules [kioskHeaderGap] apart.
+        expect(
+          order[1].left - order[0].right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+        expect(
+          order[2].left - order[1].right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+        expect(
+          order[5].left - order[4].right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('every value fits its box, at text scale 1 and 2: none is '
+          'cut to the box\'s height — the clock, cut so, sat lower than the '
+          'other values', (tester) async {
+        fullHd(tester);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.right)
+            .withSide(KioskHeaderModule.notices, PanelSide.right);
+        final values = {
+          'clock': find.text('12:00'),
+          'name day': find.text('Věra'),
+          'weather': find.text('14°'),
+          'notices': find.descendant(
+            of: find.byType(KioskHeadline),
+            matching: find.text('Brigáda'),
+          ),
+          'duty': find.text('AA Hráč a PP Hráč'),
+        };
+        for (final scale in [1.0, 2.0]) {
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          await tester.pumpWidget(
+            app(
+              header: header,
+              forecast: forecast,
+              notices: [notice('1', 'Brigáda')],
+              dutyPeriods: [current],
+              dutyAssignments: serving,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          for (final MapEntry(key: name, value: value) in values.entries) {
+            expect(value, findsOneWidget, reason: name);
+            final text = tester.renderObject<RenderParagraph>(
+              find.descendant(of: value, matching: find.byType(RichText)),
+            );
+            // The line its text needs, against the height it was given.
+            expect(
+              text.size.height,
+              greaterThanOrEqualTo(
+                text.getMaxIntrinsicHeight(text.size.width) - 0.01,
+              ),
+              reason: '$name at text scale $scale',
+            );
+          }
+          await finish(tester);
+        }
+      });
+
+      testWidgets('the clock is a module too: the date over the time, '
+          'always first', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(app());
+        await tester.pumpAndSettle();
+        final date = find.text('Dnes je čtvrtek 8. 10.');
+        final time = find.text('12:00');
+        expect(date, findsOneWidget);
+        expect(
+          tester.getRect(date).bottom,
+          lessThanOrEqualTo(tester.getRect(time).top),
+        );
+        expect(tester.getRect(date).left, tester.getRect(time).left);
+        // Its title in the modules' style.
+        expect(tester.widget<Text>(date).style?.fontSize, 13);
+
+        await finish(tester);
+      });
+
+      testWidgets('home and away today: the home matches on one line, the '
+          'away ones under them, both in the bar\'s middle', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí'), away]));
+        await tester.pumpAndSettle();
+        expect(homeLabel, findsOneWidget);
+        expect(awayLabel, findsOneWidget);
+        final home = tester.getRect(homeLabel);
+        final aways = tester.getRect(awayLabel);
+        expect(home.bottom, lessThanOrEqualTo(aways.top));
+        expect(home.center.dx, closeTo(aways.center.dx, 1));
+        // In the bar's middle: between the clock and „Rezervovat“.
+        expect(home.left, greaterThan(clockOf(tester).right));
+        expect(
+          home.right,
+          lessThan(tester.getRect(find.text(kioskReserveLabel)).left),
+        );
+        await finish(tester);
+
+        // Only away matches: one line, no gap above it.
+        await tester.pumpWidget(app(slots: [away]));
+        await tester.pumpAndSettle();
+        expect(homeLabel, findsNothing);
+        expect(awayLabel, findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a module with nothing to say leaves no gap: the next one '
+          'closes up', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .moved(KioskHeaderModule.nameday, 1);
+        // Weather, duty, name day — nobody serves today.
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: forecast,
+            dutyPeriods: [current],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskDutyModule), findsNothing);
+        expect(
+          rectOf(tester, KioskNameDayModule).left -
+              rectOf(tester, KioskWeatherModule).right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+        await finish(tester);
+
+        // A stale forecast: no weather module, the name day right after
+        // the clock.
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: KioskWeather(
+              temperature: 14,
+              kind: WeatherKind.clear,
+              isDay: true,
+              fetchedAt: nowAt.subtract(const Duration(hours: 4)),
+            ),
+            dutyPeriods: [current],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskWeatherModule), findsNothing);
+        expect(
+          rectOf(tester, KioskNameDayModule).left - clockOf(tester).right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+        await finish(tester);
+      });
+
+      testWidgets('neither a centre nor the notices: the right modules stay '
+          'on the right, before „Rezervovat“', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.right)
+            .withSide(KioskHeaderModule.nameday, PanelSide.right)
+            .withSide(KioskHeaderModule.notices, PanelSide.off);
+        // An open day without a match: no info line, nothing in the centre.
+        await tester.pumpWidget(app(header: header, forecast: forecast));
+        await tester.pumpAndSettle();
+        expect(find.byType(KioskHeadline), findsNothing);
+        expect(find.byType(Wrap), findsNothing);
+        expect(findEmojiTextContaining('Další trénink'), findsNothing);
+        final button = tester.getRect(find.byType(GradientButton));
+        expect(
+          rectOf(tester, KioskNameDayModule).right,
+          closeTo(button.left - 16, 0.5),
+        );
+        expect(
+          rectOf(tester, KioskNameDayModule).left -
+              rectOf(tester, KioskWeatherModule).right,
+          closeTo(kioskHeaderGap, 0.5),
+        );
+        // Not right after the clock.
+        expect(
+          rectOf(tester, KioskWeatherModule).left,
+          greaterThan(clockOf(tester).right + 200),
+        );
+        await finish(tester);
+      });
+
+      testWidgets('the weather module: the admin\'s title, „Počasí“ without '
+          'one; a tap shows the source in its place', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(app(weather: true, forecast: forecast));
+        await tester.pumpAndSettle();
+        expect(find.text(kioskWeatherTitleOf(null)), findsOneWidget);
+        expect(find.text(weatherSource), findsNothing);
+        await tester.tap(find.text('14°'));
+        await tester.pump();
+        expect(find.text(weatherSource), findsOneWidget);
+        expect(find.text(kioskWeatherTitleOf(null)), findsNothing);
+        await tester.pump(KioskWeatherModule.sourceFor);
+        await tester.pump();
+        expect(find.text(kioskWeatherTitleOf(null)), findsOneWidget);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(weather: true, forecast: forecast, weatherTitle: 'Brno'),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Brno:'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the weather shows the values the admin picked beside the '
+          'temperature; the high and low by default', (tester) async {
+        fullHd(tester);
+        final windy = KioskWeather(
+          temperature: 14,
+          kind: WeatherKind.clear,
+          isDay: true,
+          max: 16,
+          min: 7,
+          feelsLike: 11.2,
+          wind: 18,
+          gusts: 35,
+          fetchedAt: nowAt,
+        );
+        await tester.pumpWidget(app(weather: true, forecast: windy));
+        await tester.pumpAndSettle();
+        expect(find.text('16° / 7°'), findsOneWidget);
+        expect(find.textContaining('pocitově'), findsNothing);
+        expect(find.byIcon(Icons.air), findsNothing);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            weather: true,
+            forecast: windy,
+            weatherItems: {KioskWeatherItem.feels, KioskWeatherItem.wind},
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('14°'), findsOneWidget);
+        expect(find.text('16° / 7°'), findsNothing);
+        expect(find.text('pocitově 11°'), findsOneWidget);
+        expect(find.text('18 km/h, nárazy 35'), findsOneWidget);
+        // Wider than a name may be, still within its share.
+        expect(
+          rectOf(tester, KioskWeatherModule).width,
+          lessThanOrEqualTo(1920 * kioskHeaderWeatherShare),
+        );
+        await finish(tester);
+      });
+
+      testWidgets('the busiest header: every value of the weather beside '
+          'the name day, the duty, the matches and the notices — cut to '
+          'fit, the weather keeps its larger share', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.left)
+            .withSide(KioskHeaderModule.notices, PanelSide.right);
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: KioskWeather(
+              temperature: 14,
+              kind: WeatherKind.clear,
+              isDay: true,
+              max: 16,
+              min: 7,
+              feelsLike: 11.2,
+              wind: 18,
+              gusts: 35,
+              precipitationChance: 60,
+              precipitationSum: 3.2,
+              fetchedAt: nowAt,
+            ),
+            weatherTitle: 'Brno',
+            weatherItems: KioskWeatherItem.values.toSet(),
+            notices: [notice('1', 'Brigáda v sobotu od devíti')],
+            dutyPeriods: [current],
+            dutyAssignments: serving,
+            slots: [fed('m', day, 'Domácí'), away],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final weather = rectOf(tester, KioskWeatherModule);
+        final duty = rectOf(tester, KioskDutyModule);
+        // Both cut to what the centre and the notices leave: the weather,
+        // whose row scales down, gets half as much again as the duty's
+        // names — not an equal part.
+        expect(
+          tester
+              .renderObject<RenderParagraph>(
+                find.descendant(
+                  of: find.text('AA Hráč a PP Hráč'),
+                  matching: find.byType(RichText),
+                ),
+              )
+              .didExceedMaxLines,
+          isTrue,
+        );
+        expect(
+          weather.width,
+          closeTo(
+            duty.width * kioskHeaderWeatherShare / kioskHeaderModuleShare,
+            1,
+          ),
+        );
+        expect(
+          weather.width,
+          greaterThan(rectOf(tester, KioskNameDayModule).width),
+        );
+        // The centre and the notices keep their room.
+        expect(
+          tester.getRect(homeLabel).left,
+          greaterThan(weather.right),
+        );
+        expect(
+          tester.getRect(find.byType(GradientButton)).right,
+          lessThanOrEqualTo(1920),
+        );
+        await finish(tester);
+      });
+
+      testWidgets('a tap on a module shows: its ink paints on the module\'s '
+          'own Material, above the bar\'s opaque background', (tester) async {
+        fullHd(tester);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.right);
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: forecast,
+            dutyPeriods: [current],
+            dutyAssignments: serving,
+          ),
+        );
+        await tester.pumpAndSettle();
+        for (final module in [KioskWeatherModule, KioskDutyModule]) {
+          final ink = find.descendant(
+            of: find.byType(module),
+            matching: find.byType(InkWell),
+          );
+          expect(ink, findsOneWidget, reason: '$module');
+          // The Material the ink paints on is the nearest one above it; it
+          // must sit in the module, not be the Scaffold's under the bar.
+          final material = find
+              .ancestor(of: ink, matching: find.byType(Material))
+              .first;
+          expect(
+            find.descendant(of: find.byType(module), matching: material),
+            findsOneWidget,
+            reason: '$module',
+          );
+          expect(
+            tester.widget<Material>(material).type,
+            MaterialType.transparency,
+            reason: '$module',
+          );
+        }
+        await finish(tester);
+      });
+
+      testWidgets('a narrow kiosk with large text: every module on and a '
+          'home and an away match, no overflow — the modules shrink, the '
+          'names and the matches are cut, „Rezervovat“ stays whole', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(1024, 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final header = KioskHeader.defaults
+            .withSide(KioskHeaderModule.weather, PanelSide.left)
+            .withSide(KioskHeaderModule.nameday, PanelSide.left)
+            .withSide(KioskHeaderModule.duty, PanelSide.left)
+            .withSide(KioskHeaderModule.notices, PanelSide.right);
+        await tester.pumpWidget(
+          app(
+            header: header,
+            forecast: forecast,
+            weatherTitle: 'Brno',
+            notices: [notice('1', 'Brigáda v sobotu od devíti')],
+            dutyPeriods: [current],
+            dutyAssignments: [
+              for (final p in players)
+                DutyAssignment(periodId: 'now', userId: p.id),
+            ],
+            slots: [fed('m', day, 'Domácí'), away],
+          ),
+        );
+        // The board's day header, listing the matches too, runs out of
+        // height at this text size — as it did before 0082; only what the
+        // header lays out counts here.
+        final errors = <FlutterErrorDetails>[];
+        final reported = FlutterError.onError;
+        FlutterError.onError = errors.add;
+        try {
+          await tester.pumpAndSettle();
+        } finally {
+          FlutterError.onError = reported;
+        }
+        expect(
+          [
+            for (final e in errors)
+              if (!e.toString().contains('calendar_board.dart')) e.toString(),
+          ],
+          isEmpty,
+        );
+        // Each match keeps one line, cut, home over away.
+        for (final label in [homeLabel, awayLabel]) {
+          expect(
+            tester
+                .renderObject<RenderParagraph>(
+                  find.descendant(of: label, matching: find.byType(RichText)),
+                )
+                .didExceedMaxLines,
+            isTrue,
+            reason: '$label',
+          );
+        }
+        expect(
+          tester.getRect(homeLabel).bottom,
+          lessThanOrEqualTo(tester.getRect(awayLabel).top),
+        );
+        final button = tester.getRect(find.byType(GradientButton));
+        expect(button.right, lessThanOrEqualTo(1024));
+        for (final (module, share) in [
+          (KioskWeatherModule, kioskHeaderWeatherShare),
+          (KioskNameDayModule, kioskHeaderModuleShare),
+          (KioskDutyModule, kioskHeaderModuleShare),
+        ]) {
+          final rect = rectOf(tester, module);
+          expect(
+            rect.width,
+            lessThanOrEqualTo(1024 * share),
+            reason: '$module',
+          );
+          expect(rect.right, lessThan(button.left), reason: '$module');
+        }
+        for (final names in [
+          find.textContaining('AA Hráč, BB Hráč'),
+          find.text('Věra'),
+        ]) {
+          expect(
+            tester
+                .renderObject<RenderParagraph>(
+                  find.descendant(of: names, matching: find.byType(RichText)),
+                )
+                .didExceedMaxLines,
+            isTrue,
+            reason: '$names',
+          );
+        }
+        // The titles still share their line.
+        expect(
+          tester.getRect(find.text('Svátek slaví:')).top,
+          closeTo(tester.getRect(find.text('Dnes je čtvrtek 8. 10.')).top, 0.5),
+        );
+        await finish(tester);
+      });
     });
 
     testWidgets('today\'s matches in the status bar: there by default; '
         'switched off, the bar reads as on a day without a match — the '
         'warning still wins', (tester) async {
       fullHd(tester);
-      // The status bar's match list is its only Wrap.
+      // The status bar's match lines (home, away) are its only Wraps.
       final inBar = find.descendant(
         of: find.byType(Wrap),
         matching: findEmojiTextContaining('Domácí – Soupeř'),
@@ -3979,12 +4653,21 @@ void main() {
       expect(inDrawer('Prvníci'), isTrue);
       expect(inDrawer('Druzí'), isFalse);
 
-      // Settling already ran the clock a few seconds; turn is 6 s.
-      await tester.pump(const Duration(seconds: 2));
+      // A touch in the view starts the turn over: from here on the clock
+      // is the test's alone. (Settling ran it for however long the panel
+      // buttons' breath took — they keep the wall clock's beat — and a
+      // settle after the turn could even run past the next one.)
+      final touch = await tester.startGesture(
+        tester.getCenter(find.byType(KioskPanelView)),
+      );
+      await touch.cancel();
+      await tester.pump(const Duration(milliseconds: 5900));
       expect(inDrawer('Druzí'), isFalse);
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+      // The turn (6 s), then the 380 ms swap.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(inDrawer('Druzí'), isTrue);
+      expect(inDrawer('Prvníci'), isFalse);
 
       await finish(tester);
     });
@@ -5941,10 +6624,21 @@ void main() {
       expect(inBar('Zámek'), findsOneWidget);
       expect(inBar('1/2'), findsOneWidget);
       expect(find.textContaining('Skryté'), findsNothing);
+      // A module: under its title „Nástěnka:“, starting where it starts.
+      final title = find.text('Nástěnka:');
+      expect(title, findsOneWidget);
+      expect(
+        tester.getRect(title).bottom,
+        lessThanOrEqualTo(tester.getRect(bar).top),
+      );
+      expect(
+        tester.getRect(find.byIcon(Icons.campaign_outlined)).left,
+        closeTo(tester.getRect(title).left, 1),
+      );
       // Left of „Rezervovat“.
       expect(
-        tester.getCenter(bar).dx,
-        lessThan(tester.getCenter(find.text(kioskReserveLabel)).dx),
+        tester.getRect(bar).right,
+        lessThan(tester.getRect(find.text(kioskReserveLabel)).left),
       );
 
       // Within one turn (settling already ran part of the clock) it fades
@@ -6505,15 +7199,18 @@ void main() {
         for (var i = 0; i < 6; i++) assign('w$i', players[i + 1]),
         assign('over', players[25]),
       ];
-      final line = find.text('Služba: AA Hráč a PP Hráč');
+      // The header's module: who serves today, under „Službu mají:“.
+      final line = find.descendant(
+        of: find.byType(KioskDutyModule),
+        matching: find.text('AA Hráč a PP Hráč'),
+      );
       final dialog = find.byType(AlertDialog);
       Finder inDialog(String t) =>
           find.descendant(of: dialog, matching: find.text(t));
       const nothingAhead = 'Další služby zatím nejsou naplánované.';
 
-      testWidgets('„V záhlaví“: who serves today, under the date', (
-        tester,
-      ) async {
+      testWidgets('in the header: who serves today, a module beside the '
+          'clock — „Službu mají:“ over the names', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -6524,27 +7221,66 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(line, findsOneWidget);
-        expect(
-          find.descendant(
-            of: find.byType(KioskDutyLine),
-            matching: find.byIcon(Icons.local_cafe_outlined),
-          ),
-          findsOneWidget,
+        final title = find.descendant(
+          of: find.byType(KioskDutyModule),
+          matching: find.text('Službu mají:'),
         );
-        final date = find.text(dayFull(day)).first;
+        expect(title, findsOneWidget);
         expect(
-          tester.getRect(line).top,
-          greaterThanOrEqualTo(tester.getRect(date).bottom),
+          tester.getRect(title).bottom,
+          lessThanOrEqualTo(tester.getRect(line).top),
+        );
+        expect(tester.getRect(title).left, tester.getRect(line).left);
+        // Beside the clock, not under its date; the title on the date's
+        // line, the names on the time's.
+        final date = find.text('Dnes je čtvrtek 8. 10.');
+        final clock = find.ancestor(
+          of: date,
+          matching: find.byType(KioskHeaderModuleFrame),
         );
         expect(
-          tester.getRect(find.byType(KioskDutyLine)).left,
-          tester.getRect(date).left,
+          tester.getRect(find.byType(KioskDutyModule)).left,
+          greaterThanOrEqualTo(tester.getRect(clock).right),
+        );
+        expect(
+          tester.getRect(title).top,
+          closeTo(tester.getRect(date).top, 0.5),
+        );
+        expect(
+          tester.getRect(line).center.dy,
+          closeTo(tester.getRect(find.text('12:00')).center.dy, 0.5),
         );
 
         await finish(tester);
       });
 
-      testWidgets('while a warning hangs, the duty\'s line steps aside too',
+      testWidgets('one on duty: „Službu má:“', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyHeader: true,
+            dutyPeriods: periods,
+            dutyAssignments: [
+              for (final a in assignments)
+                if (a.periodId != 'now' || a.userId == petr.id) a,
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Službu má:'), findsOneWidget);
+        expect(find.text('Službu mají:'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDutyModule),
+            matching: find.text(petr.displayName),
+          ),
+          findsOneWidget,
+        );
+
+        await finish(tester);
+      });
+
+      testWidgets('while a warning hangs, the duty\'s module steps aside too',
           (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
@@ -6557,11 +7293,11 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
-        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.byType(KioskDutyModule), findsNothing);
         await finish(tester);
       });
 
-      testWidgets('the mode off, or nobody serving today: no line', (
+      testWidgets('the module off, or nobody serving today: no module', (
         tester,
       ) async {
         fullHd(tester);
@@ -6569,8 +7305,8 @@ void main() {
           app(dutyPeriods: periods, dutyAssignments: assignments),
         );
         await tester.pumpAndSettle();
-        expect(find.byType(KioskDutyLine), findsNothing);
-        expect(find.textContaining('Služba:'), findsNothing);
+        expect(find.byType(KioskDutyModule), findsNothing);
+        expect(find.textContaining('službu'), findsNothing);
         await finish(tester);
 
         // Today's period without anyone on it says nothing either.
@@ -6585,15 +7321,14 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byType(KioskDutyLine), findsNothing);
-        expect(find.textContaining('Služba:'), findsNothing);
+        expect(find.byType(KioskDutyModule), findsNothing);
+        expect(find.textContaining('službu'), findsNothing);
 
         await finish(tester);
       });
 
-      testWidgets('a long line stays one line, cut, at most 420 px wide', (
-        tester,
-      ) async {
+      testWidgets('a long list of names stays one line, cut, at most a fifth '
+          'of the screen wide', (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -6603,13 +7338,21 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        final text = find.textContaining('Služba: AA Hráč, BB Hráč');
+        final text = find.textContaining('AA Hráč, BB Hráč');
         expect(text, findsOneWidget);
         expect(tester.widget<Text>(text).maxLines, 1);
         expect(tester.widget<Text>(text).overflow, TextOverflow.ellipsis);
         expect(
-          tester.getSize(find.byType(KioskDutyLine)).width,
-          lessThanOrEqualTo(420),
+          tester
+              .renderObject<RenderParagraph>(
+                find.descendant(of: text, matching: find.byType(RichText)),
+              )
+              .didExceedMaxLines,
+          isTrue,
+        );
+        expect(
+          tester.getSize(find.byType(KioskDutyModule)).width,
+          lessThanOrEqualTo(1920 * kioskHeaderModuleShare),
         );
 
         await finish(tester);
@@ -6776,8 +7519,8 @@ void main() {
           bandLabelRun(tester, bbBand).left,
           closeTo(stripOn(tester, monday).left + 6, 0.01),
         );
-        // Only the band: the status bar's line is the other switch.
-        expect(find.byType(KioskDutyLine), findsNothing);
+        // Only the band: the header's module is placed elsewhere.
+        expect(find.byType(KioskDutyModule), findsNothing);
         await finish(tester);
 
         // A one-day duty: one piece, its first day and its last.
@@ -7394,8 +8137,8 @@ void main() {
           tester.getRect(cardTitled(dutyTitle)).bottom,
           lessThan(tester.getRect(cardTitled('NÁSTĚNKA')).top),
         );
-        // Only the card: the line and the band are switches of their own.
-        expect(find.byType(KioskDutyLine), findsNothing);
+        // Only the card: the module and the band are placed on their own.
+        expect(find.byType(KioskDutyModule), findsNothing);
         expect(find.byType(BoardBand), findsNothing);
 
         await finish(tester);
