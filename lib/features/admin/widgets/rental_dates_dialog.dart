@@ -125,15 +125,14 @@ class _RentalDatesDialogState extends ConsumerState<RentalDatesDialog> {
 
   Widget _tile(BuildContext context, RentalGroup live, Rental d, Day now) {
     final date = d.date!;
-    // A date that has passed stays on the list for the record; there is
-    // nothing left to change about it.
+    // A date that has passed stays on the list for the record. The admin may
+    // still correct it (as from the calendar), but not delete it.
     final past = date.isBefore(now);
     final when =
         '${d.startsAt.display()}–${d.endsAt.display()} · '
         'dráhy ${d.lanes.join(', ')}';
     final note = d.note.trim();
     return ListTile(
-      enabled: !past,
       contentPadding: EdgeInsets.zero,
       title: Text(dayFull(date)),
       // The note under the time and lanes, its own lines kept — as the

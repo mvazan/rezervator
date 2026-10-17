@@ -125,7 +125,7 @@ void main() {
   }
 
   testWidgets('lists the dates chronologically with lanes, times and note; '
-      'a past date is shown but inert', (tester) async {
+      'a past date is shown without delete', (tester) async {
     await open(tester, rows);
     expect(find.text('Termíny · Firma Trak'), findsOneWidget);
     expect(find.text(dayFull(past)), findsOneWidget);
@@ -138,9 +138,6 @@ void main() {
       tester.getTopLeft(find.text(dayFull(past))).dy,
       lessThan(tester.getTopLeft(find.text(dayFull(next))).dy),
     );
-    final pastTile = tester.widget<ListTile>(find.ancestor(
-        of: find.text(dayFull(past)), matching: find.byType(ListTile)));
-    expect(pastTile.enabled, isFalse);
     expect(find.text('Přidat termín'), findsOneWidget);
     expect(find.text('Zavřít'), findsOneWidget);
   });
@@ -167,6 +164,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Upravit termín'), findsOneWidget);
     expect(find.text('bez rozbrusu'), findsOneWidget);
+  });
+
+  testWidgets('a past date opens for editing too', (tester) async {
+    await open(tester, rows);
+    await tester.tap(find.text(dayFull(past)));
+    await tester.pumpAndSettle();
+    expect(find.text('Upravit termín'), findsOneWidget);
   });
 
   testWidgets('deleting a date confirms and deletes just that row',
