@@ -1,5 +1,15 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- file_saver 0.4+ asks for writing (Android 9 and older), and the
+         manifest merger implies reading from it; the CSV export saves into
+         the app's own directory and needs no storage access. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:node="remove"/>
     <application
         android:label="Rezervátor"
         android:name="${applicationName}"
