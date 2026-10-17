@@ -49,31 +49,29 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '17. 10. 2026', [
-    'Správa → Pronájmy: minulý termín nepravidelného pronájmu jde upravit '
-        'i ze seznamu termínů, stejně jako z kalendáře.',
+  Release('2.0.10', '17. 10. 2026', [
+    'Správa → Oddíly → Ostatní oddíly: přezdívku jde dát i soupeřům — '
+        'oddílům, které na naší kuželně nejsou doma. Appka ji pak ukazuje '
+        'v názvech jejich družstev („TJ Sokol Husovice E“ → „Husovice E“), '
+        'v kalendáři, na kiosku i v Google Kalendáři.',
     'Kiosk: dny na tabuli zůstávají zarovnané do sloupců i po změně počtu '
         'dní nebo šířky obrazovky — dnešek není useknutý a po nečinnosti se '
         'tabule vrátí s dneškem v prvním sloupci, ať je levý panel otevřený, '
         'nebo ne.',
     'Kiosk: seznam zápasů v panelu sleduje dny, které tabule ukazuje, i když '
         'se po posunu otevře nebo zavře panel.',
-    'Správa → Oddíly → Ostatní oddíly: přezdívku jde dát i soupeřům — '
-        'oddílům, které na naší kuželně nejsou doma. Appka ji pak ukazuje '
-        'v názvech jejich družstev („TJ Sokol Husovice E“ → „Husovice E“), '
-        'v kalendáři, na kiosku i v Google Kalendáři.',
+    'Správa → Pronájmy: minulý termín nepravidelného pronájmu jde upravit '
+        'i ze seznamu termínů, stejně jako z kalendáře.',
+    'Napište nám: když se zprávu nepodaří doručit, aplikace to řekne, místo '
+        'aby hlásila, že odešla.',
   ], store: [
-    'Pronájmy: minulý termín nepravidelného pronájmu jde upravit i ze '
-        'seznamu termínů.',
-    'Kiosk: dny na tabuli drží sloupce, dnešek je po nečinnosti zase první; '
-        'seznam zápasů sleduje, co tabule ukazuje.',
     'Oddíly: přezdívku jde dát i soupeřům, appka ji ukazuje v názvech '
         'jejich družstev.',
-  ]),
-  Release(null, '16. 10. 2026', [
-    'Napište nám: když se zprávu nepodaří doručit (třeba když blokovač '
-        'reklam v prohlížeči zastaví odeslání), aplikace to řekne, místo '
-        'aby hlásila, že odešla.',
+    'Kiosk: dny na tabuli drží sloupce, dnešek je po nečinnosti zase první; '
+        'seznam zápasů sleduje, co tabule ukazuje.',
+    'Pronájmy: minulý termín nepravidelného pronájmu jde upravit i ze '
+        'seznamu termínů.',
+    'Napište nám: nedoručená zpráva už nehlásí, že odešla.',
   ]),
   Release('2.0.9', '16. 10. 2026', [
     'Kiosk, záhlaví: každý údaj má nahoře nadpis a pod ním hodnotu, všechny '
