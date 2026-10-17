@@ -37,6 +37,9 @@ void main() {
     Future<void> Function(Team team,
             {required String name, String? clubId, required bool active})?
         updateTeam,
+    List<Venue> venues = const [],
+    List<ClubNickname> nicknames = const [],
+    Future<void> Function(String name, String? nickname)? setOtherNickname,
   }) =>
       ProviderScope(
         overrides: [
@@ -46,6 +49,8 @@ void main() {
               (ref) => teamsStream?.call() ?? Stream.value(teams)),
           federationSyncProvider
               .overrideWith((ref) => syncStream ?? Stream.value(sync)),
+          venuesProvider.overrideWith((ref) => Stream.value(venues)),
+          clubNicknamesProvider.overrideWith((ref) => Stream.value(nicknames)),
         ],
         child: MaterialApp(
           home: ClubsScreen(
@@ -55,6 +60,7 @@ void main() {
             syncProgress: () async => FederationSyncProgress.idle,
             updateTeam: updateTeam ??
                 (_, {required String name, String? clubId, required bool active}) async {},
+            setOtherNickname: setOtherNickname ?? (_, _) async {},
           ),
         ),
       );
@@ -526,6 +532,172 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(capturedName, 'x' * 80);
+    });
+  });
+
+  group('other clubs\' nicknames (0083)', () {
+    final venues = [
+      Venue(
+        id: 'v1',
+        slug: 'brno',
+        name: 'Brno',
+        clubs: const ['Veverky', 'TJ Sokol Husovice', 'KK Blansko'],
+        fetchedAt: DateTime(2026, 10, 17),
+      ),
+    ];
+    const husovice = ClubNickname(
+      id: 'n1',
+      name: 'TJ Sokol Husovice',
+      nickname: 'Husovice',
+    );
+    final others = find.text('Ostatní oddíly');
+
+    Future<void> open(WidgetTester tester) async {
+      await tester.ensureVisible(others);
+      await tester.tap(others);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('folded under „Ostatní oddíly“: the clubs at the alleys we '
+        'play at, ours left out, each with its nickname or none', (
+      tester,
+    ) async {
+      await pumpApp(
+        tester,
+        app(clubs, venues: venues, nicknames: const [husovice]),
+      );
+      expect(others, findsOneWidget);
+      expect(find.text('Soupeři — s přezdívkou: 1'), findsOneWidget);
+      expect(find.text('KK Blansko'), findsNothing);
+
+      await open(tester);
+      expect(find.text('KK Blansko'), findsOneWidget);
+      expect(find.text('TJ Sokol Husovice'), findsOneWidget);
+      expect(find.text('Přezdívka: Husovice'), findsOneWidget);
+      // Veverky is ours: its nickname lives on its own row above.
+      expect(find.text('Veverky'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('KK Blansko')).dy,
+        lessThan(tester.getTopLeft(find.text('TJ Sokol Husovice')).dy),
+      );
+      expect(find.text('Přidat jiný oddíl'), findsOneWidget);
+    });
+
+    testWidgets('a club from the list saves its nickname by its name; '
+        '„Odebrat přezdívku“ removes it', (tester) async {
+      final saved = <(String, String?)>[];
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          venues: venues,
+          nicknames: const [husovice],
+          setOtherNickname: (name, nickname) async =>
+              saved.add((name, nickname)),
+        ),
+      );
+      await open(tester);
+
+      await tester.tap(find.text('KK Blansko'));
+      await tester.pumpAndSettle();
+      expect(find.text('Přezdívka oddílu'), findsOneWidget);
+      // The name is fixed; the example follows it.
+      expect(
+        find.textContaining('„KK Blansko B“ → „přezdívka B“'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        ' Blansko ',
+      );
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(saved, [('KK Blansko', 'Blansko')]);
+      expect(find.byType(AlertDialog), findsNothing);
+
+      await tester.tap(find.text('TJ Sokol Husovice'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odebrat přezdívku'));
+      await tester.pumpAndSettle();
+      expect(saved.last, ('TJ Sokol Husovice', null));
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Přezdívka odebrána.'), findsOneWidget);
+    });
+
+    testWidgets('„Přidat jiný oddíl“: a typed name and a nickname, neither '
+        'empty', (tester) async {
+      final saved = <(String, String?)>[];
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          setOtherNickname: (name, nickname) async =>
+              saved.add((name, nickname)),
+        ),
+      );
+      await open(tester);
+      await tester.tap(find.text('Přidat jiný oddíl'));
+      await tester.pumpAndSettle();
+      expect(find.text('Jiný oddíl'), findsOneWidget);
+
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Vyplň název oddílu.'), findsOneWidget);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Název oddílu'),
+        'TJ Lokomotiva Brno',
+      );
+      await tester.pump();
+      expect(
+        find.textContaining('„TJ Lokomotiva Brno B“ → „přezdívka B“'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Vyplň přezdívku.'), findsOneWidget);
+      expect(saved, isEmpty);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Přezdívka'),
+        'Lokomotiva',
+      );
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(saved, [('TJ Lokomotiva Brno', 'Lokomotiva')]);
+    });
+
+    testWidgets('a refused save (one of our clubs) says why and keeps the '
+        'dialog open', (tester) async {
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          setOtherNickname: (_, _) async =>
+              throw Exception('P0001: own_club'),
+        ),
+      );
+      await open(tester);
+      await tester.tap(find.text('Přidat jiný oddíl'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Název oddílu'),
+        'Veverky',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Přezdívka'),
+        'Vev',
+      );
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Tohle je náš oddíl — přezdívku mu dej v seznamu oddílů výš.'),
+        findsOneWidget,
+      );
+      expect(find.byType(AlertDialog), findsOneWidget);
     });
   });
 }

@@ -1316,4 +1316,65 @@ void main() {
       expect(names.title(blockage), 'TJ Sokol Brno IV brigáda');
     });
   });
+
+  group('other clubs\' nicknames (0083)', () {
+    test('ClubNickname reads its row, trimmed', () {
+      final n = ClubNickname.fromJson(
+        {'id': 'n', 'name': ' TJ Sokol Husovice ', 'nickname': ' Husovice '},
+      );
+      expect(n.name, 'TJ Sokol Husovice');
+      expect(n.nickname, 'Husovice');
+    });
+
+    const husovice = ClubNickname(
+      id: 'h',
+      name: 'TJ Sokol Husovice',
+      nickname: 'Husovice',
+    );
+    final own = Club(id: 's', name: 'TJ Sokol Brno IV', nickname: 'Sokol IV');
+
+    test('an opponent\'s team reads with its club\'s nickname, beside the '
+        'own clubs\'', () {
+      final names = NameDisplay([own], [husovice]);
+      expect(names.team('TJ Sokol Husovice E'), 'Husovice E');
+      expect(names.team('TJ Sokol Husovice'), 'Husovice');
+      expect(names.team('TJ Sokol Husovicex A'), 'TJ Sokol Husovicex A');
+      expect(names.team('TJ Sokol Brno IV B'), 'Sokol IV B');
+      final match = PrioritySlot(
+        id: 'm',
+        date: Day(2026, 10, 15),
+        startsAt: const HourMinute(17, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'TJ Sokol Brno IV B',
+        awayTeam: 'TJ Sokol Husovice E',
+      );
+      expect(names.title(match), 'Sokol IV B – Husovice E');
+    });
+
+    test('the longest name wins whoever has it; as long, the own club\'s', () {
+      // A longer opponent's name beats a shorter own one it begins with.
+      final brno = Club(id: 'b', name: 'TJ Sokol', nickname: 'Sokol');
+      final longer = NameDisplay([brno], [husovice]);
+      expect(longer.team('TJ Sokol Husovice B'), 'Husovice B');
+      expect(longer.team('TJ Sokol C'), 'Sokol C');
+      // The same name both ways: the own club's nickname.
+      const clash = ClubNickname(
+        id: 'x',
+        name: 'TJ Sokol Brno IV',
+        nickname: 'Cizí',
+      );
+      for (final names in [
+        NameDisplay([own], [clash]),
+        NameDisplay([own, brno], [clash, husovice]),
+      ]) {
+        expect(names.team('TJ Sokol Brno IV A'), 'Sokol IV A');
+      }
+    });
+
+    test('nicknames of other clubs alone, no own club with one', () {
+      final names = NameDisplay(const [], [husovice]);
+      expect(names.team('TJ Sokol Husovice D'), 'Husovice D');
+    });
+  });
 }
