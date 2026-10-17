@@ -6476,6 +6476,62 @@ void main() {
       });
     }
 
+    testWidgets('the days stay on their grid when the columns change width '
+        '(another screen width, the admin\'s number of days): today whole at '
+        'the board\'s left edge, the days after it a column apart, and the '
+        'idle reset brings today back there', (tester) async {
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        app(
+          pastDays: 7,
+          panelEnabled: true,
+          notices: [notice('1', 'Brigáda')],
+          fitDay: false,
+          visibleDays: 6,
+          idleSeconds: 30,
+        ),
+      );
+      await tester.pumpAndSettle();
+      Rect header(String text) => tester.getRect(
+        find.ancestor(
+          of: find.text(text),
+          matching: find.byType(BoardColumnHeader),
+        ),
+      );
+      Rect body(int day) => tester.getRect(
+        find.byWidgetPredicate(
+          (w) => w is ScheduleDayColumn && w.day.date.day == day,
+        ),
+      );
+      void onGrid(String reason) {
+        final today = header('DNES · čt 8.10.');
+        expect(today.left, closeTo(calendarRulerWidth, 0.5), reason: reason);
+        // The day columns keep 2 px on each side.
+        expect(body(8).left, closeTo(today.left + 2, 0.5), reason: reason);
+        expect(
+          header('pá 9.10.').left,
+          closeTo(today.left + today.width, 0.5),
+          reason: reason,
+        );
+        expect(body(9).left, closeTo(today.right + 2, 0.5), reason: reason);
+      }
+
+      onGrid('as it opens');
+      for (final width in [1920.0, 1366.0, 1600.0]) {
+        tester.view.physicalSize = Size(width, 900);
+        await tester.pumpAndSettle();
+        onGrid('$width px');
+      }
+      await tester.drag(find.byType(ListView).last, const Offset(-700, 0));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      onGrid('after the idle reset');
+      await finish(tester);
+    });
+
     testWidgets('a match band on the board stacks the cup with the time, '
         'then home, x and away, so no team name breaks in half', (
       tester,
