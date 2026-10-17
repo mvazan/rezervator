@@ -13655,6 +13655,48 @@ begin
   raise notice 'OK: the other clubs'' nicknames read in team_shown and the calendar, an own club''s first, every change queued (0083)';
 end $$;
 
+-- 0083: an own club without a nickname keeps its teams' names even where
+-- another club's shorter name begins them; another club that becomes ours
+-- (added, renamed, linked by discovery) takes its nickname along and its
+-- row goes.
+do $$
+declare
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_club uuid;
+  v_nick text;
+begin
+  insert into clubs (tenant_id, name) values (v_tenant, 'KK Moravská Slavia Brno');
+  insert into club_nicknames (tenant_id, name, nickname)
+  values (v_tenant, 'KK Moravská', 'Morava');
+  if team_shown(v_tenant, 'KK Moravská Slavia Brno B') <> 'KK Moravská Slavia Brno B'
+     or team_shown(v_tenant, 'KK Moravská C') <> 'Morava C' then
+    raise exception 'FAIL: another club''s shorter name renamed an own club''s team (0083)';
+  end if;
+
+  insert into club_nicknames (tenant_id, name, nickname)
+  values (v_tenant, 'TJ Sokol Kutná Hora', 'Kutná');
+  insert into clubs (tenant_id, name) values (v_tenant, 'TJ Sokol Kutná Hora')
+  returning id, nickname into v_club, v_nick;
+  if v_nick is distinct from 'Kutná'
+     or exists (select 1 from club_nicknames
+                 where tenant_id = v_tenant and name = 'TJ Sokol Kutná Hora') then
+    raise exception 'FAIL: a new own club did not take the other club''s nickname (0083): %', v_nick;
+  end if;
+
+  -- Linked by discovery (site_name): a club with a nickname of its own
+  -- keeps it, the row goes all the same.
+  insert into club_nicknames (tenant_id, name, nickname)
+  values (v_tenant, 'TJ Sokol Kutná Hora B-tým', 'Kutná B');
+  update clubs set site_name = 'TJ Sokol Kutná Hora B-tým' where id = v_club
+  returning nickname into v_nick;
+  if v_nick is distinct from 'Kutná'
+     or exists (select 1 from club_nicknames
+                 where tenant_id = v_tenant and name = 'TJ Sokol Kutná Hora B-tým') then
+    raise exception 'FAIL: linking an own club with a nickname mishandled the other club''s row (0083): %', v_nick;
+  end if;
+  raise notice 'OK: an own club keeps its teams'' names; another club that becomes ours takes its nickname along (0083)';
+end $$;
+
 -- The admin sets, changes and removes one through set_club_nickname; an
 -- own club's name is refused; another alley does not see it; a player who
 -- is not an admin may not.
@@ -13696,6 +13738,12 @@ begin
   perform set_club_nickname('KK Konstruktiva Praha', '  ');
   if exists (select 1 from club_nicknames where name = 'KK Konstruktiva Praha') then
     raise exception 'FAIL: a blank nickname did not remove it (0083)';
+  end if;
+  -- A row under an own club's name (from before the club was ours) can
+  -- still be removed.
+  perform set_club_nickname('TJ Lokomotiva', null);
+  if exists (select 1 from club_nicknames where name = 'TJ Lokomotiva') then
+    raise exception 'FAIL: a row under an own club''s name could not be removed (0083)';
   end if;
 end $$;
 set local request.jwt.claims =

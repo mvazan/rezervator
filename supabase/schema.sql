@@ -1272,6 +1272,34 @@ $$;
 ALTER FUNCTION "public"."club_nicknames_enqueue_calendar"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."clubs_adopt_nickname"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_names text[] := array[btrim(new.name), btrim(new.site_name)];
+  v_nick text;
+begin
+  select n.nickname into v_nick
+    from club_nicknames n
+   where n.tenant_id = new.tenant_id and n.name = any(v_names)
+   order by (n.name = btrim(new.site_name)) desc nulls last
+   limit 1;
+  if v_nick is not null then
+    if new.nickname is null then
+      new.nickname := v_nick;
+    end if;
+    delete from club_nicknames n
+     where n.tenant_id = new.tenant_id and n.name = any(v_names);
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."clubs_adopt_nickname"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."clubs_enqueue_calendar"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -4598,18 +4626,18 @@ begin
   if char_length(v_nick) > 30 then
     raise exception 'club_nickname_too_long';
   end if;
+  if v_nick is null then
+    delete from club_nicknames where tenant_id = v_tenant and name = v_name;
+    return;
+  end if;
   if exists (select 1 from clubs c
               where c.tenant_id = v_tenant
                 and v_name in (btrim(c.name), btrim(c.site_name))) then
     raise exception 'own_club';
   end if;
-  if v_nick is null then
-    delete from club_nicknames where tenant_id = v_tenant and name = v_name;
-  else
-    insert into club_nicknames (tenant_id, name, nickname)
-    values (v_tenant, v_name, v_nick)
-    on conflict (tenant_id, name) do update set nickname = excluded.nickname;
-  end if;
+  insert into club_nicknames (tenant_id, name, nickname)
+  values (v_tenant, v_name, v_nick)
+  on conflict (tenant_id, name) do update set nickname = excluded.nickname;
 end;
 $$;
 
@@ -5110,11 +5138,11 @@ CREATE OR REPLACE FUNCTION "public"."team_shown"("p_tenant" "uuid", "p_team" "te
   select coalesce((
     select p.nickname || substr(p_team, char_length(p.prefix) + 1)
       from (
-        select btrim(c.nickname) as nickname, x.prefix, 0 as rank, c.id::text as tie
+        select coalesce(btrim(c.nickname), x.prefix) as nickname, x.prefix,
+               0 as rank, c.id::text as tie
           from clubs c
           cross join lateral (values (btrim(c.site_name)), (btrim(c.name))) x(prefix)
          where c.tenant_id = p_tenant
-           and c.nickname is not null
         union all
         select n.nickname, n.name, 1, n.name
           from club_nicknames n
@@ -6609,6 +6637,10 @@ CREATE OR REPLACE TRIGGER "club_nicknames_enqueue_calendar" AFTER INSERT OR DELE
 
 
 
+CREATE OR REPLACE TRIGGER "clubs_adopt_nickname" BEFORE INSERT OR UPDATE OF "name", "site_name" ON "public"."clubs" FOR EACH ROW EXECUTE FUNCTION "public"."clubs_adopt_nickname"();
+
+
+
 CREATE OR REPLACE TRIGGER "clubs_enqueue_calendar" AFTER DELETE OR UPDATE ON "public"."clubs" FOR EACH ROW EXECUTE FUNCTION "public"."clubs_enqueue_calendar"();
 
 
@@ -7469,6 +7501,11 @@ GRANT ALL ON FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid
 
 REVOKE ALL ON FUNCTION "public"."club_nicknames_enqueue_calendar"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."club_nicknames_enqueue_calendar"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."clubs_adopt_nickname"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."clubs_adopt_nickname"() TO "service_role";
 
 
 

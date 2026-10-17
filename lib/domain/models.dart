@@ -333,16 +333,18 @@ class ClubNickname {
 /// theirs ([Club.nickname]), the other clubs' come as [others] (0083).
 /// Display only: the app keys matches, follows, colours and calendars by
 /// the stored names, never by these. A name no nickname starts is shown
-/// as it is.
+/// as it is — and so is a team of an own club without one, even where
+/// another club's shorter name begins it.
 class NameDisplay {
   NameDisplay(
     Iterable<Club> clubs, [
     Iterable<ClubNickname> others = const [],
   ]) : _prefixes = _longestFirst([
+         // Every own club, one without a nickname as itself (0083).
          for (final c in clubs)
-           if (c.nickname case final nick?)
-             for (final prefix in {?c.siteName, c.name})
-               if (prefix.trim().isNotEmpty) (prefix.trim(), nick),
+           for (final prefix in {?c.siteName, c.name})
+             if (prefix.trim().isNotEmpty)
+               (prefix.trim(), c.nickname ?? prefix.trim()),
          // After the own clubs: on a prefix as long, an own club's wins —
          // as team_shown (0083).
          for (final o in others)

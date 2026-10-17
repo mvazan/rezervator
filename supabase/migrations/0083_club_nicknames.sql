@@ -47,9 +47,10 @@ $$;
 -- ---------------------------------------------------------------------------
 -- set_club_nickname: the admin's one write
 -- ---------------------------------------------------------------------------
--- [p_name]'s nickname; null or blank removes it. An own club's names (its
--- name or its name on the federation's site) are refused: that club has
--- its nickname on its own row (0080).
+-- [p_name]'s nickname; null or blank removes it — always, whatever the
+-- name. An own club's names (its name or its name on the federation's
+-- site) are refused for a nickname: that club has it on its own row
+-- (0080).
 create or replace function set_club_nickname(p_name text, p_nickname text)
 returns void
 language plpgsql security definer set search_path = public
@@ -71,18 +72,18 @@ begin
   if char_length(v_nick) > 30 then
     raise exception 'club_nickname_too_long';
   end if;
+  if v_nick is null then
+    delete from club_nicknames where tenant_id = v_tenant and name = v_name;
+    return;
+  end if;
   if exists (select 1 from clubs c
               where c.tenant_id = v_tenant
                 and v_name in (btrim(c.name), btrim(c.site_name))) then
     raise exception 'own_club';
   end if;
-  if v_nick is null then
-    delete from club_nicknames where tenant_id = v_tenant and name = v_name;
-  else
-    insert into club_nicknames (tenant_id, name, nickname)
-    values (v_tenant, v_name, v_nick)
-    on conflict (tenant_id, name) do update set nickname = excluded.nickname;
-  end if;
+  insert into club_nicknames (tenant_id, name, nickname)
+  values (v_tenant, v_name, v_nick)
+  on conflict (tenant_id, name) do update set nickname = excluded.nickname;
 end;
 $$;
 revoke all on function set_club_nickname(text, text) from public, anon;
@@ -92,9 +93,10 @@ grant execute on function set_club_nickname(text, text) to authenticated;
 -- team_shown: the other clubs' nicknames too
 -- ---------------------------------------------------------------------------
 -- As 0080, with club_nicknames' names as prefixes beside the own clubs'
--- names and site names. The longest matching prefix wins; on a tie the own
--- club's (set_club_nickname refuses those names, but a club renamed later
--- could meet one). Keep in step with NameDisplay (lib/domain/models.dart).
+-- names and site names. Every own club takes part, one without a nickname
+-- as itself: its teams keep their names even where another club's shorter
+-- name begins them. The longest matching prefix wins; on a tie the own
+-- club's. Keep in step with NameDisplay (lib/domain/models.dart).
 create or replace function team_shown(p_tenant uuid, p_team text)
 returns text
 language sql stable set search_path = public
@@ -102,11 +104,11 @@ as $$
   select coalesce((
     select p.nickname || substr(p_team, char_length(p.prefix) + 1)
       from (
-        select btrim(c.nickname) as nickname, x.prefix, 0 as rank, c.id::text as tie
+        select coalesce(btrim(c.nickname), x.prefix) as nickname, x.prefix,
+               0 as rank, c.id::text as tie
           from clubs c
           cross join lateral (values (btrim(c.site_name)), (btrim(c.name))) x(prefix)
          where c.tenant_id = p_tenant
-           and c.nickname is not null
         union all
         select n.nickname, n.name, 1, n.name
           from club_nicknames n
@@ -172,3 +174,40 @@ revoke all on function club_nicknames_enqueue_calendar() from public, anon, auth
 create or replace trigger club_nicknames_enqueue_calendar
   after insert or update or delete on club_nicknames
   for each row execute function club_nicknames_enqueue_calendar();
+
+-- ---------------------------------------------------------------------------
+-- Another club that becomes ours takes its nickname along
+-- ---------------------------------------------------------------------------
+-- Discovery links or creates the alley's clubs (0047), and the admin adds
+-- and renames them: a club whose name or site name has a club_nicknames row
+-- is the alley's own from then on. Its nickname moves onto the club (unless
+-- the club has one already) and the row goes — it could neither be removed
+-- nor shown under Ostatní oddíly any more.
+create or replace function clubs_adopt_nickname()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_names text[] := array[btrim(new.name), btrim(new.site_name)];
+  v_nick text;
+begin
+  select n.nickname into v_nick
+    from club_nicknames n
+   where n.tenant_id = new.tenant_id and n.name = any(v_names)
+   order by (n.name = btrim(new.site_name)) desc nulls last
+   limit 1;
+  if v_nick is not null then
+    if new.nickname is null then
+      new.nickname := v_nick;
+    end if;
+    delete from club_nicknames n
+     where n.tenant_id = new.tenant_id and n.name = any(v_names);
+  end if;
+  return new;
+end;
+$$;
+revoke all on function clubs_adopt_nickname() from public, anon, authenticated;
+
+create or replace trigger clubs_adopt_nickname
+  before insert or update of name, site_name on clubs
+  for each row execute function clubs_adopt_nickname();

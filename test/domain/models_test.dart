@@ -1372,6 +1372,39 @@ void main() {
       }
     });
 
+    test('an own club without a nickname keeps its teams\' names, even where '
+        'another club\'s shorter name begins them', () {
+      const slavia = Club(id: 'm', name: 'KK Moravská Slavia Brno');
+      const morava = ClubNickname(
+        id: 'n',
+        name: 'KK Moravská',
+        nickname: 'Morava',
+      );
+      final names = NameDisplay([slavia, own], [morava]);
+      expect(names.team('KK Moravská Slavia Brno B'), 'KK Moravská Slavia Brno B');
+      expect(names.team('KK Moravská C'), 'Morava C');
+    });
+
+    test('on a tie the own club\'s, among many names as long', () {
+      const clash = ClubNickname(
+        id: 'x',
+        name: 'TJ Sokol Brno IV',
+        nickname: 'Cizí',
+      );
+      // As long as the clash, ahead and behind it in the list.
+      final decoys = [
+        for (var i = 0; i < 40; i++)
+          ClubNickname(
+            id: 'd$i',
+            name: 'TJ Decoy ${i.toString().padLeft(2, '0')} xxxx',
+            nickname: 'D$i',
+          ),
+      ];
+      expect('TJ Decoy 00 xxxx'.length, 'TJ Sokol Brno IV'.length);
+      final names = NameDisplay([own], [...decoys, clash, ...decoys.reversed]);
+      expect(names.team('TJ Sokol Brno IV A'), 'Sokol IV A');
+    });
+
     test('nicknames of other clubs alone, no own club with one', () {
       final names = NameDisplay(const [], [husovice]);
       expect(names.team('TJ Sokol Husovice D'), 'Husovice D');
