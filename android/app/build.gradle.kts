@@ -3,8 +3,8 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // Kotlin is built into AGP 9 (android.builtInKotlin=true): no
+    // kotlin-android plugin. The Flutter Gradle Plugin comes after Android.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
