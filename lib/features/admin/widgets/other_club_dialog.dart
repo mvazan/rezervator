@@ -26,9 +26,15 @@ class OtherClubDialog extends StatefulWidget {
   State<OtherClubDialog> createState() => _OtherClubDialogState();
 }
 
+/// The dialog's field width; a narrow phone gives it less.
+const double _fieldWidth = 360;
+
 class _OtherClubDialogState extends State<OtherClubDialog> {
   final _name = TextEditingController();
   final _nickname = TextEditingController();
+
+  /// A save or a removal is on its way: neither button starts another.
+  bool _busy = false;
 
   @override
   void initState() {
@@ -58,23 +64,31 @@ class _OtherClubDialogState extends State<OtherClubDialog> {
       snack(context, 'Vyplň přezdívku.');
       return null;
     }
+    setState(() => _busy = true);
     final ok = await tryAction(
       context,
       () => widget.save(name, nickname.isEmpty ? null : nickname),
       success: nickname.isEmpty ? 'Přezdívka odebrána.' : 'Uloženo.',
       errorText: friendlyDbError,
     );
+    if (!ok && mounted) setState(() => _busy = false);
     return ok ? true : null;
   }
 
   Future<void> _remove() async {
+    setState(() => _busy = true);
     final ok = await tryAction(
       context,
       () => widget.save(_clubName, null),
       success: 'Přezdívka odebrána.',
       errorText: friendlyDbError,
     );
-    if (ok && mounted) closeDialog(context, true);
+    if (!mounted) return;
+    if (ok) {
+      closeDialog(context, true);
+    } else {
+      setState(() => _busy = false);
+    }
   }
 
   @override
@@ -83,10 +97,11 @@ class _OtherClubDialogState extends State<OtherClubDialog> {
     return FormDialog<bool>(
       title: widget.name == null ? 'Jiný oddíl' : 'Přezdívka oddílu',
       onSave: _save,
+      saveEnabled: !_busy,
       leadingActions: [
         if (widget.nickname != null)
           TextButton(
-            onPressed: _remove,
+            onPressed: _busy ? null : _remove,
             child: const Text('Odebrat přezdívku'),
           ),
       ],
@@ -107,18 +122,23 @@ class _OtherClubDialogState extends State<OtherClubDialog> {
             ),
           ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _nickname,
-          autofocus: widget.name != null,
-          maxLength: 30,
-          decoration: InputDecoration(
-            labelText: 'Přezdívka',
-            helperText: name.isEmpty
-                ? 'Krátké jméno, které appka ukazuje místo názvu — i v '
-                      'názvech družstev.'
-                : 'Krátké jméno, které appka ukazuje místo názvu — i v '
-                      'názvech družstev: „$name B“ → „přezdívka B“.',
-            helperMaxLines: 3,
+        // Wide enough for the example under it, whatever the name; a
+        // narrow phone gives it less.
+        SizedBox(
+          width: _fieldWidth,
+          child: TextField(
+            controller: _nickname,
+            autofocus: widget.name != null,
+            maxLength: 30,
+            decoration: InputDecoration(
+              labelText: 'Přezdívka',
+              helperText: name.isEmpty
+                  ? 'Krátké jméno, které appka ukazuje místo názvu — i v '
+                        'názvech družstev.'
+                  : 'Krátké jméno, které appka ukazuje místo názvu — i v '
+                        'názvech družstev: „$name B“ → „přezdívka B“.',
+              helperMaxLines: 3,
+            ),
           ),
         ),
       ],

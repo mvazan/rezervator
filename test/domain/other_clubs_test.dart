@@ -50,4 +50,46 @@ void main() {
       ['TJ Sokol Husovice'],
     );
   });
+
+  test('the opponents of our matches by their team without its letter, '
+      'each spelling once; our own teams and clubs left out', () {
+    PrioritySlot match(String home, String away, {bool away_ = false}) =>
+        PrioritySlot(
+          id: '$home-$away',
+          date: Day(2026, 10, 17),
+          startsAt: const HourMinute(10, 0),
+          endsAt: const HourMinute(13, 0),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: home,
+          awayTeam: away,
+          isAway: away_,
+        );
+    final names = otherClubNames(
+      venues: const [],
+      clubs: const [Club(id: 'v', name: 'SKK Veverky Brno')],
+      nicknames: const [],
+      matches: [
+        match('SKK Veverky Brno A', 'KK Moravská Slavia Brno B'),
+        match('KK Moravská Slávia Brno G', 'SKK Veverky Brno C', away_: true),
+        match('SKK Veverky Brno A', 'Viktoria Zlín'),
+        // A derby: both ours.
+        match('SKK Veverky Brno A', 'SKK Veverky Brno C'),
+        // An úklid or a blockage is no opponent.
+        PrioritySlot(
+          id: 'b',
+          date: Day(2026, 10, 18),
+          startsAt: const HourMinute(9, 0),
+          endsAt: const HourMinute(10, 0),
+          type: const PrioritySlotType(id: 't', name: 'Brigáda'),
+          awayTeam: 'Brigádníci B',
+        ),
+      ],
+      ourTeams: const ['SKK Veverky Brno A', 'SKK Veverky Brno C'],
+    );
+    expect(names, [
+      'KK Moravská Slavia Brno',
+      'KK Moravská Slávia Brno',
+      'Viktoria Zlín',
+    ]);
+  });
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,6 +41,8 @@ void main() {
         updateTeam,
     List<Venue> venues = const [],
     List<ClubNickname> nicknames = const [],
+    List<PrioritySlot> matches = const [],
+    List<String> ourTeams = const [],
     Future<void> Function(String name, String? nickname)? setOtherNickname,
   }) =>
       ProviderScope(
@@ -50,6 +54,8 @@ void main() {
           federationSyncProvider
               .overrideWith((ref) => syncStream ?? Stream.value(sync)),
           venuesProvider.overrideWith((ref) => Stream.value(venues)),
+          prioritySlotsProvider.overrideWithValue(matches),
+          ourTeamsProvider.overrideWithValue(ourTeams),
           clubNicknamesProvider.overrideWith((ref) => Stream.value(nicknames)),
         ],
         child: MaterialApp(
@@ -625,6 +631,86 @@ void main() {
       expect(saved.last, ('TJ Sokol Husovice', null));
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('Přezdívka odebrána.'), findsOneWidget);
+    });
+
+    testWidgets('the opponents of our matches are listed too, by their team '
+        'without its letter', (tester) async {
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          matches: [
+            PrioritySlot(
+              id: 'm',
+              date: Day(2026, 10, 17),
+              startsAt: const HourMinute(10, 0),
+              endsAt: const HourMinute(13, 0),
+              type: PrioritySlot.fallbackMatchType,
+              homeTeam: 'Veverky A',
+              awayTeam: 'TJ Lokomotiva Brno B',
+            ),
+          ],
+          ourTeams: const ['Veverky A'],
+        ),
+      );
+      await open(tester);
+      expect(find.text('TJ Lokomotiva Brno'), findsOneWidget);
+      expect(find.text('Veverky A'), findsNothing);
+    });
+
+    testWidgets('an emptied nickname saved removes it', (tester) async {
+      final saved = <(String, String?)>[];
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          venues: venues,
+          nicknames: const [husovice],
+          setOtherNickname: (name, nickname) async =>
+              saved.add((name, nickname)),
+        ),
+      );
+      await open(tester);
+      await tester.tap(find.text('TJ Sokol Husovice'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Přezdívka'),
+        '   ',
+      );
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(saved, [('TJ Sokol Husovice', null)]);
+      expect(find.text('Přezdívka odebrána.'), findsOneWidget);
+    });
+
+    testWidgets('while a save runs, neither Uložit nor „Odebrat přezdívku“ '
+        'starts another', (tester) async {
+      final pending = Completer<void>();
+      var calls = 0;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          venues: venues,
+          nicknames: const [husovice],
+          setOtherNickname: (_, _) {
+            calls++;
+            return pending.future;
+          },
+        ),
+      );
+      await open(tester);
+      await tester.tap(find.text('TJ Sokol Husovice'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odebrat přezdívku'));
+      await tester.pump();
+      await tester.tap(find.text('Odebrat přezdívku'));
+      await tester.tap(find.text('Uložit'), warnIfMissed: false);
+      await tester.pump();
+      expect(calls, 1);
+      pending.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
     });
 
     testWidgets('„Přidat jiný oddíl“: a typed name and a nickname, neither '

@@ -103,8 +103,8 @@ class ClubsScreen extends ConsumerWidget {
       );
 
   /// The other clubs (0083): the opponents the federation's site lists at
-  /// the alleys our teams play at, and those given a nickname by hand —
-  /// folded away, there can be dozens of them.
+  /// the alleys our teams play at, those of our matches, and those given a
+  /// nickname by hand — folded away, there can be dozens of them.
   Widget _others(
     BuildContext context,
     List<String> names,
@@ -114,11 +114,10 @@ class ClubsScreen extends ConsumerWidget {
       key: const ValueKey('other-clubs'),
       tilePadding: const EdgeInsets.symmetric(horizontal: 16),
       title: const Text('Ostatní oddíly'),
-      subtitle: Text(
-        nicknames.isEmpty
-            ? 'Soupeři — i jejich družstvům jde dát přezdívka.'
-            : 'Soupeři — s přezdívkou: ${nicknames.length}',
-      ),
+      subtitle: Text(switch (names.where(nicknames.containsKey).length) {
+        0 => 'Soupeři — i jejich družstvům jde dát přezdívka.',
+        final n => 'Soupeři — s přezdívkou: $n',
+      }),
       children: [
         for (final name in names)
           ListTile(
@@ -191,6 +190,8 @@ class ClubsScreen extends ConsumerWidget {
             venues: ref.watch(venuesProvider).value ?? const <Venue>[],
             clubs: clubs,
             nicknames: nicknames,
+            matches: ref.watch(prioritySlotsProvider),
+            ourTeams: ref.watch(ourTeamsProvider),
           );
           final unassigned = [
             for (final team in teams)
