@@ -7023,31 +7023,27 @@ void main() {
         await finish(tester);
       });
 
-      testWidgets('the match list follows the days the board shows, not '
-          'those a panel takes: closing the left panel after a scroll brings '
-          'the days it gave back into the list too', (tester) async {
-        fullHd(tester);
-        await tester.pumpWidget(
-          app(
-            notices: [notice('1', 'Brigáda')],
-            slots: [
-              for (var i = 0; i <= 12; i++)
-                for (var k = 1; k <= 3; k++)
-                  fed('d$i-$k', day.addDays(i), 'D$i-$k '),
-            ],
-            weeksAhead: 2,
-            panels: split
-                .withPanel(PanelSide.left, open: true)
-                .withPanel(PanelSide.right, open: true),
-          ),
+      group('the match list follows the days the board shows, not those a '
+          'panel takes', () {
+        // Eight matches a day: two days of them do not fit the list.
+        Widget kiosk() => app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [
+            for (var i = 0; i <= 12; i++)
+              for (var k = 1; k <= 8; k++)
+                fed('d$i-$k', day.addDays(i), 'D$i-$k '),
+          ],
+          weeksAhead: 2,
+          panels: split
+              .withPanel(PanelSide.left, open: true)
+              .withPanel(PanelSide.right, open: true),
         );
-        await tester.pumpAndSettle();
-        final list = find.descendant(
+        Finder list() => find.descendant(
           of: panelOn(PanelSide.right),
           matching: find.byType(CustomScrollView),
         );
-        bool visible(String t) {
-          final box = tester.getRect(list);
+        bool visible(WidgetTester tester, String t) {
+          final box = tester.getRect(list());
           final f = find.descendant(
             of: panelOn(PanelSide.right),
             matching: find.textContaining(t),
@@ -7057,21 +7053,87 @@ void main() {
           return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
         }
 
+        double listAt(WidgetTester tester) => tester
+            .state<ScrollableState>(
+              find.descendant(of: list(), matching: find.byType(Scrollable)),
+            )
+            .position
+            .pixels;
         // Seven days less two panels of two: three on the board. A day
-        // forward shows days 1–3, the list follows to day 3.
-        await tester.dragFrom(
-          Offset(2 * column + 200, 600),
-          const Offset(-column * 0.7 - 18, 0),
-        );
-        await tester.pumpAndSettle();
-        expect(visible('D3-3 '), isTrue);
-        expect(visible('D5-3 '), isFalse);
+        // forward shows days 1–3.
+        Future<void> dayForward(WidgetTester tester) async {
+          await tester.dragFrom(
+            Offset(2 * column + 200, 600),
+            const Offset(-column * 0.7 - 18, 0),
+          );
+          await tester.pumpAndSettle();
+        }
 
-        // The left panel closed: two more days on the board, 1–5.
-        await tester.tap(button('Skrýt levý panel'));
-        await tester.pumpAndSettle();
-        expect(visible('D5-3 '), isTrue);
-        await finish(tester);
+        testWidgets('closing the left panel after a scroll brings the days '
+            'it gave back into the list, the first of them on top when they '
+            'do not all fit', (tester) async {
+          fullHd(tester);
+          await tester.pumpWidget(kiosk());
+          await tester.pumpAndSettle();
+          expect(visible(tester, 'D3-8 '), isFalse);
+          await dayForward(tester);
+          expect(visible(tester, 'D3-8 '), isTrue);
+          expect(visible(tester, 'D4-1 '), isFalse);
+
+          // Days 1–5 on the board: 4 and 5 came into view, told once the
+          // panel has stopped — day by day, day 4's first matches would
+          // scroll off again for day 5's.
+          await tester.tap(button('Skrýt levý panel'));
+          await tester.pumpAndSettle();
+          expect(visible(tester, 'D4-1 '), isTrue);
+          await finish(tester);
+        });
+
+        testWidgets('the panels stepping aside for a pick leave the list '
+            'where the visitor scrolled it', (tester) async {
+          fullHd(tester);
+          await tester.pumpWidget(kiosk());
+          await tester.pumpAndSettle();
+          await dayForward(tester);
+          final scrolled = listAt(tester);
+
+          await tester.tap(find.text(kioskReserveLabel));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('A'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(players.first.displayName));
+          await tester.pumpAndSettle();
+          expect(width(tester, PanelSide.left), 0);
+          await tester.tap(find.byTooltip('Zrušit výběr'));
+          await tester.pumpAndSettle();
+          expect(listAt(tester), scrolled);
+          expect(visible(tester, 'D3-8 '), isTrue);
+          await finish(tester);
+        });
+
+        testWidgets('before a visitor scrolls, and again after the idle '
+            'reset, a panel opened or closed leaves the list be', (
+          tester,
+        ) async {
+          fullHd(tester);
+          await tester.pumpWidget(kiosk());
+          await tester.pumpAndSettle();
+          final opened = listAt(tester);
+          await tester.tap(button('Skrýt levý panel'));
+          await tester.pumpAndSettle();
+          expect(listAt(tester), opened, reason: 'nobody scrolled yet');
+          await tester.tap(button('Zobrazit levý panel'));
+          await tester.pumpAndSettle();
+
+          await dayForward(tester);
+          await tester.pump(const Duration(seconds: 61));
+          await tester.pumpAndSettle();
+          final reset = listAt(tester);
+          await tester.tap(button('Skrýt levý panel'));
+          await tester.pumpAndSettle();
+          expect(listAt(tester), reset, reason: 'after the idle reset');
+          await finish(tester);
+        });
       });
 
       testWidgets('a match being played takes over the panel holding the '

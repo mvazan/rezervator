@@ -86,6 +86,11 @@ class _KioskShellState extends ConsumerState<KioskShell>
 
   /// The days a visitor scrolled the board to; null = never (or reset).
   ({Day first, Day last})? _boardDays;
+
+  /// A visitor's tap has a panel sliding: once it stops, the board says
+  /// which days it shows now. Not for the panels stepping aside for a
+  /// pick, nor for the idle reset putting them back.
+  bool _visitorSlide = false;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
   /// The display, held (screen on, bars hidden) for as long as the shell is
@@ -139,6 +144,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
       _selected = null;
       _drawerOverride.clear();
       _boardDays = null;
+      _visitorSlide = false;
       _liveHidden = false;
       _resets++;
     });
@@ -157,7 +163,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
     );
     if (!mounted) return;
     setState(() {
-      if (picked != null) _selected = picked;
+      if (picked != null) {
+        _selected = picked;
+        _visitorSlide = false;
+      }
     });
   }
 
@@ -405,6 +414,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     }
     void toggle(PanelSide side, bool open) => setState(() {
       _drawerOverride[side] = !open;
+      _visitorSlide = true;
       // Where only one fits, at most one panel is shown open and a tap
       // always leaves the other one shut: opening one closes the other, and
       // hiding the one shown must not let the other (resting open too, only
@@ -446,6 +456,13 @@ class _KioskShellState extends ConsumerState<KioskShell>
           onOpenFeedback: _openFeedback,
           onPlay: play,
           resetToken: _resets,
+          // A panel the visitor opened or closed gives the board days or
+          // takes them: the list of matches follows what is left in view.
+          onSlideEnd: () {
+            if (!_visitorSlide) return;
+            _visitorSlide = false;
+            _boardKey.currentState?.reportVisibleDays();
+          },
           showLive: !(holdsMatches && _liveHidden),
           onShowLive: holdsMatches
               ? (live) => setState(() => _liveHidden = !live)
