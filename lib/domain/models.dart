@@ -304,27 +304,72 @@ String clubNameOf(String? clubId, Iterable<Club> clubs) {
   return '';
 }
 
+/// A nickname for a club that is not the alley's own (0083) — an
+/// opponent's: [name] as it starts its teams' names (on the federation's
+/// site), [nickname] what the app shows instead, as [Club.nickname] does
+/// for the alley's own clubs.
+class ClubNickname {
+  const ClubNickname({
+    required this.id,
+    required this.name,
+    required this.nickname,
+  });
+
+  final String id;
+  final String name;
+  final String nickname;
+
+  factory ClubNickname.fromJson(Map<String, dynamic> json) => ClubNickname(
+    id: json['id'] as String,
+    name: (json['name'] as String).trim(),
+    nickname: (json['nickname'] as String).trim(),
+  );
+}
+
 /// What the app shows for a club's and a team's name (0080): a club's
 /// nickname instead of its name, and instead of the start of its teams'
 /// names — the club's name on the federation's site, or its own name —
-/// „TJ Sokol Brno IV B“ → „Sokol IV B“. Display only: the app keys
-/// matches, follows, colours and calendars by the stored names, never by
-/// these. A name no club with a nickname starts is shown as it is (a
-/// team of another alley, a club without a nickname).
+/// „TJ Sokol Brno IV B“ → „Sokol IV B“. The alley's own clubs carry
+/// theirs ([Club.nickname]), the other clubs' come as [others] (0083).
+/// Display only: the app keys matches, follows, colours and calendars by
+/// the stored names, never by these. A name no nickname starts is shown
+/// as it is — and so is a team of an own club without one, even where
+/// another club's shorter name begins it.
 class NameDisplay {
-  NameDisplay(Iterable<Club> clubs)
-    : _prefixes = [
-        for (final c in clubs)
-          if (c.nickname case final nick?)
-            for (final prefix in {?c.siteName, c.name})
-              if (prefix.trim().isNotEmpty) (prefix.trim(), nick),
-      ]..sort((a, b) => b.$1.length.compareTo(a.$1.length));
+  NameDisplay(
+    Iterable<Club> clubs, [
+    Iterable<ClubNickname> others = const [],
+  ]) : _prefixes = _longestFirst([
+         // Every own club, one without a nickname as itself (0083).
+         for (final c in clubs)
+           for (final prefix in {?c.siteName, c.name})
+             if (prefix.trim().isNotEmpty)
+               (prefix.trim(), c.nickname ?? prefix.trim()),
+         // After the own clubs: on a prefix as long, an own club's wins —
+         // as team_shown (0083).
+         for (final o in others)
+           if (o.name.trim().isNotEmpty) (o.name.trim(), o.nickname),
+       ]);
+
+  /// [prefixes] longest first; equally long ones keep their order (a
+  /// plain sort need not).
+  static List<(String, String)> _longestFirst(
+    List<(String, String)> prefixes,
+  ) {
+    final indexed = prefixes.indexed.toList()
+      ..sort((a, b) {
+        final byLength = b.$2.$1.length.compareTo(a.$2.$1.length);
+        return byLength != 0 ? byLength : a.$1.compareTo(b.$1);
+      });
+    return [for (final (_, prefix) in indexed) prefix];
+  }
 
   /// No nicknames: every name as it is.
   static final none = NameDisplay(const []);
 
   /// (the start a nickname replaces, the nickname), the longest first — a
-  /// club's site name before a shorter own name it begins with.
+  /// club's site name before a shorter own name it begins with — and an
+  /// own club's before another club's as long.
   final List<(String, String)> _prefixes;
 
   /// [team] with its club's nickname for the club's name at its start.

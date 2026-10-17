@@ -428,14 +428,27 @@ final clubsProvider = StreamProvider<List<Club>>((ref) {
         ..sort((a, b) => compareCzech(a.shown, b.shown)));
 });
 
+/// Nicknames for the clubs that are not the alley's own (0083), the
+/// opponents', Czech-sorted by the club's name.
+final clubNicknamesProvider = StreamProvider<List<ClubNickname>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'club_nicknames',
+          () => _db.from('club_nicknames').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(ClubNickname.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.name, b.name)));
+});
+
 /// What the app shows for club and team names (0080): the clubs'
 /// nicknames in place of their names and of the start of their teams'
-/// names. None where no club has one — and on the public overview, which
-/// reads no clubs.
+/// names — the alley's own clubs' and the other clubs' (0083). None where
+/// there is none — and on the public overview, which reads neither.
 final nameDisplayProvider = Provider<NameDisplay>((ref) {
   final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
-  return clubs.any((c) => c.nickname != null)
-      ? NameDisplay(clubs)
+  final others =
+      ref.watch(clubNicknamesProvider).value ?? const <ClubNickname>[];
+  return clubs.any((c) => c.nickname != null) || others.isNotEmpty
+      ? NameDisplay(clubs, others)
       : NameDisplay.none;
 });
 
@@ -950,6 +963,14 @@ class Api {
 
   static Future<void> deleteClub(String id) =>
       _db.rpc('delete_club', params: {'p_id': id});
+
+  /// The nickname of a club that is not the alley's own (0083), by the
+  /// club's name; null or blank removes it.
+  static Future<void> setOtherClubNickname(String name, String? nickname) =>
+      _db.rpc('set_club_nickname', params: {
+        'p_name': name,
+        'p_nickname': nickname,
+      });
 
   // --- admin: federation sync (0045) ---
   static Future<void> setFederationSync({
@@ -2525,6 +2546,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(profilesProvider);
   ref.invalidate(settingsProvider);
   ref.invalidate(clubsProvider);
+  ref.invalidate(clubNicknamesProvider);
   ref.invalidate(teamsProvider);
   ref.invalidate(federationSyncProvider);
   ref.invalidate(matchResultsProvider);

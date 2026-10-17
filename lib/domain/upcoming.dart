@@ -128,17 +128,21 @@ List<(PrioritySlot, bool)> overruledMatches(
 ///
 /// [query] is searched by words ([matchesWords]) within ONE team name or the
 /// description: „Veverky A“ finds that team (home or away), not the B team
-/// and not a match of Veverky B against another A.
+/// and not a match of Veverky B against another A. A team's name counts as
+/// stored and as [names] shows it — a club's nickname finds it too
+/// (0080/0083).
 List<PrioritySlot> upcomingMatches({
   required List<PrioritySlot> slots,
   required Day today,
   String query = '',
+  NameDisplay? names,
 }) {
   bool hit(String s) => matchesWords(s, query, teamLetter: true);
+  bool team(String t) => hit(t) || (names != null && hit(names.team(t)));
   return [
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
-        if (hit(s.homeTeam) || hit(s.awayTeam) || hit(s.description)) s,
+        if (team(s.homeTeam) || team(s.awayTeam) || hit(s.description)) s,
   ]..sort((a, b) => compareDayTime(a.date, a.startsAt, b.date, b.startsAt));
 }
 

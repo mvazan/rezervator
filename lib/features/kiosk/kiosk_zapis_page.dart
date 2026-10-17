@@ -467,11 +467,13 @@ class _Bar extends StatelessWidget {
     return widest.ceilToDouble() + 2;
   }
 
+  // Shown with the club's nickname (0080/0083), again when it changes; the
+  // tap still names the team.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ShownNames(builder: _build);
+
+  Widget _build(BuildContext context, NameDisplay names) {
     final scheme = Theme.of(context).colorScheme;
-    // Shown with the club's nickname (0080); the tap still names the team.
-    final names = shownNamesNow(context);
     Widget team(String name, double maxWidth) => ConstrainedBox(
       constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
       child: OutlinedButton(
@@ -617,9 +619,10 @@ class _TeamMatchesState extends State<_TeamMatches> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ShownNames(builder: _build);
+
+  Widget _build(BuildContext context, NameDisplay names) {
     final team = widget.team;
-    final names = shownNamesNow(context);
     final matches = widget.matches;
     final results = widget.results;
     return Padding(

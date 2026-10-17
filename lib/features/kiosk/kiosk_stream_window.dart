@@ -553,15 +553,15 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
+  Widget build(BuildContext context) => ShownNames(
+    // The teams as the app shows them: a club's nickname (0080/0083).
+    builder: (context, names) => LayoutBuilder(
     builder: (context, constraints) {
       _area = Size(constraints.maxWidth, constraints.maxHeight);
       final rect = _rect = _fit(_rect ?? _initial(_area), _area);
       final shown = _shown;
       // The provider lets only matches with a YouTube id through.
       final videoId = youtubeVideoId(shown.videoUrl ?? '')!;
-      // The teams as the app shows them: a club's nickname (0080).
-      final names = shownNamesNow(context);
       final title =
           '${names.team(shown.homeTeam)} – ${names.team(shown.awayTeam)}';
       final frame = _maximized ? Offset.zero & _area : rect;
@@ -692,6 +692,7 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
         ],
       );
     },
+  ),
   );
 }
 

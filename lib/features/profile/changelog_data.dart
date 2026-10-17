@@ -58,6 +58,17 @@ const appChangelog = <Release>[
         'nebo ne.',
     'Kiosk: seznam zápasů v panelu sleduje dny, které tabule ukazuje, i když '
         'se po posunu otevře nebo zavře panel.',
+    'Správa → Oddíly → Ostatní oddíly: přezdívku jde dát i soupeřům — '
+        'oddílům, které na naší kuželně nejsou doma. Appka ji pak ukazuje '
+        'v názvech jejich družstev („TJ Sokol Husovice E“ → „Husovice E“), '
+        'v kalendáři, na kiosku i v Google Kalendáři.',
+  ], store: [
+    'Pronájmy: minulý termín nepravidelného pronájmu jde upravit i ze '
+        'seznamu termínů.',
+    'Kiosk: dny na tabuli drží sloupce, dnešek je po nečinnosti zase první; '
+        'seznam zápasů sleduje, co tabule ukazuje.',
+    'Oddíly: přezdívku jde dát i soupeřům, appka ji ukazuje v názvech '
+        'jejich družstev.',
   ]),
   Release(null, '16. 10. 2026', [
     'Napište nám: když se zprávu nepodaří doručit (třeba když blokovač '

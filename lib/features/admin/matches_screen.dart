@@ -30,10 +30,12 @@ class MatchesScreen extends ConsumerWidget {
   Widget _tile(
       BuildContext context, PrioritySlot slot, List<PrioritySlotType> types) {
     return ListTile(
-      title: Text(
-        '${dayLabel(slot.date)} · '
-        '${slot.startsAt.display()}–${slot.endsAt.display()} · '
-        '${shownNamesNow(context).title(slot)}',
+      title: ShownNames(
+        builder: (context, names) => Text(
+          '${dayLabel(slot.date)} · '
+          '${slot.startsAt.display()}–${slot.endsAt.display()} · '
+          '${names.title(slot)}',
+        ),
       ),
       subtitle: switch ([
         // Whose row this is: the federation's own results service, the old

@@ -98,8 +98,11 @@ class GapEventBanner extends StatelessWidget {
   /// tappable (a blockage, a rental, or no match links on this screen).
   final VoidCallback? onTap;
 
+  // Drawn with the names as shown, again when they change (0080/0083).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ShownNames(builder: _build);
+
+  Widget _build(BuildContext context, NameDisplay names) {
     final scheme = Theme.of(context).colorScheme;
     final (background, foreground) = switch (event) {
       OffBlockPriority(:final slot) => clubTint(
@@ -111,7 +114,7 @@ class GapEventBanner extends StatelessWidget {
           fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
           fallbackFg: scheme.onTertiaryContainer),
     };
-    final text = eventBandLabel(event, names: shownNamesNow(context));
+    final text = eventBandLabel(event, names: names);
     final banner = Container(
       constraints: const BoxConstraints(minHeight: 36),
       alignment: Alignment.center,

@@ -4,16 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/other_clubs.dart';
 import 'widgets/admin_scaffold.dart';
 import 'widgets/club_dialog.dart';
 import 'widgets/federation_card.dart';
 import 'widgets/form_fields.dart';
+import 'widgets/other_club_dialog.dart';
 import 'widgets/team_dialog.dart';
 
 /// Admin: manage clubs (oddíly) — list + add/edit/delete, each backed by
 /// [Api.upsertClub]/[Api.deleteClub] — and, above them, the ČKA results
 /// service (0045): its own sync settings plus the teams it discovered,
-/// grouped under the club each is assigned to.
+/// grouped under the club each is assigned to. Below them the other clubs
+/// — the opponents — for their nicknames (0083).
 class ClubsScreen extends ConsumerWidget {
   const ClubsScreen({
     super.key,
@@ -22,6 +25,7 @@ class ClubsScreen extends ConsumerWidget {
     this.syncNow = Api.requestFederationSync,
     this.syncProgress = Api.federationSyncProgress,
     this.updateTeam = _defaultUpdateTeam,
+    this.setOtherNickname = Api.setOtherClubNickname,
   });
 
   /// Injectable so widget tests can drive the ČKA card and team dialog
@@ -32,6 +36,7 @@ class ClubsScreen extends ConsumerWidget {
   final Future<FederationSyncProgress> Function() syncProgress;
   final Future<void> Function(Team team,
       {required String name, String? clubId, required bool active}) updateTeam;
+  final Future<void> Function(String name, String? nickname) setOtherNickname;
 
   static Future<void> _defaultSaveFederation(String venueSlug, bool enabled) =>
       Api.setFederationSync(venueSlug: venueSlug, enabled: enabled);
@@ -83,6 +88,58 @@ class ClubsScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _editOther(
+    BuildContext context, {
+    String? name,
+    String? nickname,
+  }) =>
+      showDialog<bool>(
+        context: context,
+        builder: (_) => OtherClubDialog(
+          name: name,
+          nickname: nickname,
+          save: setOtherNickname,
+        ),
+      );
+
+  /// The other clubs (0083): the opponents the federation's site lists at
+  /// the alleys our teams play at, those of our matches, and those given a
+  /// nickname by hand — folded away, there can be dozens of them.
+  Widget _others(
+    BuildContext context,
+    List<String> names,
+    Map<String, String> nicknames,
+  ) {
+    return ExpansionTile(
+      key: const ValueKey('other-clubs'),
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+      title: const Text('Ostatní oddíly'),
+      subtitle: Text(switch (names.where(nicknames.containsKey).length) {
+        0 => 'Soupeři — i jejich družstvům jde dát přezdívka.',
+        final n => 'Soupeři — s přezdívkou: $n',
+      }),
+      children: [
+        for (final name in names)
+          ListTile(
+            title: Text(name),
+            subtitle: Text(
+              nicknames[name] == null
+                  ? 'Bez přezdívky'
+                  : 'Přezdívka: ${nicknames[name]}',
+            ),
+            trailing: const Icon(Icons.edit_outlined),
+            onTap: () =>
+                _editOther(context, name: name, nickname: nicknames[name]),
+          ),
+        ListTile(
+          leading: const Icon(Icons.add),
+          title: const Text('Přidat jiný oddíl'),
+          onTap: () => _editOther(context),
+        ),
+      ],
+    );
+  }
+
   Future<void> _editTeam(BuildContext context, Team team, List<Club> clubs) =>
       showDialog<bool>(
         context: context,
@@ -124,6 +181,18 @@ class ClubsScreen extends ConsumerWidget {
         builder: (clubs) {
           final loadedTeams = ref.watch(teamsProvider);
           final teams = loadedTeams.value ?? const <Team>[];
+          final nicknames =
+              ref.watch(clubNicknamesProvider).value ?? const <ClubNickname>[];
+          final otherNicknames = {
+            for (final n in nicknames) n.name: n.nickname,
+          };
+          final otherNames = otherClubNames(
+            venues: ref.watch(venuesProvider).value ?? const <Venue>[],
+            clubs: clubs,
+            nicknames: nicknames,
+            matches: ref.watch(prioritySlotsProvider),
+            ourTeams: ref.watch(ourTeamsProvider),
+          );
           final unassigned = [
             for (final team in teams)
               if (team.clubId == null ||
@@ -202,6 +271,8 @@ class ClubsScreen extends ConsumerWidget {
                 ),
                 for (final team in unassigned) _teamTile(context, team, clubs),
               ],
+              const SizedBox(height: 12),
+              _others(context, otherNames, otherNicknames),
             ],
           );
         },

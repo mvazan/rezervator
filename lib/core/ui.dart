@@ -153,6 +153,10 @@ String friendlyDbError(Object error, {bool wasOnDuty = false}) {
     'team_name_taken': 'Tým s tímto názvem už existuje.',
     'teams_name_check': 'Název týmu smí mít nejvýš 80 znaků.',
     'empty_name': 'Název nesmí být prázdný.',
+    'own_club':
+        'Tohle je náš oddíl — přezdívku mu dej v seznamu oddílů výš.',
+    'club_name_too_long': 'Název oddílu je moc dlouhý (max 80 znaků).',
+    'club_nickname_too_long': 'Přezdívka je moc dlouhá (max 30 znaků).',
     'invalid_phone': invalidPhoneMessage,
     'profiles_phone_check': invalidPhoneMessage,
     // Canteen duty (0050).
