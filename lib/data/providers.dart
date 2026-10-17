@@ -2546,6 +2546,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(profilesProvider);
   ref.invalidate(settingsProvider);
   ref.invalidate(clubsProvider);
+  ref.invalidate(clubNicknamesProvider);
   ref.invalidate(teamsProvider);
   ref.invalidate(federationSyncProvider);
   ref.invalidate(matchResultsProvider);
