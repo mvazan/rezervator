@@ -149,6 +149,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// Whether the horizontal scroll that is running was started by a hand.
   bool _dragged = false;
 
+  /// The columns last reported through [KioskBoardView.onVisibleDays];
+  /// null until a visitor scrolls, and again after the idle reset.
+  ({int first, int last})? _reportedDays;
+
   CalendarWindow? _window;
   double _pxPerMinute = 0;
 
@@ -183,6 +187,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// While a block is running, the anchor is that block's START (the whole
   /// block stays in view until it ends — no mid-block creep).
   void resetToNow(HourMinute now) {
+    _reportedDays = null;
     if (_hScroll.hasClients) {
       _hScroll.animateTo(
         _todayOffset,
@@ -472,6 +477,24 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
               (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
         ];
 
+        // The first and the last column whole in view, to the shell — once
+        // per change of the two.
+        void reportVisible(ScrollMetrics m) {
+          final first = (m.pixels / columnWidth).round().clamp(
+            0,
+            days.length - 1,
+          );
+          // Half a pixel of slack: the panels are whole columns, yet a
+          // board of five reads 4.9999… of them in floating point.
+          final count = ((m.viewportDimension + 0.5) / columnWidth)
+              .floor()
+              .clamp(1, days.length);
+          final last = (first + count - 1).clamp(0, days.length - 1);
+          if (_reportedDays == (first: first, last: last)) return;
+          _reportedDays = (first: first, last: last);
+          widget.onVisibleDays?.call(days[first].date, days[last].date);
+        }
+
         // Sticky header strip: pinned above the vertically scrolling body,
         // horizontally driven by the body's own scroll (see _syncHeader).
         return Column(
@@ -544,7 +567,22 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                       Expanded(
                         child: SizedBox(
                           height: bodyHeight,
-                          child: NotificationListener<ScrollNotification>(
+                          // The days in view are the board's own: a
+                          // panel takes its width from the board, it does
+                          // not cover it.
+                          child: NotificationListener<ScrollMetricsNotification>(
+                            // A panel opening or closing after a visitor's
+                            // scroll changes how many days are in view;
+                            // the list of matches follows that too.
+                            onNotification: (n) {
+                              if (n.metrics.axis == Axis.horizontal &&
+                                  _reportedDays != null &&
+                                  !_dragged) {
+                                reportVisible(n.metrics);
+                              }
+                              return false;
+                            },
+                            child: NotificationListener<ScrollNotification>(
                             onNotification: (n) {
                               if (n.metrics.axis != Axis.horizontal) {
                                 return false;
@@ -555,19 +593,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                               } else if (n is ScrollEndNotification &&
                                   _dragged) {
                                 _dragged = false;
-                                final first = (n.metrics.pixels / columnWidth)
-                                    .round()
-                                    .clamp(0, days.length - 1);
-                                final count =
-                                    (n.metrics.viewportDimension / columnWidth)
-                                        .floor()
-                                        .clamp(1, days.length);
-                                final last = (first + count - 1)
-                                    .clamp(0, days.length - 1);
-                                widget.onVisibleDays?.call(
-                                  days[first].date,
-                                  days[last].date,
-                                );
+                                reportVisible(n.metrics);
                               }
                               return false;
                             },
@@ -637,6 +663,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                 ),
                               );
                             },
+                          ),
                           ),
                           ),
                         ),

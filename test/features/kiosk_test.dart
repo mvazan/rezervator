@@ -7023,6 +7023,57 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('the match list follows the days the board shows, not '
+          'those a panel takes: closing the left panel after a scroll brings '
+          'the days it gave back into the list too', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [
+              for (var i = 0; i <= 12; i++)
+                for (var k = 1; k <= 3; k++)
+                  fed('d$i-$k', day.addDays(i), 'D$i-$k '),
+            ],
+            weeksAhead: 2,
+            panels: split
+                .withPanel(PanelSide.left, open: true)
+                .withPanel(PanelSide.right, open: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final list = find.descendant(
+          of: panelOn(PanelSide.right),
+          matching: find.byType(CustomScrollView),
+        );
+        bool visible(String t) {
+          final box = tester.getRect(list);
+          final f = find.descendant(
+            of: panelOn(PanelSide.right),
+            matching: find.textContaining(t),
+          );
+          if (f.evaluate().isEmpty) return false;
+          final r = tester.getRect(f.first);
+          return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+        }
+
+        // Seven days less two panels of two: three on the board. A day
+        // forward shows days 1–3, the list follows to day 3.
+        await tester.dragFrom(
+          Offset(2 * column + 200, 600),
+          const Offset(-column * 0.7 - 18, 0),
+        );
+        await tester.pumpAndSettle();
+        expect(visible('D3-3 '), isTrue);
+        expect(visible('D5-3 '), isFalse);
+
+        // The left panel closed: two more days on the board, 1–5.
+        await tester.tap(button('Skrýt levý panel'));
+        await tester.pumpAndSettle();
+        expect(visible('D5-3 '), isTrue);
+        await finish(tester);
+      });
+
       testWidgets('a match being played takes over the panel holding the '
           'matches — on the left too — and keeps it open', (tester) async {
         fullHd(tester);
