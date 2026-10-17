@@ -49,6 +49,10 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '17. 10. 2026', [
+    'Správa → Pronájmy: minulý termín nepravidelného pronájmu jde upravit '
+        'i ze seznamu termínů, stejně jako z kalendáře.',
+  ]),
   Release(null, '16. 10. 2026', [
     'Napište nám: když se zprávu nepodaří doručit (třeba když blokovač '
         'reklam v prohlížeči zastaví odeslání), aplikace to řekne, místo '
