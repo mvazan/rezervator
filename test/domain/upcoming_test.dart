@@ -543,6 +543,23 @@ void main() {
           isEmpty);
     });
 
+    test('the search finds a team by the nickname it is shown with too '
+        '(0080/0083)', () {
+      final b = match('b', today.addDays(1), const HourMinute(12, 0),
+          home: 'SKK Veverky Brno A', away: 'TJ Sokol Husovice E');
+      final c = match('c', today.addDays(2), const HourMinute(12, 0),
+          home: 'SKK Veverky Brno A', away: 'KK Znojmo');
+      final names = NameDisplay(const [], const [
+        ClubNickname(id: 'h', name: 'TJ Sokol Husovice', nickname: 'Husy'),
+      ]);
+      List<String> find(String q, {NameDisplay? names}) => ids(
+          upcomingMatches(slots: [b, c], today: today, query: q, names: names));
+      expect(find('husy E', names: names), ['b']);
+      expect(find('husovice', names: names), ['b'],
+          reason: 'the stored name still counts');
+      expect(find('husy'), isEmpty, reason: 'no names, no nicknames');
+    });
+
     test('the search takes words of ONE team, so „Veverky A“ finds that team '
         'and nothing else', () {
       final a = match('a', today.addDays(1), const HourMinute(10, 0),

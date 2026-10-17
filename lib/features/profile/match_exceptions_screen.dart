@@ -138,6 +138,7 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
       slots: slots,
       today: today,
       query: _query.text,
+      names: ref.watch(nameDisplayProvider),
     );
     final days = <Day, List<PrioritySlot>>{};
     for (final slot in matches) {
