@@ -52,6 +52,12 @@ const appChangelog = <Release>[
   Release(null, '17. 10. 2026', [
     'Správa → Pronájmy: minulý termín nepravidelného pronájmu jde upravit '
         'i ze seznamu termínů, stejně jako z kalendáře.',
+    'Kiosk: dny na tabuli zůstávají zarovnané do sloupců i po změně počtu '
+        'dní nebo šířky obrazovky — dnešek není useknutý a po nečinnosti se '
+        'tabule vrátí s dneškem v prvním sloupci, ať je levý panel otevřený, '
+        'nebo ne.',
+    'Kiosk: seznam zápasů v panelu sleduje dny, které tabule ukazuje, i když '
+        'se po posunu otevře nebo zavře panel.',
   ]),
   Release(null, '16. 10. 2026', [
     'Napište nám: když se zprávu nepodaří doručit (třeba když blokovač '
