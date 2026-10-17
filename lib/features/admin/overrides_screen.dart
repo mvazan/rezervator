@@ -429,10 +429,12 @@ class _BlockageTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      title: Text(
-        '${dayLabel(slot.date)} · '
-        '${slot.startsAt.display()}–${slot.endsAt.display()} · '
-        '${shownNamesNow(context).title(slot)}',
+      title: ShownNames(
+        builder: (context, names) => Text(
+          '${dayLabel(slot.date)} · '
+          '${slot.startsAt.display()}–${slot.endsAt.display()} · '
+          '${names.title(slot)}',
+        ),
       ),
       subtitle: switch ([
         if (slot.type.lanes != null) 'dráhy ${slot.type.lanes!.join(', ')}',

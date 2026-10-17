@@ -408,10 +408,12 @@ class _MyTeamsListState extends State<_MyTeamsList> {
           children: [
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
-                shownNamesNow(context).team(team),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              child: ShownNames(
+                builder: (context, names) => Text(
+                  names.team(team),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             _cellBox(

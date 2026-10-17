@@ -468,8 +468,11 @@ class _GroupColumn extends StatelessWidget {
   final _Group group;
   final VoidCallback? Function(WeekLine line) open;
 
+  // Drawn with the names as shown, again when they change (0080/0083).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ShownNames(builder: _build);
+
+  Widget _build(BuildContext context, NameDisplay names) {
     final scheme = Theme.of(context).colorScheme;
     final ranked = group.lines;
     final places = weekPlaces(ranked);
@@ -504,7 +507,7 @@ class _GroupColumn extends StatelessWidget {
                   Expanded(
                     child: Text(
                       // The club's nickname (0080) for its name.
-                      shownNamesNow(context).team(group.title),
+                      names.team(group.title),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -550,8 +553,11 @@ class _DetailRow extends StatelessWidget {
   final WeekLine line;
   final VoidCallback? onTap;
 
+  // Drawn with the names as shown, again when they change (0080/0083).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ShownNames(builder: _build);
+
+  Widget _build(BuildContext context, NameDisplay names) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
@@ -593,8 +599,8 @@ class _DetailRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: placeWidth),
               child: Text(
-                '${shownNamesNow(context).team(line.teamName)} – '
-                '${shownNamesNow(context).team(line.opponent)} · '
+                '${names.team(line.teamName)} – '
+                '${names.team(line.opponent)} · '
                 '${_where(line)}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
