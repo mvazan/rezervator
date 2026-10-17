@@ -135,9 +135,9 @@ class _OtherClubDialogState extends State<OtherClubDialog> {
               helperText: name.isEmpty
                   ? 'Krátké jméno, které appka ukazuje místo názvu — i v '
                         'názvech družstev.'
-                  : 'Krátké jméno, které appka ukazuje místo názvu — i v '
-                        'názvech družstev: „$name B“ → „přezdívka B“.',
-              helperMaxLines: 3,
+                  : 'Místo názvu, i v názvech družstev: „$name B“ → '
+                        '„přezdívka B“.',
+              helperMaxLines: 4,
             ),
           ),
         ),
