@@ -224,6 +224,7 @@ class KioskPanelView extends ConsumerWidget {
     this.boardDays,
     this.showLive = true,
     this.onShowLive,
+    this.onSlideEnd,
   });
 
   /// Left or right of the board: the panel grows from that edge of the
@@ -270,6 +271,9 @@ class KioskPanelView extends ConsumerWidget {
 
   /// A tap on „Napište nám“: its QR code large; null = a tap does nothing.
   final VoidCallback? onOpenFeedback;
+
+  /// The panel has finished growing or shrinking.
+  final VoidCallback? onSlideEnd;
 
   /// ▶ at a match with a video: its stream (0072); null while the admin
   /// has the streams off — no ▶ and no live badge.
@@ -335,6 +339,7 @@ class KioskPanelView extends ConsumerWidget {
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
       width: open && !hidden ? width : 0,
+      onEnd: onSlideEnd,
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(color: scheme.surfaceContainer),
       // Laid out at its full width even while it grows or shrinks, so the

@@ -153,6 +153,22 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// null until a visitor scrolls, and again after the idle reset.
   ({int first, int last})? _reportedDays;
 
+  /// The latest build's way of reporting the days in view.
+  void Function(ScrollMetrics)? _report;
+
+  /// A panel a visitor opened or closed has stopped sliding: the board
+  /// shows more days or fewer, and says so once — the list of matches
+  /// follows the days in view, not those a panel took. Only after a
+  /// visitor's own scroll; before it, the list keeps to today as ever.
+  void reportVisibleDays() {
+    if (_reportedDays == null) return;
+    // The slide's last value is set, its frame not laid out yet.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _dragged || !_hScroll.hasClients) return;
+      _report?.call(_hScroll.position);
+    });
+  }
+
   CalendarWindow? _window;
   double _pxPerMinute = 0;
 
@@ -494,6 +510,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
           _reportedDays = (first: first, last: last);
           widget.onVisibleDays?.call(days[first].date, days[last].date);
         }
+        _report = reportVisible;
 
         // Sticky header strip: pinned above the vertically scrolling body,
         // horizontally driven by the body's own scroll (see _syncHeader).
@@ -567,22 +584,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                       Expanded(
                         child: SizedBox(
                           height: bodyHeight,
-                          // The days in view are the board's own: a
-                          // panel takes its width from the board, it does
-                          // not cover it.
-                          child: NotificationListener<ScrollMetricsNotification>(
-                            // A panel opening or closing after a visitor's
-                            // scroll changes how many days are in view;
-                            // the list of matches follows that too.
-                            onNotification: (n) {
-                              if (n.metrics.axis == Axis.horizontal &&
-                                  _reportedDays != null &&
-                                  !_dragged) {
-                                reportVisible(n.metrics);
-                              }
-                              return false;
-                            },
-                            child: NotificationListener<ScrollNotification>(
+                          child: NotificationListener<ScrollNotification>(
                             onNotification: (n) {
                               if (n.metrics.axis != Axis.horizontal) {
                                 return false;
@@ -663,7 +665,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                 ),
                               );
                             },
-                          ),
                           ),
                           ),
                         ),
