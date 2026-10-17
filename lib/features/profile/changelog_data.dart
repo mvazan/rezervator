@@ -50,6 +50,8 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '17. 10. 2026', [
+    'Správa → Pronájmy: minulý termín nepravidelného pronájmu jde upravit '
+        'i ze seznamu termínů, stejně jako z kalendáře.',
     'Kiosk: dny na tabuli zůstávají zarovnané do sloupců i po změně počtu '
         'dní nebo šířky obrazovky — dnešek není useknutý a po nečinnosti se '
         'tabule vrátí s dneškem v prvním sloupci, ať je levý panel otevřený, '
