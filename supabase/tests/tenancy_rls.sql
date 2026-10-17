@@ -1767,7 +1767,7 @@ declare
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
     'match_exceptions', 'player_group_members', 'duty_periods',
     'duty_assignments', 'messages', 'message_recipients',
-    'league_matches', 'league_player_results'
+    'league_matches', 'league_player_results', 'club_nicknames'
   ];
   v_missing text[];
 begin
@@ -13547,6 +13547,183 @@ begin
     raise exception 'FAIL: the admin''s header was not saved (0082)';
   end if;
   raise notice 'OK: an admin saves the kiosk header and the weather''s values through the checks as authenticated (0082)';
+end $$;
+
+-- 0083: nicknames for the other clubs. Run again first: the migration is
+-- re-runnable. team_shown takes them beside the own clubs' — the longest
+-- name wins, on a tie the own club's — and a nickname set, changed or
+-- removed puts the club's future matches back in the calendar queue.
+reset role;
+\ir ../migrations/0083_club_nicknames.sql
+do $$
+declare
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_other constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_type uuid;
+  v_match uuid;
+  v_row record;
+  v_queued boolean;
+begin
+  insert into clubs (tenant_id, name, nickname)
+  values (v_tenant, 'TJ Lokomotiva', 'Loko');
+  insert into club_nicknames (tenant_id, name, nickname) values
+    (v_tenant, 'TJ Lokomotiva Brno', 'Lokobrno'),
+    (v_tenant, 'KK Konstruktiva Praha', 'Konstruktiva'),
+    -- The same name as an own club's: the own club's nickname wins.
+    (v_tenant, 'TJ Lokomotiva', 'Cizí');
+  if team_shown(v_tenant, 'TJ Lokomotiva Brno B') <> 'Lokobrno B'
+     or team_shown(v_tenant, 'TJ Lokomotiva C') <> 'Loko C'
+     or team_shown(v_tenant, 'KK Konstruktiva Praha') <> 'Konstruktiva'
+     or team_shown(v_tenant, 'KK Konstruktiva Prahax A') <> 'KK Konstruktiva Prahax A'
+     or team_shown(v_other, 'KK Konstruktiva Praha A') <> 'KK Konstruktiva Praha A' then
+    raise exception 'FAIL: team_shown maps the other clubs'' names wrong (0083)';
+  end if;
+  begin
+    insert into club_nicknames (tenant_id, name, nickname)
+    values (v_tenant, ' KK Blansko', 'Blansko');
+    raise exception 'FAIL: an untrimmed club name was stored (0083)';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into club_nicknames (tenant_id, name, nickname)
+    values (v_tenant, 'KK Blansko', repeat('x', 31));
+    raise exception 'FAIL: a 31-character nickname was stored (0083)';
+  exception when check_violation then null;
+  end;
+
+  -- A followed future match against the club: the calendar reads the
+  -- nickname, and every change of it queues the sync.
+  insert into google_calendar_links (user_id, status, google_email)
+  values (v_uid, 'linked', 'a@gmail.com')
+  on conflict (user_id) do update set status = 'linked';
+  insert into calendar_teams (user_id, team) values (v_uid, 'Domácí (0083) A')
+  on conflict do nothing;
+  select id into v_type from priority_slot_types
+   where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     is_away, created_by)
+  values
+    (v_tenant, (now() at time zone 'Europe/Prague')::date + 301, '06:00',
+     '07:00', v_type, 'Domácí (0083) A', 'KK Blansko C', false, v_uid)
+  returning id into v_match;
+
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  insert into club_nicknames (tenant_id, name, nickname)
+  values (v_tenant, 'KK Blansko', 'Blansko');
+  select * into v_row from my_future_matches(v_uid) where match_id = v_match;
+  if v_row is null or v_row.away_team <> 'Blansko C' then
+    raise exception 'FAIL: my_future_matches does not show the other club''s nickname: %',
+      to_jsonb(v_row);
+  end if;
+  v_queued := exists (select 1 from notification_jobs
+                       where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match);
+  if not v_queued then
+    raise exception 'FAIL: a new nickname of another club did not queue the calendar sync (0083)';
+  end if;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  update club_nicknames set nickname = nickname
+   where tenant_id = v_tenant and name = 'KK Blansko';
+  if exists (select 1 from notification_jobs
+              where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: an unchanged nickname queued a calendar sync (0083)';
+  end if;
+  update club_nicknames set nickname = 'Blanenští'
+   where tenant_id = v_tenant and name = 'KK Blansko';
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a changed nickname of another club did not queue the calendar sync (0083)';
+  end if;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  delete from club_nicknames where tenant_id = v_tenant and name = 'KK Blansko';
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'calendar:' || v_uid || ':match:' || v_match) then
+    raise exception 'FAIL: a removed nickname of another club did not queue the calendar sync (0083)';
+  end if;
+
+  -- Read by the alley through RLS, written only through the RPC.
+  if has_table_privilege('anon', 'public.club_nicknames', 'select')
+     or has_table_privilege('authenticated', 'public.club_nicknames', 'insert')
+     or has_table_privilege('authenticated', 'public.club_nicknames', 'update')
+     or has_table_privilege('authenticated', 'public.club_nicknames', 'delete')
+     or not has_table_privilege('authenticated', 'public.club_nicknames', 'select')
+     or has_function_privilege('anon', 'public.set_club_nickname(text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'public.set_club_nickname(text, text)', 'execute') then
+    raise exception 'FAIL: club_nicknames privileges are off (0083)';
+  end if;
+  raise notice 'OK: the other clubs'' nicknames read in team_shown and the calendar, an own club''s first, every change queued (0083)';
+end $$;
+
+-- The admin sets, changes and removes one through set_club_nickname; an
+-- own club's name is refused; another alley does not see it; a player who
+-- is not an admin may not.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_nick text;
+begin
+  perform set_club_nickname(' KK Zbrojovka Brno ', ' Zbrojovka ');
+  select nickname into v_nick from club_nicknames where name = 'KK Zbrojovka Brno';
+  if v_nick is distinct from 'Zbrojovka' then
+    raise exception 'FAIL: the admin''s nickname was not saved trimmed (0083): %', v_nick;
+  end if;
+  perform set_club_nickname('KK Zbrojovka Brno', 'Zbrojka');
+  select nickname into v_nick from club_nicknames where name = 'KK Zbrojovka Brno';
+  if v_nick is distinct from 'Zbrojka' then
+    raise exception 'FAIL: the admin could not change the nickname (0083): %', v_nick;
+  end if;
+  begin
+    perform set_club_nickname('TJ Lokomotiva', 'Loko');
+    raise exception 'FAIL: an own club''s name was taken as another club (0083)';
+  exception when raise_exception then
+    if sqlerrm <> 'own_club' then raise; end if;
+  end;
+  begin
+    perform set_club_nickname('KK Zbrojovka Brno', repeat('x', 31));
+    raise exception 'FAIL: a 31-character nickname was saved (0083)';
+  exception when raise_exception then
+    if sqlerrm <> 'club_nickname_too_long' then raise; end if;
+  end;
+  begin
+    perform set_club_nickname('  ', 'X');
+    raise exception 'FAIL: a blank club name was saved (0083)';
+  exception when raise_exception then
+    if sqlerrm <> 'empty_name' then raise; end if;
+  end;
+  perform set_club_nickname('KK Konstruktiva Praha', '  ');
+  if exists (select 1 from club_nicknames where name = 'KK Konstruktiva Praha') then
+    raise exception 'FAIL: a blank nickname did not remove it (0083)';
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from club_nicknames) then
+    raise exception 'FAIL: another alley''s admin sees our clubs'' nicknames (0083)';
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  perform set_club_nickname('KK Zbrojovka Brno', 'Zbroj');
+  raise exception 'FAIL: a player who is not an admin set a nickname (0083)';
+exception when raise_exception then
+  if sqlerrm <> 'not_allowed' then raise; end if;
+end $$;
+reset role;
+do $$
+begin
+  if (select nickname from club_nicknames
+       where tenant_id = '00000000-0000-0000-0000-00000000000a'
+         and name = 'KK Zbrojovka Brno') is distinct from 'Zbrojka' then
+    raise exception 'FAIL: a refused write changed the nickname (0083)';
+  end if;
+  raise notice 'OK: the admin sets, changes and removes another club''s nickname, an own club''s name and a non-admin are refused, other alleys see none (0083)';
 end $$;
 
 rollback;

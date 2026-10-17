@@ -1225,6 +1225,53 @@ $$;
 ALTER FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."club_nicknames_enqueue_calendar"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant uuid;
+  v_prefixes text[];
+begin
+  if tg_op = 'INSERT' then
+    v_tenant := new.tenant_id;
+    v_prefixes := array[new.name];
+  elsif tg_op = 'UPDATE' then
+    if (old.name, old.nickname) is not distinct from (new.name, new.nickname) then
+      return null;
+    end if;
+    v_tenant := new.tenant_id;
+    v_prefixes := array[old.name, new.name];
+  else
+    v_tenant := old.tenant_id;
+    v_prefixes := array[old.name];
+  end if;
+  perform enqueue_match_calendar_sync(f.user_id, s.id)
+     from priority_slots s
+     join priority_slot_types y on y.id = s.type_id and y.is_match
+     cross join lateral (
+       select u from match_calendar_followers(s.tenant_id, s.home_team,
+                                              s.away_team) u
+       union
+       select e.user_id from match_exceptions e where e.match_id = s.id
+     ) f(user_id)
+    where s.tenant_id = v_tenant
+      and s.parent_id is null
+      and s.date >= (now() at time zone 'Europe/Prague')::date
+      and exists (
+        select 1
+          from unnest(v_prefixes) x(prefix)
+          cross join unnest(array[s.home_team, s.away_team]) t(team)
+         where t.team = x.prefix
+            or left(t.team, char_length(x.prefix) + 1) = x.prefix || ' ');
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."club_nicknames_enqueue_calendar"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."clubs_enqueue_calendar"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -4530,6 +4577,46 @@ $$;
 ALTER FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_club_nickname"("p_name" "text", "p_nickname" "text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant uuid := current_tenant_id();
+  v_name text := btrim(coalesce(p_name, ''));
+  v_nick text := nullif(btrim(coalesce(p_nickname, '')), '');
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_name = '' then
+    raise exception 'empty_name';
+  end if;
+  if char_length(v_name) > 80 then
+    raise exception 'club_name_too_long';
+  end if;
+  if char_length(v_nick) > 30 then
+    raise exception 'club_nickname_too_long';
+  end if;
+  if exists (select 1 from clubs c
+              where c.tenant_id = v_tenant
+                and v_name in (btrim(c.name), btrim(c.site_name))) then
+    raise exception 'own_club';
+  end if;
+  if v_nick is null then
+    delete from club_nicknames where tenant_id = v_tenant and name = v_name;
+  else
+    insert into club_nicknames (tenant_id, name, nickname)
+    values (v_tenant, v_name, v_nick)
+    on conflict (tenant_id, name) do update set nickname = excluded.nickname;
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_club_nickname"("p_name" "text", "p_nickname" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_day_override"("p_date" "date", "p_closed" boolean, "p_reason" "text" DEFAULT ''::"text", "p_block_ids" "uuid"[] DEFAULT NULL::"uuid"[]) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -5021,15 +5108,22 @@ CREATE OR REPLACE FUNCTION "public"."team_shown"("p_tenant" "uuid", "p_team" "te
     SET "search_path" TO 'public'
     AS $$
   select coalesce((
-    select btrim(c.nickname) || substr(p_team, char_length(x.prefix) + 1)
-      from clubs c
-      cross join lateral (values (btrim(c.site_name)), (btrim(c.name))) x(prefix)
-     where c.tenant_id = p_tenant
-       and c.nickname is not null
-       and x.prefix <> ''
-       and (p_team = x.prefix
-            or left(p_team, char_length(x.prefix) + 1) = x.prefix || ' ')
-     order by char_length(x.prefix) desc, c.id
+    select p.nickname || substr(p_team, char_length(p.prefix) + 1)
+      from (
+        select btrim(c.nickname) as nickname, x.prefix, 0 as rank, c.id::text as tie
+          from clubs c
+          cross join lateral (values (btrim(c.site_name)), (btrim(c.name))) x(prefix)
+         where c.tenant_id = p_tenant
+           and c.nickname is not null
+        union all
+        select n.nickname, n.name, 1, n.name
+          from club_nicknames n
+         where n.tenant_id = p_tenant
+      ) p
+     where p.prefix <> ''
+       and (p_team = p.prefix
+            or left(p_team, char_length(p.prefix) + 1) = p.prefix || ' ')
+     order by char_length(p.prefix) desc, p.rank, p.tie
      limit 1), p_team);
 $$;
 
@@ -5373,6 +5467,24 @@ COMMENT ON TABLE "public"."calendar_teams" IS 'One row per player+followed team 
 
 
 COMMENT ON COLUMN "public"."calendar_teams"."calendar" IS 'Which of the player''s Google calendars this team''s matches go to; secondary only means something once google_calendar_links.secondary_enabled is true.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."club_nicknames" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "nickname" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "club_nicknames_name_check" CHECK ((("name" = "btrim"("name")) AND (("char_length"("name") >= 1) AND ("char_length"("name") <= 80)))),
+    CONSTRAINT "club_nicknames_nickname_check" CHECK ((("nickname" = "btrim"("nickname")) AND (("char_length"("nickname") >= 1) AND ("char_length"("nickname") <= 30))))
+);
+
+
+ALTER TABLE "public"."club_nicknames" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."club_nicknames" IS 'Nicknames for clubs that are not the alley''s own (0083): name = the club''s name as it starts its teams'' names, nickname = what the app shows instead (as clubs.nickname, 0080). Display only. Written only through set_club_nickname.';
 
 
 
@@ -6165,6 +6277,16 @@ ALTER TABLE ONLY "public"."calendar_teams"
 
 
 
+ALTER TABLE ONLY "public"."club_nicknames"
+    ADD CONSTRAINT "club_nicknames_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."club_nicknames"
+    ADD CONSTRAINT "club_nicknames_tenant_name_key" UNIQUE ("tenant_id", "name");
+
+
+
 ALTER TABLE ONLY "public"."clubs"
     ADD CONSTRAINT "clubs_pkey" PRIMARY KEY ("id");
 
@@ -6483,6 +6605,10 @@ CREATE OR REPLACE TRIGGER "block_deactivated" AFTER UPDATE OF "active" ON "publi
 
 
 
+CREATE OR REPLACE TRIGGER "club_nicknames_enqueue_calendar" AFTER INSERT OR DELETE OR UPDATE ON "public"."club_nicknames" FOR EACH ROW EXECUTE FUNCTION "public"."club_nicknames_enqueue_calendar"();
+
+
+
 CREATE OR REPLACE TRIGGER "clubs_enqueue_calendar" AFTER DELETE OR UPDATE ON "public"."clubs" FOR EACH ROW EXECUTE FUNCTION "public"."clubs_enqueue_calendar"();
 
 
@@ -6593,6 +6719,11 @@ CREATE OR REPLACE TRIGGER "time_blocks_enqueue_calendar" AFTER UPDATE OF "starts
 
 ALTER TABLE ONLY "public"."calendar_teams"
     ADD CONSTRAINT "calendar_teams_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."club_nicknames"
+    ADD CONSTRAINT "club_nicknames_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
 
 
@@ -6948,6 +7079,13 @@ ALTER TABLE "public"."calendar_teams" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "calendar_teams_own" ON "public"."calendar_teams" FOR SELECT USING (("user_id" = "auth"."uid"()));
+
+
+
+ALTER TABLE "public"."club_nicknames" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "club_nicknames_select" ON "public"."club_nicknames" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
 
 
 
@@ -7326,6 +7464,11 @@ GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "service_role";
 
 REVOKE ALL ON FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."club_nicknames_enqueue_calendar"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."club_nicknames_enqueue_calendar"() TO "service_role";
 
 
 
@@ -7863,6 +8006,12 @@ GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_team
 
 
 
+REVOKE ALL ON FUNCTION "public"."set_club_nickname"("p_name" "text", "p_nickname" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_club_nickname"("p_name" "text", "p_nickname" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_club_nickname"("p_name" "text", "p_nickname" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") TO "service_role";
@@ -7994,6 +8143,11 @@ GRANT SELECT ON TABLE "public"."app_config" TO "authenticated";
 
 GRANT SELECT ON TABLE "public"."calendar_teams" TO "authenticated";
 GRANT ALL ON TABLE "public"."calendar_teams" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."club_nicknames" TO "service_role";
+GRANT SELECT ON TABLE "public"."club_nicknames" TO "authenticated";
 
 
 
